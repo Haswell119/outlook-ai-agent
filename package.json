@@ -12,6 +12,15 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "db:migrate": "pnpm --filter @oao/orchestrator db:migrate",
-    "db:seed": "pnpm --filter @oao/orchestrator db:seed"
+    "db:seed": "pnpm --filter @oao/orchestrator db:seed",
+    "e2e": "pnpm -r --filter \"./apps/**\" run --if-present e2e",
+    "setup:dev": "node scripts/setup-dev.mjs",
+    "dev:db": "node scripts/dev-db.mjs",
+    "certs": "node scripts/certs.mjs",
+    "check:llm": "node scripts/check-llm.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "manifest:render": "pnpm --filter @oao/addin manifest:render",
+    "manifest:sideload": "node scripts/sideload-manifest.mjs",
+    "k8s:render": "node scripts/render-k8s.mjs"
   }
 }
