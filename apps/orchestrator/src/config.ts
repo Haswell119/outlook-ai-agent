@@ -52,8 +52,8 @@ export const ConfigSchema = z
     AAD_TENANT_ID: z.string().optional(),
     AAD_CLIENT_ID: z.string().optional(),
     AAD_CLIENT_SECRET: z.string().optional(),
-    ADMIN_EMAILS: csv(["admin@longbow.ch"]),
-    COMPLIANCE_EMAILS: csv(["compliance@longbow.ch"]),
+    ADMIN_EMAILS: csv(["admin@northbridge.example"]),
+    COMPLIANCE_EMAILS: csv(["compliance@northbridge.example"]),
     ADMIN_API_TOKEN: z.string().default("change-me"),
 
     GRAPH_ENABLED: bool(false),

@@ -21,7 +21,7 @@ describe("language detection", () => {
 
 describe("text utils", () => {
   it("levenshtein", () => {
-    expect(levenshtein("longbow", "longbovv")).toBe(2);
+    expect(levenshtein("northbridge", "northbridqe")).toBe(1);
     expect(levenshtein("", "abc")).toBe(3);
     expect(levenshtein("same", "same")).toBe(0);
   });

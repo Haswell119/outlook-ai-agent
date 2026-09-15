@@ -2,7 +2,7 @@
 
 > Ce document explique comment installer, configurer et déployer le projet,
 > du mode démo (5 minutes, sans dépendance externe) jusqu'à la production
-> (Docker / Kubernetes, IA interne Longbow, Azure AD). Les termes techniques
+> (Docker / Kubernetes, IA interne Northbridge, Azure AD). Les termes techniques
 > (endpoints, variables d'environnement, commandes) sont laissés en anglais.
 
 ## Sommaire
@@ -109,7 +109,7 @@ docker compose -f docker-compose.dev.yml up -d
 
 # 2. .env
 LLM_PROVIDER=openai-compatible
-LLM_BASE_URL=http://gpu-node.longbow.local:8000/v1
+LLM_BASE_URL=http://gpu-node.northbridge.local:8000/v1
 LLM_MODEL=qwen3-30b-a3b
 DATABASE_URL=postgres://oao:oao@localhost:5432/oao
 DB_AUTO_MIGRATE=true
@@ -172,7 +172,7 @@ docker run --gpus all -p 8001:80 \
 `.env` correspondant :
 
 ```bash
-LLM_BASE_URL=http://gpu-node.longbow.local:8000/v1
+LLM_BASE_URL=http://gpu-node.northbridge.local:8000/v1
 LLM_MODEL=qwen3-30b-a3b
 EMBEDDINGS_ENABLED=true
 EMBEDDING_MODEL=bge-m3
@@ -242,7 +242,7 @@ Microsoft Graph (`GRAPH_ENABLED=true`).
 1. Azure Portal → **Azure Active Directory** → **App registrations** → **New
    registration**.
 2. Nom : `Outlook AI Orchestrator — API`. Comptes pris en charge : *single
-   tenant* (Longbow uniquement).
+   tenant* (Northbridge uniquement).
 3. Après création, noter **Application (client) ID** → `AAD_CLIENT_ID`, et
    **Directory (tenant) ID** → `AAD_TENANT_ID`.
 4. **Expose an API** :
@@ -263,7 +263,7 @@ Microsoft Graph (`GRAPH_ENABLED=true`).
 2. **Authentication** → **Add a platform** → **Single-page application** →
    redirect URIs :
    - `https://localhost:3000` (dev)
-   - `https://addin.longbow.local` (prod, ou le domaine réel de déploiement)
+   - `https://addin.northbridge.local` (prod, ou le domaine réel de déploiement)
 3. **API permissions** → **Add a permission** → **My APIs** → sélectionner
    l'app *Outlook AI Orchestrator — API* → cocher `access_as_user`.
 4. Ajouter les permissions **Microsoft Graph** (déléguées), en respectant le
@@ -273,7 +273,7 @@ Microsoft Graph (`GRAPH_ENABLED=true`).
    - Toujours : `offline_access` (rafraîchissement du token pour l'OBO côté
      orchestrator)
 5. **Grant admin consent** pour le tenant (bouton *Grant admin consent for
-   Longbow*) — requis pour que tous les utilisateurs puissent utiliser
+   Northbridge*) — requis pour que tous les utilisateurs puissent utiliser
    l'add-in sans popup de consentement individuel. Voir la justification de
    chaque scope dans `docs/SECURITY.md`.
 6. Dans le manifest de l'add-in (`apps/addin/manifest/manifest.xml` /
@@ -326,7 +326,7 @@ Pour déployer l'add-in à toute l'organisation sans sideload manuel :
 1. **Microsoft 365 admin center** → **Settings** → **Integrated apps** →
    **Upload custom apps**.
 2. Uploader `apps/addin/manifest/manifest.xml` (le manifest de **production**,
-   avec `https://addin.longbow.local` déjà remplacé par le domaine réel —
+   avec `https://addin.northbridge.local` déjà remplacé par le domaine réel —
    voir §9/§10 pour l'hébergement).
 3. Choisir les utilisateurs/groupes cibles (déploiement pilote recommandé
    avant un rollout complet).
@@ -351,7 +351,7 @@ HTTPS :3000, certificat auto-signé généré au démarrage si aucun n'est mont�
 dans `apps/addin/certs/`).
 
 Voir `infra/docker/` pour le détail des Dockerfiles et `docker-compose.yml`
-pour le profil optionnel `llm` (vLLM/Ollama locaux, utile en démo — Longbow
+pour le profil optionnel `llm` (vLLM/Ollama locaux, utile en démo — Northbridge
 dispose déjà de Qwen3 en interne, ce profil n'est pas nécessaire en usage
 normal).
 
@@ -379,7 +379,7 @@ kubectl -n oao wait --for=condition=complete job/oao-migrate --timeout=300s
 
 # 5. Vérifier
 kubectl -n oao get pods,svc,ingress
-curl https://api.oao.longbow.local/api/v1/health
+curl https://api.oao.northbridge.local/api/v1/health
 ```
 
 Notes :
@@ -389,8 +389,8 @@ Notes :
   (dans le Secret) vers une instance PostgreSQL managée avec l'extension
   `vector` disponible, et retirer le StatefulSet de `kustomization.yaml`.
 - L'Ingress attend un `IngressClass` nginx et un secret TLS `oao-tls-cert`
-  (cert-manager recommandé) pour `api.oao.longbow.local`,
-  `admin.oao.longbow.local`, `addin.oao.longbow.local`.
+  (cert-manager recommandé) pour `api.oao.northbridge.local`,
+  `admin.oao.northbridge.local`, `addin.oao.northbridge.local`.
 - Valider la structure des manifests sans cluster : `kubectl kustomize
   infra/k8s` (ou un parseur YAML si `kubectl` est indisponible).
 
@@ -401,7 +401,7 @@ Notes :
 - [ ] `AUTH_MODE=aad` (le mode `dev` est refusé si `NODE_ENV=production`).
 - [ ] Azure AD : admin consent donné, scopes Graph limités à ceux réellement
       utilisés par la phase déployée (§6).
-- [ ] `LLM_BASE_URL` pointe vers l'endpoint interne Longbow validé par
+- [ ] `LLM_BASE_URL` pointe vers l'endpoint interne Northbridge validé par
       `./scripts/check-llm.sh`.
 - [ ] Migrations appliquées (`job-migrate.yaml` ou `db:migrate` + `db:seed`).
 - [ ] `CORS_ORIGINS` restreint au(x) domaine(s) réel(s) de l'add-in.
@@ -411,6 +411,6 @@ Notes :
 - [ ] Sauvegardes Postgres planifiées (voir `docs/OPERATIONS.md`).
 - [ ] CI verte (`pnpm build`, tests, secret-scan) sur la branche déployée.
 - [ ] Manifest de production (`manifest.xml`) déployé via Integrated Apps
-      (§8), avec les vrais domaines (plus de `*.longbow.local`).
+      (§8), avec les vrais domaines (plus de `*.northbridge.local`).
 - [ ] Runbook `docs/OPERATIONS.md` et matrice de gouvernance
       `docs/SECURITY.md` relus par l'équipe compliance.

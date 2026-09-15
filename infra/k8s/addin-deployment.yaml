@@ -23,7 +23,7 @@ spec:
         - name: addin
           # Built from infra/docker/addin.Dockerfile (VITE_* baked in at build
           # time) — replace with your registry.
-          image: registry.longbow.local/oao/addin:latest
+          image: registry.northbridge.local/oao/addin:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: https

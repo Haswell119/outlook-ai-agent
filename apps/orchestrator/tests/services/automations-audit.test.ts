@@ -44,9 +44,9 @@ describe("AutomationCoachService", () => {
     const approved = await c.services.automations.approve(ctx(), id, "go");
     expect(approved.status).toBe("active");
     expect((await c.services.automations.list(ctx()))[0]!.status).toBe("active");
-    expect(await c.services.automations.list(ctx(user("other@longbow.ch")))).toEqual([]);
-    await expect(c.services.automations.get(ctx(user("other@longbow.ch")), id)).rejects.toMatchObject({ code: "not_found" });
-    expect((await c.services.automations.list(ctx(user("admin@longbow.ch", ["admin"])), true)).length).toBe(1);
+    expect(await c.services.automations.list(ctx(user("other@northbridge.example")))).toEqual([]);
+    await expect(c.services.automations.get(ctx(user("other@northbridge.example")), id)).rejects.toMatchObject({ code: "not_found" });
+    expect((await c.services.automations.list(ctx(user("admin@northbridge.example", ["admin"])), true)).length).toBe(1);
 
     const edited = await c.services.automations.update(ctx(), id, { name: "Renamed", trigger: { description: "x", conditions: { fromDomain: "abccapital.com" } } });
     expect(edited).toMatchObject({ name: "Renamed", status: "proposed" });
@@ -62,15 +62,15 @@ describe("AuditService", () => {
   it("scopes queries per role, exports CSV and computes stats with deltas", async () => {
     const r = await seedDemo(c, now);
     expect(r.auditEvents).toBeGreaterThanOrEqual(60);
-    const mine = await c.services.audit.query(user("jane.smith@longbow.ch"), { page: 1, pageSize: 10 });
-    expect(mine.items.every((e) => e.user.id === "jane.smith@longbow.ch")).toBe(true);
-    const all = await c.services.audit.query(user("admin@longbow.ch", ["admin"]), { page: 1, pageSize: 200 });
+    const mine = await c.services.audit.query(user("jane.smith@northbridge.example"), { page: 1, pageSize: 10 });
+    expect(mine.items.every((e) => e.user.id === "jane.smith@northbridge.example")).toBe(true);
+    const all = await c.services.audit.query(user("admin@northbridge.example", ["admin"]), { page: 1, pageSize: 200 });
     expect(all.total).toBe(r.auditEvents);
-    const filtered = await c.services.audit.query(user("admin@longbow.ch", ["admin"]), { page: 1, pageSize: 200, type: "summary_generated", search: "horizon" });
+    const filtered = await c.services.audit.query(user("admin@northbridge.example", ["admin"]), { page: 1, pageSize: 200, type: "summary_generated", search: "horizon" });
     expect(filtered.items.every((e) => e.type === "summary_generated" && /horizon/i.test(e.source?.label ?? ""))).toBe(true);
-    await expect(c.services.audit.get(user("nobody@longbow.ch"), all.items[0]!.id)).rejects.toMatchObject({ code: "not_found" });
+    await expect(c.services.audit.get(user("nobody@northbridge.example"), all.items[0]!.id)).rejects.toMatchObject({ code: "not_found" });
 
-    const csv = await c.services.audit.exportCsv(user("admin@longbow.ch", ["admin"]), {});
+    const csv = await c.services.audit.exportCsv(user("admin@northbridge.example", ["admin"]), {});
     expect(csv.split("\n")).toHaveLength(r.auditEvents + 1);
     expect(csv.split("\n")[0]).toContain("timestamp,userId");
 
@@ -85,7 +85,7 @@ describe("AuditService", () => {
     expect(stats.topUsers.length).toBeGreaterThan(0);
     expect(stats.complianceAlertsByCategory.length).toBeGreaterThan(0);
     const users = await c.services.users.list();
-    expect(users.find((u) => u.email === "compliance@longbow.ch")?.roles).toContain("compliance");
+    expect(users.find((u) => u.email === "compliance@northbridge.example")?.roles).toContain("compliance");
   });
 
   it("feedback is stored against an existing audit id", async () => {
@@ -97,11 +97,11 @@ describe("AuditService", () => {
   });
 
   it("policy put validates and audits", async () => {
-    const p = await c.services.policy.put(user("admin@longbow.ch", ["admin"]), { ...(await c.services.policy.get()), blockOnHighRisk: true });
+    const p = await c.services.policy.put(user("admin@northbridge.example", ["admin"]), { ...(await c.services.policy.get()), blockOnHighRisk: true });
     expect(p.blockOnHighRisk).toBe(true);
-    expect(p.updatedBy).toBe("admin@longbow.ch");
+    expect(p.updatedBy).toBe("admin@northbridge.example");
     expect((await c.services.policy.get()).blockOnHighRisk).toBe(true);
     expect(c.repos.audit.events[0]!.type).toBe("policy_updated");
-    await expect(c.services.policy.put(user("admin@longbow.ch", ["admin"]), { internalDomains: "nope" })).rejects.toBeTruthy();
+    await expect(c.services.policy.put(user("admin@northbridge.example", ["admin"]), { internalDomains: "nope" })).rejects.toBeTruthy();
   });
 });

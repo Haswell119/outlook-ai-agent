@@ -13,9 +13,9 @@ describe("shared contracts", () => {
   });
 
   it("detects internal addresses incl. sub-domains", () => {
-    expect(isInternalAddress("jane@longbow.ch", ["longbow.ch"])).toBe(true);
-    expect(isInternalAddress("jane@mail.longbow.ch", ["longbow.ch"])).toBe(true);
-    expect(isInternalAddress("jane@notlongbow.ch", ["longbow.ch"])).toBe(false);
-    expect(isInternalAddress("jane@clientco.com", ["longbow.ch"])).toBe(false);
+    expect(isInternalAddress("jane@northbridge.example", ["northbridge.example"])).toBe(true);
+    expect(isInternalAddress("jane@mail.northbridge.example", ["northbridge.example"])).toBe(true);
+    expect(isInternalAddress("jane@notnorthbridge.example", ["northbridge.example"])).toBe(false);
+    expect(isInternalAddress("jane@clientco.com", ["northbridge.example"])).toBe(false);
   });
 });

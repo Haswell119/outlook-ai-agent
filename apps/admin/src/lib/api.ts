@@ -375,7 +375,7 @@ export async function savePolicy(policy: Policy): Promise<Policy> {
     s.policy = {
       ...policy,
       updatedAt: new Date().toISOString(),
-      updatedBy: "jane.smith@longbow.ch",
+      updatedBy: "jane.smith@northbridge.example",
     };
     return s.policy;
   }

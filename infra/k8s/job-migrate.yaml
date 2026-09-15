@@ -25,7 +25,7 @@ spec:
         runAsGroup: 1001
       containers:
         - name: migrate
-          image: registry.longbow.local/oao/orchestrator:latest
+          image: registry.northbridge.local/oao/orchestrator:latest
           # Same image as the orchestrator Deployment; overrides its CMD to
           # run the migration + seed scripts instead of starting the server.
           command:

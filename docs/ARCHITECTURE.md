@@ -1,7 +1,7 @@
 # Outlook AI Orchestrator — Architecture
 
 > Secure. Compliant. Human-in-the-loop.
-> Longbow Finance SA — internal AI competition. Tech Lead: Justin Vuffray. Product/PM: Luanda Borg.
+> Northbridge Capital — internal AI competition. Tech Lead: Tech Lead. Product/PM: Product Owner.
 
 ## 1. Goal
 
@@ -12,7 +12,7 @@ the user (human-in-the-loop), an **Automation Coach** (detect routines → propo
 simulate → activate) and a **Compliance Guardian** (pre-send checks + inbound
 anti-phishing). Everything is audited and supervised from an admin dashboard.
 
-The AI model is **hosted internally** (Longbow GPU, Qwen3 today). The orchestrator
+The AI model is **hosted internally** (Northbridge GPU, Qwen3 today). The orchestrator
 talks to it through an **OpenAI-compatible HTTP API** (vLLM, Ollama, LM Studio,
 TGI, Azure OpenAI private tenant …). Switching model = changing environment variables.
 
@@ -171,12 +171,12 @@ orchestrator with an admin bearer token (`ADMIN_API_TOKEN`, dev) or AAD (prod).
 - Rate limiting, request size limit (2 MB), CORS restricted to the add-in origin, Helmet.
 - Tenant isolation: `TENANT_ID` pinned; `user.tenantId` checked.
 
-## 8. Configuration (single `.env` — this is what Longbow configures)
+## 8. Configuration (single `.env` — this is what Northbridge configures)
 
 ```
 # --- AI model (OpenAI-compatible endpoint hosted internally) ---
 LLM_PROVIDER=openai-compatible        # openai-compatible | mock
-LLM_BASE_URL=http://gpu-node.longbow.local:8000/v1
+LLM_BASE_URL=http://gpu-node.northbridge.local:8000/v1
 LLM_API_KEY=                          # optional
 LLM_MODEL=qwen3-30b-a3b
 LLM_TIMEOUT_MS=60000
@@ -194,8 +194,8 @@ AUTH_MODE=dev                         # dev | aad
 AAD_TENANT_ID=
 AAD_CLIENT_ID=                        # add-in app registration (audience)
 AAD_CLIENT_SECRET=                    # for OBO to Graph
-ADMIN_EMAILS=admin@longbow.ch
-COMPLIANCE_EMAILS=compliance@longbow.ch
+ADMIN_EMAILS=admin@northbridge.example
+COMPLIANCE_EMAILS=compliance@northbridge.example
 ADMIN_API_TOKEN=change-me             # used by the admin dashboard in dev
 
 # --- Microsoft Graph (optional) ---

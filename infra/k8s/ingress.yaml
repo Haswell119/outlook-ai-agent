@@ -6,7 +6,7 @@
 # TLS: `oao-tls-cert` is a placeholder secret name. Provision it with
 # cert-manager (recommended, e.g. a ClusterIssuer + this Ingress annotated
 # with `cert-manager.io/cluster-issuer: ...`) or `kubectl create secret tls`
-# from a certificate issued by Longbow's internal CA. Never commit the actual
+# from a certificate issued by Northbridge's internal CA. Never commit the actual
 # secret.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -20,10 +20,10 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: ["api.oao.longbow.local"]
+    - hosts: ["api.oao.northbridge.local"]
       secretName: oao-tls-cert
   rules:
-    - host: api.oao.longbow.local
+    - host: api.oao.northbridge.local
       http:
         paths:
           - path: /
@@ -45,10 +45,10 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: ["admin.oao.longbow.local"]
+    - hosts: ["admin.oao.northbridge.local"]
       secretName: oao-tls-cert
   rules:
-    - host: admin.oao.longbow.local
+    - host: admin.oao.northbridge.local
       http:
         paths:
           - path: /
@@ -73,10 +73,10 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: ["addin.oao.longbow.local"]
+    - hosts: ["addin.oao.northbridge.local"]
       secretName: oao-tls-cert
   rules:
-    - host: addin.oao.longbow.local
+    - host: addin.oao.northbridge.local
       http:
         paths:
           - path: /

@@ -29,7 +29,7 @@ describe("ActionsService.propose", () => {
     const p = await c.services.actions.propose(ctx(), { analysisAuditId: a.auditId });
     expect(p.actions.length).toBe(a.suggestedActions.length);
     expect(c.repos.audit.events.filter((e) => e.type === "summary_generated")).toHaveLength(1);
-    await expect(c.services.actions.propose(ctx(user("other@longbow.ch")), { analysisAuditId: a.auditId })).rejects.toMatchObject({ code: "not_found" });
+    await expect(c.services.actions.propose(ctx(user("other@northbridge.example")), { analysisAuditId: a.auditId })).rejects.toMatchObject({ code: "not_found" });
     await expect(c.services.actions.propose(ctx(), { analysisAuditId: p.auditId })).rejects.toMatchObject({ code: "validation_error" });
     await expect(c.services.actions.propose(ctx(), {})).rejects.toMatchObject({ code: "validation_error" });
   });
@@ -77,7 +77,7 @@ describe("ActionsService.approve", () => {
       },
     });
     const cc = await createTestContainer({}, { graph });
-    const u = user("dev.user@longbow.ch", ["user"], { token: "user-token" });
+    const u = user("dev.user@northbridge.example", ["user"], { token: "user-token" });
     const p = await cc.services.actions.propose(ctx(u), { email: sampleEmail() });
     const reminder = p.actions.find((a) => a.type === "create_reminder")!;
     const classify = p.actions.find((a) => a.type === "classify_email")!;
@@ -94,7 +94,7 @@ describe("ActionsService.approve", () => {
 
   it("refuses foreign, unknown and expired proposals", async () => {
     const p = await c.services.actions.propose(ctx(), { email: sampleEmail() });
-    await expect(c.services.actions.approve(ctx(user("x@longbow.ch")), { proposalId: p.proposalId, actionIds: [p.actions[0]!.id] })).rejects.toMatchObject({ code: "not_found" });
+    await expect(c.services.actions.approve(ctx(user("x@northbridge.example")), { proposalId: p.proposalId, actionIds: [p.actions[0]!.id] })).rejects.toMatchObject({ code: "not_found" });
     await expect(c.services.actions.approve(ctx(), { proposalId: "nope", actionIds: ["a"] })).rejects.toMatchObject({ code: "not_found" });
     const stored = await c.repos.actions.getProposal(p.proposalId);
     stored!.expiresAt = new Date(Date.now() - 1000).toISOString();
@@ -113,7 +113,7 @@ describe("ActionsService.approve", () => {
     expect((await c.repos.actions.getAction(draft.id))!.status).toBe("executed");
     const cancelled = await c.services.actions.report(ctx(), draft.id, { status: "cancelled" });
     expect(cancelled.status).toBe("rejected");
-    await expect(c.services.actions.report(ctx(user("x@longbow.ch")), draft.id, { status: "executed" })).rejects.toMatchObject({ code: "not_found" });
+    await expect(c.services.actions.report(ctx(user("x@northbridge.example")), draft.id, { status: "executed" })).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("clientInstruction covers every action type", () => {

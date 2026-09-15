@@ -792,7 +792,7 @@ export const AdminUserSchema = z.object({
 export type AdminUser = z.infer<typeof AdminUserSchema>;
 
 export const PolicySchema = z.object({
-  /** Domains considered internal (e.g. ["longbow.ch"]). */
+  /** Domains considered internal (e.g. ["northbridge.example"]). */
   internalDomains: z.array(z.string()),
   /** Attachment name / label patterns considered confidential. */
   confidentialPatterns: z.array(z.string()),
@@ -922,7 +922,7 @@ export function isInternalAddress(address: string, internalDomains: string[]): b
 
 /** Default policy used when the database has none yet. */
 export const DEFAULT_POLICY: Policy = {
-  internalDomains: ["longbow.ch", "longbowfinance.com"],
+  internalDomains: ["northbridge.example", "northbridgecapital.com"],
   confidentialPatterns: ["confidential", "confidentiel", "internal only", "interne", "mandate", "mandat", "kyc", "performance report"],
   requiredClassificationLabels: ["Public", "Internal", "Confidential", "Highly Confidential"],
   sensitiveDataPatterns: [

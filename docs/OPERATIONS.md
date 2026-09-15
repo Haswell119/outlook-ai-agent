@@ -1,7 +1,7 @@
 # Runbook opérationnel — Outlook AI Orchestrator
 
 > Destiné aux équipes qui exploitent le service en production (SRE / IT
-> Longbow). Termes techniques laissés en anglais.
+> Northbridge). Termes techniques laissés en anglais.
 
 ## 1. Logs
 
@@ -59,7 +59,7 @@ charge de l'environnement cible — non fourni par ce repo.
 
 | Secret | Où | Rotation |
 |---|---|---|
-| `LLM_API_KEY` | `.env` / K8s Secret | Sur demande de l'équipe GPU interne, ou tous les 90 jours si la politique Longbow l'exige. Mettre à jour puis `kubectl -n oao rollout restart deploy/orchestrator`. |
+| `LLM_API_KEY` | `.env` / K8s Secret | Sur demande de l'équipe GPU interne, ou tous les 90 jours si la politique Northbridge l'exige. Mettre à jour puis `kubectl -n oao rollout restart deploy/orchestrator`. |
 | `AAD_CLIENT_SECRET` | `.env` / K8s Secret | Avant expiration (Azure Portal → App registration → Certificates & secrets → date d'expiration). Générer le nouveau secret **avant** de supprimer l'ancien (fenêtre de recouvrement), déployer, puis révoquer l'ancien. |
 | `ADMIN_API_TOKEN` | `.env` / K8s Secret | À chaque changement de personnel ayant eu accès en clair, ou tous les 90 jours. |
 | `POSTGRES_PASSWORD` | `.env` / K8s Secret | Selon la politique DB de l'environnement (managé = géré par le provider). |

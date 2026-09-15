@@ -6,7 +6,7 @@ export interface DevAuthOptions {
   complianceEmails: string[];
 }
 
-export const DEV_DEFAULT_EMAIL = "dev.user@longbow.ch";
+export const DEV_DEFAULT_EMAIL = "dev.user@northbridge.example";
 
 /** Dev identity from `x-user-email` / `x-user-name` (+ optional `x-user-roles`). Never used in production. */
 export function devIdentity(headers: Record<string, string | string[] | undefined>, opts: DevAuthOptions): AuthenticatedUser {
@@ -29,6 +29,6 @@ export function devIdentity(headers: Record<string, string | string[] | undefine
 }
 
 export function adminTokenIdentity(adminEmails: string[]): AuthenticatedUser {
-  const email = adminEmails[0] ?? "admin@longbow.ch";
+  const email = adminEmails[0] ?? "admin@northbridge.example";
   return { id: "admin-dashboard", email, displayName: "Admin dashboard", roles: ["user", "compliance", "admin"], via: "admin-token" };
 }

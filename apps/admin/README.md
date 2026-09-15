@@ -62,7 +62,7 @@ The dataset (`src/lib/mock-data.ts`) is deterministic — a seeded `mulberry32` 
 so every process and every build produce the same rows:
 
 * **1,247 audit events** over 12–18 May 2025, across 6 users of *ABC Capital* /
-  *Longbow Finance SA*, with realistic risk levels, approval statuses, model,
+  *Northbridge Capital*, with realistic risk levels, approval statuses, model,
   latency, confidence, SHA-256 prompt/response hashes and correlation ids.
 * KPIs pinned to the mock-up: **8,642 / 2,341 / 186 / 142 / 37 / 1,216** with deltas
   +12.4 / +9.7 / +15.3 / +13.8 / +8.3 / +18.6 %.

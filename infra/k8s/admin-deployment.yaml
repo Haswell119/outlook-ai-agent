@@ -23,7 +23,7 @@ spec:
       containers:
         - name: admin
           # Built from infra/docker/admin.Dockerfile — replace with your registry.
-          image: registry.longbow.local/oao/admin:latest
+          image: registry.northbridge.local/oao/admin:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

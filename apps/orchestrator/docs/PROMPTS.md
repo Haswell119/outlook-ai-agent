@@ -19,7 +19,7 @@ The audit row stores SHA-256 hashes of prompt and response (raw text only when `
 
 ## Common system prompt (`format.ts` → `SYSTEM_BASE`)
 
-> You are the Outlook AI Orchestrator, an assistant for a Swiss wealth-management firm (Longbow Finance).
+> You are the Outlook AI Orchestrator, an assistant for a Swiss wealth-management firm (Northbridge Capital).
 > You never send emails, never delete anything and never invent facts… Write every human-readable
 > field in {French|English}. Return ONLY a single JSON object matching the requested schema.
 

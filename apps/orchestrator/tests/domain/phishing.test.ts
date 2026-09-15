@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assessPhishing } from "../../src/domain/compliance/phishing.js";
 import { sampleEmail } from "../helpers.js";
 
-const opts = { internalDomains: ["longbow.ch"] };
+const opts = { internalDomains: ["northbridge.example"] };
 const codes = (e: Parameters<typeof assessPhishing>[0]) => assessPhishing(e, opts).indicators.map((i) => i.code);
 
 describe("phishing heuristics", () => {
@@ -13,11 +13,11 @@ describe("phishing heuristics", () => {
   });
 
   it("detects display-name mismatch and lookalike sender domain", () => {
-    const e = sampleEmail({ from: { name: "Longbow IT Support", address: "it@longbovv-finance.com" } });
+    const e = sampleEmail({ from: { name: "Northbridge IT Support", address: "it@northbridqe-capital.com" } });
     const c = codes(e);
     expect(c).toContain("display_name_mismatch");
     expect(c).toContain("lookalike_sender_domain");
-    expect(codes(sampleEmail({ from: { name: "john@longbow.ch", address: "john@evil.com" } }))).toContain("display_name_mismatch");
+    expect(codes(sampleEmail({ from: { name: "john@northbridge.example", address: "john@evil.com" } }))).toContain("display_name_mismatch");
   });
 
   it("detects reply-to mismatch, urgency, credentials and raw IP links → likely_phishing", () => {
@@ -35,7 +35,7 @@ describe("phishing heuristics", () => {
   it("detects shorteners, punycode, anchor/href mismatch", () => {
     expect(codes(sampleEmail({ body: "see https://bit.ly/abc" }))).toContain("url_shortener");
     expect(codes(sampleEmail({ body: "see https://xn--lngbow-9ya.ch/login" }))).toContain("punycode_link");
-    expect(codes(sampleEmail({ body: '<a href="https://evil.com/x">https://longbow.ch/portal</a>' }))).toContain("anchor_href_mismatch");
+    expect(codes(sampleEmail({ body: '<a href="https://evil.com/x">https://northbridge.example/portal</a>' }))).toContain("anchor_href_mismatch");
   });
 
   it("detects payment change requests and dangerous attachments from unknown senders", () => {

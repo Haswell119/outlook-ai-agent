@@ -115,5 +115,5 @@ export function currentUser(): { email: string; name: string } {
   } catch {
     /* ignore */
   }
-  return { email: "jane.smith@longbow.ch", name: "Jane Smith" };
+  return { email: "jane.smith@northbridge.example", name: "Jane Smith" };
 }

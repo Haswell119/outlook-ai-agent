@@ -119,7 +119,7 @@ describe("mock dataset", () => {
 
     expect(buildUsers()).toHaveLength(6);
     const policy = PolicySchema.parse(defaultPolicy());
-    expect(policy.internalDomains).toContain("longbow.ch");
+    expect(policy.internalDomains).toContain("northbridge.example");
     expect(policy.blockOnHighRisk).toBe(true);
     for (const p of policy.sensitiveDataPatterns) expect(() => new RegExp(p.pattern)).not.toThrow();
   });

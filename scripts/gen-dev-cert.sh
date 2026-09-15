@@ -18,14 +18,14 @@ KEY="$OUT_DIR/addin.key"
 if command -v mkcert >/dev/null 2>&1; then
   echo "==> mkcert found — generating a locally-trusted certificate"
   mkcert -install >/dev/null 2>&1 || true
-  mkcert -cert-file "$CERT" -key-file "$KEY" localhost 127.0.0.1 ::1 addin.longbow.local
+  mkcert -cert-file "$CERT" -key-file "$KEY" localhost 127.0.0.1 ::1 addin.northbridge.local
 else
   echo "==> mkcert not found — falling back to a self-signed openssl certificate"
   echo "    (browsers will warn; for a trusted local cert install mkcert: https://github.com/FiloSottile/mkcert)"
   openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
     -keyout "$KEY" -out "$CERT" \
-    -subj "/C=CH/ST=Geneva/L=Geneva/O=Longbow Finance SA/OU=OAO/CN=localhost" \
-    -addext "subjectAltName=DNS:localhost,DNS:addin.longbow.local,IP:127.0.0.1"
+    -subj "/C=CH/ST=Geneva/L=Geneva/O=Northbridge Capital/OU=OAO/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost,DNS:addin.northbridge.local,IP:127.0.0.1"
 fi
 
 chmod 600 "$KEY"

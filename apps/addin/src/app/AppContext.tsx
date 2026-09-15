@@ -25,5 +25,5 @@ export function adminUrl(): string {
 }
 
 export function complianceEmail(): string {
-  return import.meta.env.VITE_COMPLIANCE_EMAIL ?? "compliance@longbow.ch";
+  return import.meta.env.VITE_COMPLIANCE_EMAIL ?? "compliance@northbridge.example";
 }

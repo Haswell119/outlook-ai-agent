@@ -22,7 +22,7 @@ function manifest({ baseUrl, id, displayName, ssoResource }) {
            xsi:type="MailApp">
   <Id>${id}</Id>
   <Version>1.0.0.0</Version>
-  <ProviderName>Longbow Finance SA</ProviderName>
+  <ProviderName>Northbridge Capital</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="${displayName}">
     <Override Locale="fr-FR" Value="${displayName}" />
@@ -290,7 +290,7 @@ function manifest({ baseUrl, id, displayName, ssoResource }) {
 mkdirSync(join(root, "manifest"), { recursive: true });
 writeFileSync(
   join(root, "manifest", "manifest.xml"),
-  manifest({ baseUrl: "https://addin.longbow.local", id: "5d8b3f1c-0a7e-4d2b-9c6f-3e1a2b4c5d6e", displayName: "Outlook AI Orchestrator", ssoResource: "api://addin.longbow.local/{{AAD_CLIENT_ID}}" }),
+  manifest({ baseUrl: "https://addin.northbridge.local", id: "5d8b3f1c-0a7e-4d2b-9c6f-3e1a2b4c5d6e", displayName: "Outlook AI Orchestrator", ssoResource: "api://addin.northbridge.local/{{AAD_CLIENT_ID}}" }),
 );
 writeFileSync(
   join(root, "manifest", "manifest.dev.xml"),

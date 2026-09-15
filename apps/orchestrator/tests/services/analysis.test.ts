@@ -19,7 +19,7 @@ describe("AnalyzeEmailService", () => {
     expect(r.confidence).toBeGreaterThan(0.7);
     const audit = c.repos.audit.events;
     expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({ type: "summary_generated", user: { id: "dev.user@longbow.ch" }, source: { emailId: "email-1" }, approvalStatus: "auto_approved" });
+    expect(audit[0]).toMatchObject({ type: "summary_generated", user: { id: "dev.user@northbridge.example" }, source: { emailId: "email-1" }, approvalStatus: "auto_approved" });
     expect(audit[0]!.details.promptHash).toMatch(/^[a-f0-9]{64}$/);
     expect(audit[0]!.details.prompt).toBeUndefined(); // AUDIT_STORE_CONTENT=false
     expect((audit[0]!.details.analysis as { summary: string }).summary).toBe(r.summary);
@@ -32,7 +32,7 @@ describe("AnalyzeEmailService", () => {
   });
 
   it("flags phishing and adds an escalation action for a suspicious email", async () => {
-    const phish = sampleEmail({ from: { name: "Longbow IT Support", address: "it-support@longbovv-finance.com" }, subject: "URGENT: password expires", body: "Verify your account immediately at http://185.203.116.42/owa and confirm your password. Final notice.", attachments: [] });
+    const phish = sampleEmail({ from: { name: "Northbridge IT Support", address: "it-support@northbridqe-finance.com" }, subject: "URGENT: password expires", body: "Verify your account immediately at http://185.203.116.42/owa and confirm your password. Final notice.", attachments: [] });
     const r = await c.services.analyzeEmail.analyze(ctx(), { email: phish, includeThread: false });
     expect(r.phishing?.verdict).toBe("likely_phishing");
     expect(r.risks[0]?.code).toBe("phishing_suspected");

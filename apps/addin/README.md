@@ -31,7 +31,7 @@ node scripts/manifest-template.mjs    # regenerate manifest/manifest.xml + manif
 | `VITE_API_MOCK` | `false` | `true` → always use the in-browser mock API (`src/api/mock.ts`). Also `?mock=1` in the URL |
 | `VITE_AUTH_MODE` | `dev` | `dev` → `x-user-email` / `x-user-name` headers from `Office.context.mailbox.userProfile`; `aad` → `OfficeRuntime.auth.getAccessToken({allowSignInPrompt:true})` bearer token, falling back to dev headers when SSO fails **in dev builds only** |
 | `VITE_ADMIN_URL` | `http://localhost:3001` | Admin dashboard (used by "View audit log" / "View activity history" links) |
-| `VITE_COMPLIANCE_EMAIL` | `compliance@longbow.ch` | "Contact Compliance Team" mailto |
+| `VITE_COMPLIANCE_EMAIL` | `compliance@northbridge.example` | "Contact Compliance Team" mailto |
 
 ## Mock API and browser preview mode
 
@@ -62,7 +62,7 @@ node scripts/manifest-template.mjs    # regenerate manifest/manifest.xml + manif
 3. Open a message → ribbon group **AI Orchestrator** → *Open AI panel*. Compose a message → *Compliance Guardian*.
    The **OnMessageSend** handler requires Mailbox 1.10+ (Smart Alerts) and, on classic Windows Outlook,
    the JavaScript-only runtime file `commands.js` (built by `pnpm build:commands`, served from `public/`).
-4. Production: replace `https://addin.longbow.local` in `manifest/manifest.xml` (or edit
+4. Production: replace `https://addin.northbridge.local` in `manifest/manifest.xml` (or edit
    `scripts/manifest-template.mjs`), replace `{{AAD_CLIENT_ID}}` with the Azure AD app registration id
    (the `Resource` must match the app's *Application ID URI* `api://<host>/<client-id>` with the
    `access_as_user` scope), then deploy through *Integrated Apps* (Microsoft 365 admin center).

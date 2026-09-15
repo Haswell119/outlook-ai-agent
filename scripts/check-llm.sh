@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# Validates Longbow's internal LLM configuration directly against the
+# Validates Northbridge's internal LLM configuration directly against the
 # OpenAI-compatible endpoint (vLLM / Ollama / TGI / Azure OpenAI private),
 # independently of the orchestrator. Reads LLM_* from .env (or the current
 # environment, which takes precedence).
@@ -130,4 +130,4 @@ else
 fi
 
 echo ""
-echo "==> OK: Longbow internal LLM configuration looks valid."
+echo "==> OK: Northbridge internal LLM configuration looks valid."

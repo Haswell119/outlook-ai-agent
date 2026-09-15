@@ -14,10 +14,10 @@ beforeEach(async () => {
 
 describe("IndexEmailsService", () => {
   it("indexes with embeddings (hybrid), upserts by user + email id and audits", async () => {
-    expect(await c.repos.emailIndex.count("dev.user@longbow.ch")).toBe(emails.length);
+    expect(await c.repos.emailIndex.count("dev.user@northbridge.example")).toBe(emails.length);
     const again = await c.services.indexEmails.index(ctx(), [emails[0]!]);
     expect(again).toEqual({ indexed: 1, skipped: 0, mode: "hybrid" });
-    expect(await c.repos.emailIndex.count("dev.user@longbow.ch")).toBe(emails.length);
+    expect(await c.repos.emailIndex.count("dev.user@northbridge.example")).toBe(emails.length);
     expect(c.repos.audit.events.filter((e) => e.type === "emails_indexed")).toHaveLength(2);
     const chunks = buildChunks("u", { ...emails[1]!, body: "x ".repeat(2000) });
     expect(chunks.length).toBeGreaterThan(1);
@@ -43,7 +43,7 @@ describe("SearchService", () => {
     expect(r.results[0]!.relevance).toBe(1);
     expect(r.results.slice(0, 3).some((x) => /Mandate Approval/i.test(x.subject))).toBe(true);
     expect(r.results[0]!.excerpt.length).toBeGreaterThan(20);
-    const other = await c.services.search.search(ctx(user("someone.else@longbow.ch")), { query: "mandate", limit: 5 });
+    const other = await c.services.search.search(ctx(user("someone.else@northbridge.example")), { query: "mandate", limit: 5 });
     expect(other.results).toEqual([]);
   });
   it("honours the conversation and date filters", async () => {
@@ -78,14 +78,14 @@ describe("ChatService", () => {
     expect(c.repos.audit.events.filter((e) => e.type === "chat_answered")).toHaveLength(2);
   });
   it("says honestly when nothing matches", async () => {
-    const r = await c.services.chat.chat(ctx(user("empty@longbow.ch")), { message: "quantum flux capacitor", scope: {} });
+    const r = await c.services.chat.chat(ctx(user("empty@northbridge.example")), { message: "quantum flux capacitor", scope: {} });
     expect(r.sources).toEqual([]);
     expect(r.evidence).toBeUndefined();
     expect(r.answer).toMatch(/could not find/i);
     expect(r.confidence).toBeLessThanOrEqual(0.4);
   });
   it("uses the current email as source [1] and rejects foreign sessions", async () => {
-    const r = await c.services.chat.chat(ctx(user("nobody@longbow.ch")), { message: "What does Sarah need by Friday?", currentEmail: sampleEmail(), scope: {} });
+    const r = await c.services.chat.chat(ctx(user("nobody@northbridge.example")), { message: "What does Sarah need by Friday?", currentEmail: sampleEmail(), scope: {} });
     expect(r.sources[0]!.emailId).toBe("email-1");
     expect(r.evidence?.quote).toMatch(/Friday|approval/);
     await expect(c.services.chat.chat(ctx(), { sessionId: r.sessionId, message: "hi", scope: {} })).rejects.toMatchObject({ code: "not_found" });

@@ -5,8 +5,8 @@
 # Multi-stage build from the monorepo root (build context = repo root).
 #
 #   docker build -f infra/docker/addin.Dockerfile \
-#     --build-arg VITE_API_BASE_URL=https://api.oao.longbow.local/api/v1 \
-#     --build-arg VITE_ADMIN_URL=https://admin.oao.longbow.local \
+#     --build-arg VITE_API_BASE_URL=https://api.oao.northbridge.local/api/v1 \
+#     --build-arg VITE_ADMIN_URL=https://admin.oao.northbridge.local \
 #     --build-arg VITE_AUTH_MODE=aad \
 #     --build-arg VITE_API_MOCK=false \
 #     -t oao/addin .
@@ -32,8 +32,8 @@ COPY packages/shared packages/shared
 COPY apps/addin apps/addin
 
 # Build-time env consumed by Vite (baked into the static bundle).
-ARG VITE_API_BASE_URL=https://api.oao.longbow.local/api/v1
-ARG VITE_ADMIN_URL=https://admin.oao.longbow.local
+ARG VITE_API_BASE_URL=https://api.oao.northbridge.local/api/v1
+ARG VITE_ADMIN_URL=https://admin.oao.northbridge.local
 ARG VITE_AUTH_MODE=aad
 ARG VITE_API_MOCK=false
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL \

@@ -61,7 +61,7 @@ Variables utilisées ci-dessous :
 
 ```bash
 export API=http://localhost:8080/api/v1
-export AUTH='-H "x-user-email: demo@longbow.ch" -H "x-user-name: Demo User"'  # AUTH_MODE=dev
+export AUTH='-H "x-user-email: demo@northbridge.example" -H "x-user-name: Demo User"'  # AUTH_MODE=dev
 ```
 
 ### Health
@@ -75,13 +75,13 @@ curl -s "$API/health" | jq
 ```bash
 curl -s -X POST "$API/analyze/email" \
   -H "Content-Type: application/json" \
-  -H "x-user-email: demo@longbow.ch" -H "x-user-name: Demo User" \
+  -H "x-user-email: demo@northbridge.example" -H "x-user-name: Demo User" \
   -d '{
     "email": {
       "id": "msg-1",
       "subject": "Q2 vendor risk assessment",
       "from": { "name": "Sarah Johnson", "address": "sarah.johnson@vendorco.com" },
-      "to": [{ "address": "demo@longbow.ch" }],
+      "to": [{ "address": "demo@northbridge.example" }],
       "body": "Please review the attached Q2 vendor risk assessment, high-risk findings need approval."
     },
     "language": "en"
@@ -93,7 +93,7 @@ curl -s -X POST "$API/analyze/email" \
 ```bash
 curl -s -X POST "$API/chat" \
   -H "Content-Type: application/json" \
-  -H "x-user-email: demo@longbow.ch" -H "x-user-name: Demo User" \
+  -H "x-user-email: demo@northbridge.example" -H "x-user-name: Demo User" \
   -d '{ "message": "Find the email where the client approved the mandate.", "language": "en" }' | jq
 ```
 
@@ -102,7 +102,7 @@ curl -s -X POST "$API/chat" \
 ```bash
 curl -s -X POST "$API/compliance/check" \
   -H "Content-Type: application/json" \
-  -H "x-user-email: demo@longbow.ch" -H "x-user-name: Demo User" \
+  -H "x-user-email: demo@northbridge.example" -H "x-user-name: Demo User" \
   -d '{
     "draft": {
       "to": [{ "address": "michael.brown@clientco.com" }],
@@ -119,7 +119,7 @@ curl -s -X POST "$API/compliance/check" \
 ```bash
 PROPOSAL=$(curl -s -X POST "$API/actions/propose" \
   -H "Content-Type: application/json" \
-  -H "x-user-email: demo@longbow.ch" -H "x-user-name: Demo User" \
+  -H "x-user-email: demo@northbridge.example" -H "x-user-name: Demo User" \
   -d '{ "email": { "id": "msg-1", "subject": "Q2 vendor risk assessment", "body": "..." } }')
 
 echo "$PROPOSAL" | jq
@@ -129,7 +129,7 @@ ACTION_ID=$(echo "$PROPOSAL" | jq -r .actions[0].id)
 
 curl -s -X POST "$API/actions/approve" \
   -H "Content-Type: application/json" \
-  -H "x-user-email: demo@longbow.ch" -H "x-user-name: Demo User" \
+  -H "x-user-email: demo@northbridge.example" -H "x-user-name: Demo User" \
   -d "{ \"proposalId\": \"$PROPOSAL_ID\", \"actionIds\": [\"$ACTION_ID\"] }" | jq
 ```
 
@@ -137,7 +137,7 @@ curl -s -X POST "$API/actions/approve" \
 
 ```bash
 curl -s "$API/audit?page=1&pageSize=25" \
-  -H "x-user-email: admin@longbow.ch" -H "x-user-name: Admin" | jq
+  -H "x-user-email: admin@northbridge.example" -H "x-user-name: Admin" | jq
 ```
 
 Voir `scripts/smoke-test.sh` pour un script prêt à l'emploi couvrant health +

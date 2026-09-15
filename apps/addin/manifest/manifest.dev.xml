@@ -11,7 +11,7 @@
            xsi:type="MailApp">
   <Id>7f2e9a4b-6c1d-4e8f-a3b5-9d0c1e2f3a4b</Id>
   <Version>1.0.0.0</Version>
-  <ProviderName>Longbow Finance SA</ProviderName>
+  <ProviderName>Northbridge Capital</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Outlook AI Orchestrator (dev)">
     <Override Locale="fr-FR" Value="Outlook AI Orchestrator (dev)" />

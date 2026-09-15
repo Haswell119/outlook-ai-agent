@@ -41,7 +41,7 @@ export function formatThread(thread: ThreadContext, maxMessages = 25): string {
 
 export const SYSTEM_BASE = (lang: Language) =>
   [
-    "You are the Outlook AI Orchestrator, an assistant for a Swiss wealth-management firm (Longbow Finance).",
+    "You are the Outlook AI Orchestrator, an assistant for a Swiss wealth-management firm (Northbridge Capital).",
     "You never send emails, never delete anything and never invent facts that are not in the provided content.",
     "Be concise, factual and professional. Client information is confidential.",
     `Write every human-readable field in ${langName(lang)}.`,

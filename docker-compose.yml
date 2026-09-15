@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 # Outlook AI Orchestrator — full stack (Postgres/pgvector + orchestrator +
-# admin + addin). Configure Longbow's internal LLM endpoint and secrets in
+# admin + addin). Configure Northbridge's internal LLM endpoint and secrets in
 # `.env` (copy from `.env.example`) before running this.
 #
 #   cp .env.example .env    # then edit LLM_*, AAD_*, ADMIN_API_TOKEN, ...
@@ -80,8 +80,8 @@ services:
       context: .
       dockerfile: infra/docker/addin.Dockerfile
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.oao.longbow.local/api/v1}
-        VITE_ADMIN_URL: ${VITE_ADMIN_URL:-https://admin.oao.longbow.local}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.oao.northbridge.local/api/v1}
+        VITE_ADMIN_URL: ${VITE_ADMIN_URL:-https://admin.oao.northbridge.local}
         VITE_AUTH_MODE: ${VITE_AUTH_MODE:-aad}
         VITE_API_MOCK: ${VITE_API_MOCK:-false}
     restart: unless-stopped
@@ -95,8 +95,8 @@ services:
 
   # ---------------------------------------------------------------------------
   # Optional: local LLM serving, for demo/dev environments that don't have
-  # access to Longbow's internal GPU endpoint. Not needed in normal operation
-  # — Longbow already runs Qwen3 on an OpenAI-compatible vLLM endpoint
+  # access to Northbridge's internal GPU endpoint. Not needed in normal operation
+  # — Northbridge already runs Qwen3 on an OpenAI-compatible vLLM endpoint
   # (see LLM_BASE_URL in .env.example); point LLM_BASE_URL at it instead of
   # running any of this. Enable with `docker compose --profile llm up`.
   # ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 # Outlook AI Orchestrator
 
 > Secure. Compliant. Human-in-the-loop.
-> Longbow Finance SA — compétition IA interne. Tech Lead : **Justin Vuffray**.
-> Product/PM : **Luanda Borg**.
+> Northbridge Capital — compétition IA interne. Tech Lead : **Tech Lead**.
+> Product/PM : **Product Owner**.
 
 Un add-in Outlook (volet latéral) qui permet à l'utilisateur de **discuter
 avec sa boîte mail** : résumés instantanés, décisions et tâches, risques,
@@ -13,7 +13,7 @@ Coach** (détection de routines → proposition → simulation → activation) e
 **Compliance Guardian** (vérifications avant envoi + anti-phishing entrant).
 Tout est audité et supervisé depuis un dashboard admin.
 
-Le modèle IA est **hébergé en interne** (GPU Longbow, Qwen3 aujourd'hui).
+Le modèle IA est **hébergé en interne** (GPU Northbridge, Qwen3 aujourd'hui).
 L'orchestrator lui parle via une **API HTTP compatible OpenAI** (vLLM,
 Ollama, LM Studio, TGI, Azure OpenAI privé…). Changer de modèle = changer des
 variables d'environnement, aucun changement de code.
@@ -109,4 +109,4 @@ Docker/Kubernetes, voir [`docs/SETUP.md`](docs/SETUP.md).
 
 ## Crédits
 
-**Longbow Finance SA** — Tech Lead : Justin Vuffray · Product/PM : Luanda Borg.
+**Northbridge Capital** — Tech Lead : Tech Lead · Product/PM : Product Owner.

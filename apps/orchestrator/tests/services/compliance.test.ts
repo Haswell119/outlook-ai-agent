@@ -23,13 +23,13 @@ describe("ComplianceService.check", () => {
     expect((c.repos.audit.events[1]!.details.issues as Array<{ code: string }>).map((i) => i.code)).toEqual(codes);
   });
   it("allows a clean internal draft without an alert", async () => {
-    const r = await c.services.compliance.check(ctx(), { draft: { to: [{ address: "marc.dubois@longbow.ch" }], cc: [], bcc: [], subject: "Lunch", body: "Lunch at noon?", attachments: [], sensitivityLabel: "Internal" } });
+    const r = await c.services.compliance.check(ctx(), { draft: { to: [{ address: "marc.dubois@northbridge.example" }], cc: [], bcc: [], subject: "Lunch", body: "Lunch at noon?", attachments: [], sensitivityLabel: "Internal" } });
     expect(r.verdict).toBe("allow");
     expect(r.issues).toEqual([]);
     expect(c.repos.audit.events.map((e) => e.type)).toEqual(["compliance_check"]);
   });
   it("blocks when the policy says so and still works when the model is down", async () => {
-    await c.services.policy.put(user("admin@longbow.ch", ["admin"]), { ...(await c.services.policy.get()), blockOnHighRisk: true });
+    await c.services.policy.put(user("admin@northbridge.example", ["admin"]), { ...(await c.services.policy.get()), blockOnHighRisk: true });
     c.llm.failing = true;
     const r = await c.services.compliance.check(ctx(undefined, "fr"), { draft: { to: [{ address: "x@clientco.com" }], cc: [], bcc: [], subject: "Docs", body: "Voici le rapport de performance confidentiel de votre portefeuille avec les positions détaillées.", attachments: [{ name: "Rapport KYC.pdf" }] } });
     expect(r.verdict).toBe("block");
@@ -39,7 +39,7 @@ describe("ComplianceService.check", () => {
 
 describe("ComplianceService.phishing", () => {
   it("returns weighted indicators and audits with the risk level", async () => {
-    const r = await c.services.compliance.phishing(ctx(), sampleEmail({ from: { name: "IT", address: "it@longbovv.ch" }, body: "urgent: verify your password at http://10.0.0.1/x" }));
+    const r = await c.services.compliance.phishing(ctx(), sampleEmail({ from: { name: "IT", address: "it@northbridqe.ch" }, body: "urgent: verify your password at http://10.0.0.1/x" }));
     expect(() => PhishingCheckResponseSchema.parse(r)).not.toThrow();
     expect(r.verdict).toBe("likely_phishing");
     expect(r.indicators.every((i) => i.weight > 0)).toBe(true);
@@ -52,13 +52,13 @@ describe("EscalationService", () => {
     const e = await c.services.escalations.create(ctx(), { reason: "External send with confidential attachment", issues: [] });
     expect(() => EscalationSchema.parse(e)).not.toThrow();
     expect(e.status).toBe("pending");
-    expect(await c.services.escalations.list(ctx(user("someone@longbow.ch")))).toEqual([]);
-    expect(await c.services.escalations.list(ctx(user("compliance@longbow.ch", ["user", "compliance"])))).toHaveLength(1);
+    expect(await c.services.escalations.list(ctx(user("someone@northbridge.example")))).toEqual([]);
+    expect(await c.services.escalations.list(ctx(user("compliance@northbridge.example", ["user", "compliance"])))).toHaveLength(1);
     expect(await c.services.escalations.list(ctx(), "approved")).toEqual([]);
-    await expect(c.services.escalations.get(ctx(user("someone@longbow.ch")), e.id)).rejects.toMatchObject({ code: "not_found" });
-    const decided = await c.services.escalations.decide(ctx(user("compliance@longbow.ch", ["user", "compliance"])), e.id, "approved", "Fine");
-    expect(decided).toMatchObject({ status: "approved", decidedBy: "compliance@longbow.ch", decisionComment: "Fine" });
-    await expect(c.services.escalations.decide(ctx(user("compliance@longbow.ch", ["compliance"])), e.id, "rejected")).rejects.toMatchObject({ code: "conflict" });
+    await expect(c.services.escalations.get(ctx(user("someone@northbridge.example")), e.id)).rejects.toMatchObject({ code: "not_found" });
+    const decided = await c.services.escalations.decide(ctx(user("compliance@northbridge.example", ["user", "compliance"])), e.id, "approved", "Fine");
+    expect(decided).toMatchObject({ status: "approved", decidedBy: "compliance@northbridge.example", decisionComment: "Fine" });
+    await expect(c.services.escalations.decide(ctx(user("compliance@northbridge.example", ["compliance"])), e.id, "rejected")).rejects.toMatchObject({ code: "conflict" });
     expect(c.repos.audit.events.map((x) => x.type)).toEqual(["compliance_escalated", "compliance_decision"]);
   });
 });

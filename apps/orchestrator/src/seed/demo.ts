@@ -23,11 +23,11 @@ export interface SeedResult {
 }
 
 const USERS = [
-  { id: "dev.user@longbow.ch", email: "dev.user@longbow.ch", displayName: "Dev User" },
-  { id: "jane.smith@longbow.ch", email: "jane.smith@longbow.ch", displayName: "Jane Smith" },
-  { id: "marc.dubois@longbow.ch", email: "marc.dubois@longbow.ch", displayName: "Marc Dubois" },
-  { id: "sophie.martin@longbow.ch", email: "sophie.martin@longbow.ch", displayName: "Sophie Martin" },
-  { id: "compliance@longbow.ch", email: "compliance@longbow.ch", displayName: "Compliance Team" },
+  { id: "dev.user@northbridge.example", email: "dev.user@northbridge.example", displayName: "Dev User" },
+  { id: "jane.smith@northbridge.example", email: "jane.smith@northbridge.example", displayName: "Jane Smith" },
+  { id: "marc.dubois@northbridge.example", email: "marc.dubois@northbridge.example", displayName: "Marc Dubois" },
+  { id: "sophie.martin@northbridge.example", email: "sophie.martin@northbridge.example", displayName: "Sophie Martin" },
+  { id: "compliance@northbridge.example", email: "compliance@northbridge.example", displayName: "Compliance Team" },
 ];
 
 /** Deterministic pseudo-random generator so the demo looks the same every start. */
@@ -104,7 +104,7 @@ export async function seedDemo(c: Container, now = new Date()): Promise<SeedResu
   // Escalations: one pending, one approved.
   const escalations: StoredEscalation[] = [
     { id: newId(), userId: USERS[1]!.id, status: "pending", requestedBy: USERS[1]!.email, requestedAt: new Date(now.getTime() - 2 * 3_600_000).toISOString(), reason: "Sending the May performance report to ABC Capital (external) with a confidential attachment.", issues: [{ id: "e1", code: "confidential_attachment", title: "Confidential attachment", description: "ABC Capital – Performance Report May 2025.pdf is classified as confidential.", severity: "high", subject: "ABC Capital – Performance Report May 2025.pdf" }, { id: "e2", code: "external_recipient", title: "External recipient detected", description: "james.carter@abccapital.com is outside your organization.", severity: "high", subject: "james.carter@abccapital.com" }] },
-    { id: newId(), userId: USERS[2]!.id, status: "approved", requestedBy: USERS[2]!.email, requestedAt: new Date(now.getTime() - 3 * 86_400_000).toISOString(), reason: "Share the Q2 mandate review deck with the custodian.", decidedBy: "compliance@longbow.ch", decidedAt: new Date(now.getTime() - 2.5 * 86_400_000).toISOString(), decisionComment: "Approved: recipient is a contracted custodian under NDA.", issues: [{ id: "e3", code: "external_recipient", title: "External recipient detected", description: "custody@swissbank-custody.ch is outside your organization.", severity: "medium", subject: "custody@swissbank-custody.ch" }] },
+    { id: newId(), userId: USERS[2]!.id, status: "approved", requestedBy: USERS[2]!.email, requestedAt: new Date(now.getTime() - 3 * 86_400_000).toISOString(), reason: "Share the Q2 mandate review deck with the custodian.", decidedBy: "compliance@northbridge.example", decidedAt: new Date(now.getTime() - 2.5 * 86_400_000).toISOString(), decisionComment: "Approved: recipient is a contracted custodian under NDA.", issues: [{ id: "e3", code: "external_recipient", title: "External recipient detected", description: "custody@swissbank-custody.ch is outside your organization.", severity: "medium", subject: "custody@swissbank-custody.ch" }] },
   ];
   for (const e of escalations) await repos.escalations.create(e);
 

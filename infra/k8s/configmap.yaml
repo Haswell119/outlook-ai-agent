@@ -9,7 +9,7 @@ metadata:
 data:
   # --- LLM ---
   LLM_PROVIDER: "openai-compatible"
-  LLM_BASE_URL: "http://gpu-node.longbow.local:8000/v1"
+  LLM_BASE_URL: "http://gpu-node.northbridge.local:8000/v1"
   LLM_MODEL: "qwen3-30b-a3b"
   LLM_TIMEOUT_MS: "60000"
   LLM_MAX_TOKENS: "2048"
@@ -26,15 +26,15 @@ data:
 
   # --- Auth ---
   AUTH_MODE: "aad"
-  ADMIN_EMAILS: "admin@longbow.ch"
-  COMPLIANCE_EMAILS: "compliance@longbow.ch"
+  ADMIN_EMAILS: "admin@northbridge.example"
+  COMPLIANCE_EMAILS: "compliance@northbridge.example"
 
   # --- Graph ---
   GRAPH_ENABLED: "false"
 
   # --- Misc ---
   PORT: "8080"
-  CORS_ORIGINS: "https://addin.oao.longbow.local"
+  CORS_ORIGINS: "https://addin.oao.northbridge.local"
   AUDIT_STORE_CONTENT: "false"
   NOTIFY_WEBHOOK_URL: ""
   DEFAULT_LANGUAGE: "fr"
@@ -46,7 +46,7 @@ data:
   ADMIN_MOCK: "false"
 
   # --- Add-in (build-time only; kept here for reference / rebuild scripts) ---
-  VITE_API_BASE_URL: "https://api.oao.longbow.local/api/v1"
-  VITE_ADMIN_URL: "https://admin.oao.longbow.local"
+  VITE_API_BASE_URL: "https://api.oao.northbridge.local/api/v1"
+  VITE_ADMIN_URL: "https://admin.oao.northbridge.local"
   VITE_AUTH_MODE: "aad"
   VITE_API_MOCK: "false"

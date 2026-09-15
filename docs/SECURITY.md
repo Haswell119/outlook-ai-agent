@@ -8,7 +8,7 @@
 Actifs à protéger :
 
 - **Contenu des emails** (sujet, corps, pièces jointes) des utilisateurs
-  Longbow, potentiellement des données clients sensibles (KYC, mandats,
+  Northbridge, potentiellement des données clients sensibles (KYC, mandats,
   informations de portefeuille).
 - **Décisions/actions proposées par l'IA** et leur exécution (risque
   d'automatisation incorrecte ou non désirée).
@@ -38,7 +38,7 @@ Outlook (add-in, Office.js)
 Orchestrator (Fastify)
    │  validation zod stricte de CHAQUE payload entrant
    │
-   ├─► LLM interne (OpenAI-compatible, réseau interne Longbow)
+   ├─► LLM interne (OpenAI-compatible, réseau interne Northbridge)
    │     - prompt = contenu minimisé de l'email + instructions système
    │     - AUCUNE donnée n'est envoyée à un service tiers/cloud public
    │
@@ -55,7 +55,7 @@ Admin dashboard (Next.js) ──HTTPS + bearer──► Orchestrator (lecture se
 ```
 
 Aucune donnée n'est envoyée à un fournisseur cloud IA public : le modèle est
-hébergé en interne par Longbow (GPU on-prem), donc l'ensemble du flux "contenu
+hébergé en interne par Northbridge (GPU on-prem), donc l'ensemble du flux "contenu
 d'email → prompt → réponse" reste sur le réseau interne.
 
 ## 3. Minimisation des données — ce qui est stocké
@@ -117,7 +117,7 @@ hébergement interne) :
   action sans entrée d'audit correspondante).
 - **Contrôle humain systématique** sur toute action à impact (au minimum
   `medium`), jamais d'exécution autonome d'actions à risque.
-- **Hébergement interne du modèle IA** (Longbow GPU) — aucune donnée client
+- **Hébergement interne du modèle IA** (Northbridge GPU) — aucune donnée client
   envoyée à un tiers cloud public par défaut.
 - **Minimisation des données** stockées (hashes plutôt que contenu, §3).
 - **Séparation des rôles** (RBAC §5), en particulier l'équipe compliance a un
@@ -128,12 +128,12 @@ hébergement interne) :
   d'activité consultable (`lastSimulation`, `View activity history`).
 - **Conservation et purge contrôlées** de l'audit (`docs/OPERATIONS.md` §8),
   alignées sur les durées légales applicables (à valider avec l'équipe
-  compliance/juridique de Longbow selon le flux concerné — ce document ne
+  compliance/juridique de Northbridge selon le flux concerné — ce document ne
   fixe pas de durée réglementaire précise, il documente le mécanisme).
 
 > Ce document décrit l'architecture technique de conformité ; il ne remplace
 > pas une revue juridique/réglementaire formelle par l'équipe compliance de
-> Longbow Finance SA avant mise en production.
+> Northbridge Capital avant mise en production.
 
 ## 7. Matrice de gouvernance (action / risque / validation)
 

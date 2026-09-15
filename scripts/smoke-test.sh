@@ -10,7 +10,7 @@ set -uo pipefail
 
 BASE_URL="${ORCHESTRATOR_URL:-http://localhost:8080}"
 API="$BASE_URL/api/v1"
-USER_EMAIL="${SMOKE_TEST_USER_EMAIL:-smoke-test@longbow.ch}"
+USER_EMAIL="${SMOKE_TEST_USER_EMAIL:-smoke-test@northbridge.example}"
 FAILED=0
 
 pass() { echo "OK   $1"; }
@@ -49,7 +49,7 @@ EMAIL_JSON=$(cat <<'JSON'
     "conversationId": "smoke-test-conv-1",
     "subject": "Q2 vendor risk assessment — please review",
     "from": { "name": "Sarah Johnson", "address": "sarah.johnson@vendorco.com" },
-    "to": [{ "name": "Smoke Test", "address": "smoke-test@longbow.ch" }],
+    "to": [{ "name": "Smoke Test", "address": "smoke-test@northbridge.example" }],
     "body": "Hi, please find attached the Q2 vendor risk assessment report. There are a few high-risk findings that need your review and approval before Friday.",
     "attachments": [{ "name": "Q2-vendor-risk-assessment.pdf", "contentType": "application/pdf" }]
   },

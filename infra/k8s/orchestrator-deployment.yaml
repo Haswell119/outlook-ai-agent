@@ -23,7 +23,7 @@ spec:
       containers:
         - name: orchestrator
           # Built from infra/docker/orchestrator.Dockerfile — replace with your registry.
-          image: registry.longbow.local/oao/orchestrator:latest
+          image: registry.northbridge.local/oao/orchestrator:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

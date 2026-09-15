@@ -57,12 +57,12 @@ export interface MockUser {
 }
 
 export const MOCK_USERS: MockUser[] = [
-  { id: "u-jsmith", email: "jane.smith@longbow.ch", displayName: "Jane Smith", roles: ["user", "admin"], actions: 312 },
-  { id: "u-mdubois", email: "marc.dubois@longbow.ch", displayName: "Marc Dubois", roles: ["user"], actions: 268 },
-  { id: "u-sjohnson", email: "sarah.johnson@longbow.ch", displayName: "Sarah Johnson", roles: ["user"], actions: 224 },
-  { id: "u-jcarter", email: "james.carter@longbow.ch", displayName: "James Carter", roles: ["user"], actions: 191 },
-  { id: "u-lborg", email: "luanda.borg@longbow.ch", displayName: "Luanda Borg", roles: ["user", "compliance"], actions: 146 },
-  { id: "u-jvuffray", email: "justin.vuffray@longbow.ch", displayName: "Justin Vuffray", roles: ["user", "admin"], actions: 106 },
+  { id: "u-jsmith", email: "jane.smith@northbridge.example", displayName: "Jane Smith", roles: ["user", "admin"], actions: 312 },
+  { id: "u-mdubois", email: "marc.dubois@northbridge.example", displayName: "Marc Dubois", roles: ["user"], actions: 268 },
+  { id: "u-sjohnson", email: "sarah.johnson@northbridge.example", displayName: "Sarah Johnson", roles: ["user"], actions: 224 },
+  { id: "u-jcarter", email: "james.carter@northbridge.example", displayName: "James Carter", roles: ["user"], actions: 191 },
+  { id: "u-lborg", email: "product.owner@northbridge.example", displayName: "Product Owner", roles: ["user", "compliance"], actions: 146 },
+  { id: "u-techlead", email: "tech.lead@northbridge.example", displayName: "Tech Lead", roles: ["user", "admin"], actions: 106 },
 ];
 
 const COMPLIANCE_TEAM = "Compliance Team";
@@ -74,27 +74,27 @@ const SUBJECTS: readonly string[] = [
   "Project Horizon – Onboarding checklist",
   "Client A – Daily Reporting 16 May",
   "Re: Q2 Portfolio Update – ABC Capital",
-  "KYC validation – Longbow Finance SA",
+  "KYC validation – Northbridge Capital",
   "Signed Account Mandate – outstanding",
   "Re: Investment Management Agreement",
   "Client A – Q2 Performance Report",
-  "Longbow / ABC Capital – Fee schedule",
+  "Northbridge / ABC Capital – Fee schedule",
   "Re: Custody transfer instructions",
   "Compliance review – external distribution",
   "Board pack – May 2025",
   "Re: Onboarding ABC Capital (Project Horizon)",
-  "Weekly risk digest – Longbow Finance",
+  "Weekly risk digest – Northbridge Capital",
 ];
 
 const COUNTERPARTS: readonly string[] = [
   "james.carter@abccapital.com",
   "michael.brown@clientco.com",
-  "sarah.johnson@longbow.ch",
+  "sarah.johnson@northbridge.example",
   "operations@abccapital.com",
   "reporting@client-a.com",
-  "legal@longbow.ch",
+  "legal@northbridge.example",
   "no-reply@secure-docs-review.net",
-  "compliance@longbow.ch",
+  "compliance@northbridge.example",
 ];
 
 /* --------------------------------------------------------------------------- */
@@ -481,7 +481,7 @@ function buildAutomations(): Automation[] {
         { order: 1, type: "detect_attachment", title: "Detect mandate PDF", description: "Detect PDF attachment named like a mandate", parameters: {} },
         { order: 2, type: "apply_label", title: "Apply Confidential label", description: "Apply the 'Confidential' sensitivity label", parameters: { label: "Confidential" } },
         { order: 3, type: "flag", title: "Flag for follow-up", description: "Flag the email for the legal review queue", parameters: {} },
-        { order: 4, type: "notify", title: "Notify Legal", description: "Notify legal@longbow.ch that a mandate arrived", parameters: { to: "legal@longbow.ch" } },
+        { order: 4, type: "notify", title: "Notify Legal", description: "Notify legal@northbridge.example that a mandate arrived", parameters: { to: "legal@northbridge.example" } },
       ],
       status: "active",
       stats: { occurrences: 41, perWeek: 3.5, estimatedMinutesPerOccurrence: 7.1, estimatedMinutesSavedPerWeek: 25 },
@@ -511,8 +511,8 @@ function buildAutomations(): Automation[] {
       name: "Weekly risk digest archive",
       description: "The weekly risk digest is archived and categorised once read.",
       trigger: {
-        description: "Emails from compliance@longbow.ch whose subject contains 'risk digest'",
-        conditions: { fromAddress: "compliance@longbow.ch", subjectContains: "risk digest", hasAttachments: false },
+        description: "Emails from compliance@northbridge.example whose subject contains 'risk digest'",
+        conditions: { fromAddress: "compliance@northbridge.example", subjectContains: "risk digest", hasAttachments: false },
       },
       steps: [
         { order: 1, type: "categorize", title: "Apply category", description: "Categorize as 'Risk – Weekly digest'", parameters: { category: "Risk – Weekly digest" } },
@@ -537,7 +537,7 @@ function buildEscalations(): Escalation[] {
     {
       id: "esc-2051",
       status: "pending",
-      requestedBy: "marc.dubois@longbow.ch",
+      requestedBy: "marc.dubois@northbridge.example",
       requestedAt: "2025-05-18T09:24:00.000Z",
       reason:
         "Outbound email carries the Q2 performance report to an external recipient without a classification label.",
@@ -551,7 +551,7 @@ function buildEscalations(): Escalation[] {
     {
       id: "esc-2048",
       status: "pending",
-      requestedBy: "sarah.johnson@longbow.ch",
+      requestedBy: "sarah.johnson@northbridge.example",
       requestedAt: "2025-05-17T16:05:00.000Z",
       reason: "Mandate documents forwarded to a distribution list of 14 external recipients.",
       issues: [
@@ -562,10 +562,10 @@ function buildEscalations(): Escalation[] {
     {
       id: "esc-2039",
       status: "approved",
-      requestedBy: "james.carter@longbow.ch",
+      requestedBy: "james.carter@northbridge.example",
       requestedAt: "2025-05-15T11:12:00.000Z",
       reason: "Custody transfer instructions sent to a newly registered counterpart domain.",
-      decidedBy: "Luanda Borg",
+      decidedBy: "Product Owner",
       decidedAt: "2025-05-15T13:40:00.000Z",
       decisionComment: "Counterpart verified with the operations team by phone. Approved for this send only.",
       issues: [
@@ -575,7 +575,7 @@ function buildEscalations(): Escalation[] {
     {
       id: "esc-2031",
       status: "rejected",
-      requestedBy: "marc.dubois@longbow.ch",
+      requestedBy: "marc.dubois@northbridge.example",
       requestedAt: "2025-05-13T08:47:00.000Z",
       reason: "Portfolio extract with client IBANs to a personal mailbox.",
       decidedBy: "Jane Smith",
@@ -622,7 +622,7 @@ export const MOCK_ESCALATION_DRAFTS: Record<
 
 export function defaultPolicy(): Policy {
   return {
-    internalDomains: ["longbow.ch", "longbowfinance.ch"],
+    internalDomains: ["northbridge.example", "northbridgecapital.ch"],
     confidentialPatterns: ["confidential", "restricted", "internal only", "q[0-9] performance report"],
     requiredClassificationLabels: ["Public", "Internal", "Confidential", "Strictly Confidential"],
     sensitiveDataPatterns: [
@@ -636,7 +636,7 @@ export function defaultPolicy(): Policy {
     approvalRequiredFrom: "medium",
     blockOnHighRisk: true,
     updatedAt: "2025-05-16T10:32:00.000Z",
-    updatedBy: "jane.smith@longbow.ch",
+    updatedBy: "jane.smith@northbridge.example",
   };
 }
 
@@ -646,7 +646,7 @@ const LAST_ACTIVITY: Record<string, string> = {
   "u-sjohnson": "2025-05-18T15:12:00.000Z",
   "u-jcarter": "2025-05-18T11:37:00.000Z",
   "u-lborg": "2025-05-17T18:04:00.000Z",
-  "u-jvuffray": "2025-05-16T09:21:00.000Z",
+  "u-techlead": "2025-05-16T09:21:00.000Z",
 };
 
 export function buildUsers(): AdminUser[] {
@@ -677,7 +677,7 @@ export function mockHealth(): Health {
     status: "degraded",
     checks: {
       database: { status: "ok", detail: "postgres 16 + pgvector 0.7" },
-      llm: { status: "ok", detail: "qwen3-30b-a3b @ gpu-node.longbow.local" },
+      llm: { status: "ok", detail: "qwen3-30b-a3b @ gpu-node.northbridge.local" },
       embeddings: { status: "ok", detail: "bge-m3, 1024 dimensions" },
       graph: { status: "degraded", detail: "GRAPH_ENABLED=false — server actions fall back to the client" },
     },

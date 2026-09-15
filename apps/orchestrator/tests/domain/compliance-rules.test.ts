@@ -3,7 +3,7 @@ import { DEFAULT_POLICY, type ComposeContext, type Policy } from "@oao/shared";
 import { evaluateCompliance, findSensitiveData, resetIssueIds } from "../../src/domain/compliance/rules.js";
 import { isLookalikeDomain, isFreeMailDomain } from "../../src/domain/compliance/lookalike.js";
 
-const draft = (over: Partial<ComposeContext> = {}): ComposeContext => ({ to: [{ address: "colleague@longbow.ch" }], cc: [], bcc: [], subject: "Hello", body: "Just a quick internal note about the meeting.", attachments: [], sensitivityLabel: "Internal", ...over });
+const draft = (over: Partial<ComposeContext> = {}): ComposeContext => ({ to: [{ address: "colleague@northbridge.example" }], cc: [], bcc: [], subject: "Hello", body: "Just a quick internal note about the meeting.", attachments: [], sensitivityLabel: "Internal", ...over });
 const policy: Policy = { ...DEFAULT_POLICY };
 const codes = (d: ComposeContext, p: Policy = policy, extra = {}) => evaluateCompliance(d, p, { language: "en", ...extra }).issues.map((i) => i.code);
 
@@ -26,13 +26,13 @@ describe("compliance rules", () => {
   });
 
   it("suspicious_recipient_domain: lookalike of internal domain and free-mail with sensitive content", () => {
-    expect(codes(draft({ to: [{ address: "x@longbovv.ch" }] }))).toContain("suspicious_recipient_domain");
-    expect(codes(draft({ to: [{ address: "x@longbow-finance.com" }] }))).toContain("suspicious_recipient_domain");
+    expect(codes(draft({ to: [{ address: "x@northbridqe.example" }] }))).toContain("suspicious_recipient_domain");
+    expect(codes(draft({ to: [{ address: "x@northbridge-capital.com" }] }))).toContain("suspicious_recipient_domain");
     expect(codes(draft({ to: [{ address: "friend@gmail.com" }], body: "IBAN CH93 0076 2011 6238 5295 7" }))).toContain("suspicious_recipient_domain");
     expect(codes(draft({ to: [{ address: "friend@gmail.com" }] }))).not.toContain("suspicious_recipient_domain");
-    expect(isLookalikeDomain("longbow.ch", ["longbow.ch"])).toBe(false);
-    expect(isLookalikeDomain("mail.longbow.ch", ["longbow.ch"])).toBe(false);
-    expect(isLookalikeDomain("longbow.ch.evil.io", ["longbow.ch"])).toBe(true);
+    expect(isLookalikeDomain("northbridge.example", ["northbridge.example"])).toBe(false);
+    expect(isLookalikeDomain("mail.northbridge.example", ["northbridge.example"])).toBe(false);
+    expect(isLookalikeDomain("northbridge.example.evil.io", ["northbridge.example"])).toBe(true);
     expect(isFreeMailDomain("protonmail.com")).toBe(true);
   });
 

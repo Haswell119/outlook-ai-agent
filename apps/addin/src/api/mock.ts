@@ -341,12 +341,12 @@ export function createMockClient(getLanguage: () => import("@oao/shared").Langua
     },
     complianceCheck: async (req) => {
       await wait(1.5);
-      const external = [...req.draft.to, ...req.draft.cc, ...req.draft.bcc].some((r) => !/@(longbow\.ch|longbowfinance\.com)$/i.test(r.address));
+      const external = [...req.draft.to, ...req.draft.cc, ...req.draft.bcc].some((r) => !/@(northbridge\.ch|northbridgecapital\.com)$/i.test(r.address));
       return validate(ComplianceCheckResponseSchema, mockCompliance(req.language ?? getLanguage(), external), "complianceCheck");
     },
     createEscalation: async (req) => {
       await wait(1);
-      return validate(EscalationSchema, { id: id("esc"), status: "pending", requestedBy: "jane.smith@longbow.ch", requestedAt: now(), reason: req.reason, issues: req.issues ?? [] }, "escalation");
+      return validate(EscalationSchema, { id: id("esc"), status: "pending", requestedBy: "jane.smith@northbridge.example", requestedAt: now(), reason: req.reason, issues: req.issues ?? [] }, "escalation");
     },
     observe: async () => {
       await wait(0.1);

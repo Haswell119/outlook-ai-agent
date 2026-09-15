@@ -16,10 +16,10 @@ mkdir -p "$CERT_DIR"
 
 if [ ! -s "$CERT_FILE" ] || [ ! -s "$KEY_FILE" ]; then
   echo "[addin-entrypoint] no certificate mounted at $CERT_DIR — generating a self-signed one"
-  ADDIN_HOST="${ADDIN_HOST:-addin.longbow.local}"
+  ADDIN_HOST="${ADDIN_HOST:-addin.northbridge.local}"
   openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
     -keyout "$KEY_FILE" -out "$CERT_FILE" \
-    -subj "/C=CH/ST=Geneva/L=Geneva/O=Longbow Finance SA/OU=OAO/CN=${ADDIN_HOST}" \
+    -subj "/C=CH/ST=Geneva/L=Geneva/O=Northbridge Capital/OU=OAO/CN=${ADDIN_HOST}" \
     -addext "subjectAltName=DNS:${ADDIN_HOST},DNS:localhost,IP:127.0.0.1" \
     >/tmp/gen-cert.log 2>&1
   echo "[addin-entrypoint] self-signed certificate generated for CN=${ADDIN_HOST} (dev/demo use only)"
