@@ -160,6 +160,18 @@ export const EmailAnalysisSchema = z.object({
   auditId: z.string(),
   generatedAt: z.string(),
   model: z.string().optional(),
+  /**
+   * How the analysis was produced (AI-load minimisation):
+   *  - `llm`         : model called for this request
+   *  - `cache`       : identical content already analysed (content-hash cache)
+   *  - `precomputed` : analysed ahead of time by the mailbox sync worker
+   *  - `heuristic`   : rules only (trivial/automatic email, or model unavailable)
+   */
+  source: z.enum(["llm", "cache", "precomputed", "heuristic"]).optional(),
+  /** Set when the email was classified as not worth a model call (newsletter, notification, OOO…). */
+  triage: z
+    .object({ kind: z.enum(["conversation", "notification", "newsletter", "out_of_office", "automatic", "calendar", "trivial"]), reason: z.string().optional() })
+    .optional(),
 });
 export type EmailAnalysis = z.infer<typeof EmailAnalysisSchema>;
 
@@ -678,6 +690,64 @@ export const AutomationDecisionRequestSchema = z.object({
 });
 
 /* ------------------------------------------------------------------------- */
+/*  7b. Daily brief (precomputed every morning by the sync worker)           */
+/* ------------------------------------------------------------------------- */
+
+export const BriefEmailSchema = z.object({
+  emailId: z.string(),
+  conversationId: z.string().optional(),
+  subject: z.string(),
+  from: z.string().optional(),
+  receivedAt: z.string().optional(),
+  /** One-line reason why it matters today. */
+  reason: z.string(),
+  priority: PrioritySchema,
+  riskLevel: RiskLevelSchema.optional(),
+  webLink: z.string().optional(),
+});
+export type BriefEmail = z.infer<typeof BriefEmailSchema>;
+
+export const DailyBriefSchema = z.object({
+  /** ISO date (YYYY-MM-DD) in the user's timezone. */
+  date: z.string(),
+  language: LanguageSchema,
+  headline: z.string(),
+  /** 3–6 bullets: what matters today. */
+  highlights: z.array(z.string()),
+  priorityEmails: z.array(BriefEmailSchema),
+  openTasks: z.array(OpenTaskSchema),
+  deadlines: z.array(DeadlineSchema),
+  /** Compliance / phishing alerts detected on inbound mail since the previous brief. */
+  alerts: z.array(DetectedRiskSchema),
+  stats: z.object({ newEmails: z.number().int(), analysed: z.number().int(), awaitingReply: z.number().int(), phishingSuspected: z.number().int() }),
+  confidence: ConfidenceSchema,
+  source: z.enum(["llm", "precomputed", "heuristic"]),
+  generatedAt: z.string(),
+  auditId: z.string(),
+});
+export type DailyBrief = z.infer<typeof DailyBriefSchema>;
+
+export const DailyBriefRequestSchema = z.object({
+  date: z.string().optional(),
+  language: LanguageSchema.optional(),
+  /** Force regeneration even when a precomputed brief exists. */
+  refresh: z.boolean().default(false),
+});
+
+/** Mailbox synchronisation / precomputation status (requires GRAPH_ENABLED). */
+export const MailboxSyncStatusSchema = z.object({
+  enabled: z.boolean(),
+  state: z.enum(["idle", "syncing", "error", "disabled"]),
+  lastSyncAt: z.string().optional(),
+  nextSyncAt: z.string().optional(),
+  indexedEmails: z.number().int(),
+  precomputedAnalyses: z.number().int(),
+  pending: z.number().int(),
+  lastError: z.string().optional(),
+});
+export type MailboxSyncStatus = z.infer<typeof MailboxSyncStatusSchema>;
+
+/* ------------------------------------------------------------------------- */
 /*  8. Audit & supervision                                                   */
 /* ------------------------------------------------------------------------- */
 
@@ -822,10 +892,29 @@ export const FeatureFlagsSchema = z.object({
   embeddingsEnabled: z.boolean(),
   llmProvider: z.string(),
   llmModel: z.string(),
+  /** Smaller/faster model used for classification, triage, phishing, extraction (falls back to llmModel). */
+  llmFastModel: z.string().optional(),
+  embeddingModel: z.string().optional(),
   authMode: z.enum(["dev", "aad"]),
+  /** Mailbox sync worker (precomputation) is running. */
+  precomputeEnabled: z.boolean().default(false),
+  dailyBriefEnabled: z.boolean().default(false),
+  /** Display name of the organisation (env ORGANIZATION_NAME). */
+  organizationName: z.string().optional(),
   version: z.string(),
 });
 export type FeatureFlags = z.infer<typeof FeatureFlagsSchema>;
+
+/** Admin: runtime status of the orchestrator (queues, caches, workers). */
+export const SystemStatusSchema = z.object({
+  health: z.lazy(() => HealthSchema),
+  features: FeatureFlagsSchema,
+  llmQueue: z.object({ pending: z.number().int(), running: z.number().int(), concurrency: z.number().int(), avgLatencyMs: z.number().optional(), circuitOpen: z.boolean() }),
+  cache: z.object({ analysisHits: z.number().int(), analysisMisses: z.number().int(), embeddingHits: z.number().int(), embeddingMisses: z.number().int() }),
+  sync: MailboxSyncStatusSchema.optional(),
+  uptimeSeconds: z.number(),
+});
+export type SystemStatus = z.infer<typeof SystemStatusSchema>;
 
 export const HealthSchema = z.object({
   status: z.enum(["ok", "degraded", "down"]),
@@ -860,10 +949,19 @@ export const API_PREFIX = "/api/v1";
 
 export const Routes = {
   health: `${API_PREFIX}/health`,
+  /** Liveness (process up) and readiness (dependencies reachable) for Kubernetes probes. */
+  live: `${API_PREFIX}/live`,
+  ready: `${API_PREFIX}/ready`,
+  /** Prometheus metrics (no API prefix, protected by network policy / METRICS_TOKEN). */
+  metrics: `/metrics`,
   features: `${API_PREFIX}/config/features`,
   me: `${API_PREFIX}/me`,
 
   analyzeEmail: `${API_PREFIX}/analyze/email`,
+  /** Precomputed / cached analysis of a known email (404 when not available yet). */
+  analysisByEmail: (emailId: string) => `${API_PREFIX}/analyze/email/${encodeURIComponent(emailId)}`,
+  dailyBrief: `${API_PREFIX}/brief/daily`,
+  mailboxSync: `${API_PREFIX}/mailbox/sync`,
   analyzeThread: `${API_PREFIX}/analyze/thread`,
   draftReply: `${API_PREFIX}/draft/reply`,
 
@@ -898,6 +996,7 @@ export const Routes = {
 
   adminPolicy: `${API_PREFIX}/admin/policy`,
   adminUsers: `${API_PREFIX}/admin/users`,
+  adminSystem: `${API_PREFIX}/admin/system`,
 } as const;
 
 /* ------------------------------------------------------------------------- */
@@ -922,7 +1021,8 @@ export function isInternalAddress(address: string, internalDomains: string[]): b
 
 /** Default policy used when the database has none yet. */
 export const DEFAULT_POLICY: Policy = {
-  internalDomains: ["northbridge.example", "northbridgecapital.com"],
+  /** Overridden by env INTERNAL_DOMAINS in production. */
+  internalDomains: ["northbridge.example"],
   confidentialPatterns: ["confidential", "confidentiel", "internal only", "interne", "mandate", "mandat", "kyc", "performance report"],
   requiredClassificationLabels: ["Public", "Internal", "Confidential", "Highly Confidential"],
   sensitiveDataPatterns: [
