@@ -1,0 +1,13 @@
+# Keeps the Docker build context small for infra/docker/*.Dockerfile builds
+# (context = repo root). Each Dockerfile COPYs only the specific paths it
+# needs, but Docker still uploads everything not excluded here first.
+**/node_modules
+**/dist
+**/.next
+**/coverage
+**/.turbo
+.git
+.github
+docs
+*.md
+apps/addin/certs

@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PNPM_VERSION: "10.33.0"
+  NODE_VERSION: "20"
+
+jobs:
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Grep fallback for obvious secret patterns
+        run: |
+          set -euo pipefail
+          # Belt-and-braces in case the gitleaks action is unavailable/skipped:
+          # fail on likely AWS keys, PEM private keys, or leaked client secrets
+          # committed anywhere in the tree (excluding this workflow file itself
+          # and node_modules/.git).
+          if grep -RInE 'AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|client_secret\s*=\s*["'"'"']?[A-Za-z0-9._~+/-]{8,}' \
+              --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.next \
+              --exclude='*.lock' --exclude='ci.yml' .; then
+            echo "::error::potential secret pattern found — see matches above"
+            exit 1
+          fi
+          echo "no obvious secret pattern found"
+
+  build:
+    name: Build, typecheck, test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - { name: orchestrator, filter: "@oao/orchestrator" }
+          - { name: addin, filter: "@oao/addin" }
+          - { name: admin, filter: "@oao/admin" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build @oao/shared
+        run: pnpm --filter @oao/shared build
+
+      - name: Typecheck ${{ matrix.app.filter }}
+        run: pnpm --filter ${{ matrix.app.filter }} typecheck
+
+      - name: Test ${{ matrix.app.filter }}
+        # LLM_PROVIDER=mock / DATABASE_URL=memory let orchestrator tests run
+        # with no external Postgres/LLM dependency, matching demo mode.
+        env:
+          LLM_PROVIDER: mock
+          DATABASE_URL: memory
+          AUTH_MODE: dev
+        run: pnpm --filter ${{ matrix.app.filter }} test
+
+      - name: Build ${{ matrix.app.filter }}
+        env:
+          VITE_API_BASE_URL: https://api.oao.longbow.local/api/v1
+          VITE_ADMIN_URL: https://admin.oao.longbow.local
+          VITE_AUTH_MODE: aad
+          VITE_API_MOCK: "false"
+        run: pnpm --filter ${{ matrix.app.filter }} build
+
+      - name: Upload addin build + manifests
+        if: matrix.app.name == 'addin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: addin-dist
+          path: |
+            apps/addin/dist
+            apps/addin/manifest/manifest.xml
+            apps/addin/manifest/manifest.dev.xml
+          if-no-files-found: error
+          retention-days: 14
+
+  docker-build:
+    name: Docker build (no push)
+    runs-on: ubuntu-latest
+    needs: [build]
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - { name: orchestrator, dockerfile: infra/docker/orchestrator.Dockerfile }
+          - { name: admin, dockerfile: infra/docker/admin.Dockerfile }
+          - { name: addin, dockerfile: infra/docker/addin.Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.image.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.image.dockerfile }}
+          push: false
+          tags: oao/${{ matrix.image.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}

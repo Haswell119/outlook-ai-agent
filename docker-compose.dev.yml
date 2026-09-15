@@ -1,0 +1,32 @@
+# ---------------------------------------------------------------------------
+# Dev override: only starts Postgres/pgvector. Developers run the three apps
+# themselves with pnpm (hot reload) — see scripts/dev-up.sh.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#   pnpm --filter @oao/shared build
+#   pnpm dev   # orchestrator :8080, addin :3000, admin :3001
+# ---------------------------------------------------------------------------
+
+name: oao-dev
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oao}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oao}
+      POSTGRES_DB: ${POSTGRES_DB:-oao}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - oao_dev_postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oao} -d ${POSTGRES_DB:-oao}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  oao_dev_postgres_data:

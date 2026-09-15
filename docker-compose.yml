@@ -1,0 +1,148 @@
+# ---------------------------------------------------------------------------
+# Outlook AI Orchestrator — full stack (Postgres/pgvector + orchestrator +
+# admin + addin). Configure Longbow's internal LLM endpoint and secrets in
+# `.env` (copy from `.env.example`) before running this.
+#
+#   cp .env.example .env    # then edit LLM_*, AAD_*, ADMIN_API_TOKEN, ...
+#   docker compose up --build
+#
+# Dev mode (only Postgres, run the apps yourself with pnpm): see
+# docker-compose.dev.yml / scripts/dev-up.sh.
+# ---------------------------------------------------------------------------
+
+name: oao
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oao}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oao}
+      POSTGRES_DB: ${POSTGRES_DB:-oao}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - oao_postgres_data:/var/lib/postgresql/data
+      # Enables the `vector` extension on first init (empty data volume only).
+      - ./infra/docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oao} -d ${POSTGRES_DB:-oao}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [oao]
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: infra/docker/orchestrator.Dockerfile
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      # Override the host-facing DATABASE_URL from .env.example with the
+      # in-network compose service name.
+      DATABASE_URL: postgres://${POSTGRES_USER:-oao}:${POSTGRES_PASSWORD:-oao}@postgres:5432/${POSTGRES_DB:-oao}
+      DB_AUTO_MIGRATE: ${DB_AUTO_MIGRATE:-true}
+      PORT: 8080
+    ports:
+      - "${ORCHESTRATOR_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [oao]
+
+  admin:
+    build:
+      context: .
+      dockerfile: infra/docker/admin.Dockerfile
+    restart: unless-stopped
+    environment:
+      ORCHESTRATOR_URL: ${ORCHESTRATOR_URL:-http://orchestrator:8080}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-change-me}
+      ADMIN_MOCK: ${ADMIN_MOCK:-false}
+      PORT: 3001
+    ports:
+      - "${ADMIN_PORT:-3001}:3001"
+    depends_on:
+      orchestrator:
+        condition: service_started
+    networks: [oao]
+
+  addin:
+    build:
+      context: .
+      dockerfile: infra/docker/addin.Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.oao.longbow.local/api/v1}
+        VITE_ADMIN_URL: ${VITE_ADMIN_URL:-https://admin.oao.longbow.local}
+        VITE_AUTH_MODE: ${VITE_AUTH_MODE:-aad}
+        VITE_API_MOCK: ${VITE_API_MOCK:-false}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount a real certificate here (addin.crt / addin.key) to skip the
+      # self-signed one the container generates on first start otherwise.
+      - ./apps/addin/certs:/etc/nginx/certs:ro
+    networks: [oao]
+
+  # ---------------------------------------------------------------------------
+  # Optional: local LLM serving, for demo/dev environments that don't have
+  # access to Longbow's internal GPU endpoint. Not needed in normal operation
+  # — Longbow already runs Qwen3 on an OpenAI-compatible vLLM endpoint
+  # (see LLM_BASE_URL in .env.example); point LLM_BASE_URL at it instead of
+  # running any of this. Enable with `docker compose --profile llm up`.
+  # ---------------------------------------------------------------------------
+
+  # vllm:
+  #   image: vllm/vllm-openai:latest
+  #   profiles: ["llm"]
+  #   command:
+  #     - "--model"
+  #     - "Qwen/Qwen3-8B-Instruct"
+  #     - "--served-model-name"
+  #     - "qwen3-30b-a3b"
+  #     - "--max-model-len"
+  #     - "16384"
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - oao_vllm_cache:/root/.cache/huggingface
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+  #   networks: [oao]
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["llm"]
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - oao_ollama_data:/root/.ollama
+    networks: [oao]
+    # After start: `docker compose exec ollama ollama pull qwen3` then set
+    # LLM_BASE_URL=http://localhost:11434/v1 and LLM_MODEL=qwen3 in .env.
+    # Ollama's OpenAI-compatible endpoint does not serve embeddings for all
+    # models — prefer vLLM/TEI for bge-m3 if you need EMBEDDINGS_ENABLED=true.
+
+networks:
+  oao:
+    driver: bridge
+
+volumes:
+  oao_postgres_data:
+  oao_vllm_cache:
+  oao_ollama_data:
