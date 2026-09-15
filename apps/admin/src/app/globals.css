@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 14%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 14%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 14%;
+    --primary: 206 85% 40%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 20% 96%;
+    --secondary-foreground: 0 0% 14%;
+    --muted: 210 20% 96%;
+    --muted-foreground: 0 0% 38%;
+    --accent: 210 33% 95%;
+    --accent-foreground: 206 85% 33%;
+    --destructive: 350 60% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 30 3% 85%;
+    --input: 30 3% 85%;
+    --ring: 206 85% 40%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-[#F5F5F5] text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+}
+
+/* Recharts: remove the default focus outline on the surface. */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+.oao-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.oao-scroll::-webkit-scrollbar-thumb {
+  background: #c8c6c4;
+  border-radius: 4px;
+}
