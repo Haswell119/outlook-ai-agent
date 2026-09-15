@@ -40,7 +40,25 @@ export async function executeApprovedResults(
   for (const result of results) {
     let entry: ExecutedResult;
     if (result.status === "pending_client" && result.clientInstruction) {
-      const outcome = await executeClientAction(result.clientInstruction, o.lang);
+      let instruction = result.clientInstruction;
+      const p = instruction.parameters as Record<string, unknown>;
+      const isReply = instruction.operation === "displayReplyForm" || instruction.operation === "displayReplyAllForm";
+      if (isReply && !p.htmlBody && !p.body && o.email) {
+        // The orchestrator only decided *that* a draft is wanted: generate it now (audited by /draft/reply).
+        try {
+          const draft = await o.api.draftReply({
+            email: o.email,
+            intent: (typeof p.intent === "string" ? p.intent : "custom") as DraftIntent,
+            instructions: typeof p.instructions === "string" ? p.instructions : undefined,
+            tone: "formal",
+            language: o.lang,
+          });
+          instruction = { ...instruction, parameters: { ...p, htmlBody: textToHtml(draft.body), subject: draft.subject } };
+        } catch {
+          /* fall through: the reply form opens empty and the user writes it */
+        }
+      }
+      const outcome = await executeClientAction(instruction, o.lang);
       const status: FinalStatus = outcome.status === "executed" ? "executed" : outcome.status === "manual" ? "manual" : "failed";
       entry = { result, status, message: outcome.message };
       try {

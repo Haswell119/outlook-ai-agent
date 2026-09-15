@@ -40,7 +40,8 @@ export class ComplianceService {
     const details = { issues: evaluation.issues.map((i) => ({ code: i.code, severity: i.severity, subject: i.subject })), verdict: evaluation.verdict, externalRecipients: evaluation.facts.externalRecipients, attachments: draft.attachments.map((a) => a.name), llmUsed, recommendedActions: evaluation.recommendedActions.map((a) => a.type) };
     const event = await this.audit.record({ user, type: "compliance_check", source: { label: draft.subject || "(draft)", emailId: draft.draftId, counterpart: draft.to[0]?.address }, riskLevel: highest, approvalStatus: evaluation.verdict === "block" ? "pending" : "auto_approved", confidence, model: llmModel, correlationId, details });
     if (evaluation.issues.length && highest !== "low") {
-      await this.audit.record({ user, type: "compliance_alert", source: { label: draft.subject || "(draft)", emailId: draft.draftId, counterpart: draft.to[0]?.address }, riskLevel: highest, approvalStatus: evaluation.verdict === "block" ? "pending" : "n/a", confidence, correlationId, details: { ...details, checkAuditId: event.id } });
+      const primary = evaluation.issues.find((i) => i.severity === highest) ?? evaluation.issues[0];
+      await this.audit.record({ user, type: "compliance_alert", source: { label: draft.subject || "(draft)", emailId: draft.draftId, counterpart: draft.to[0]?.address }, riskLevel: highest, approvalStatus: evaluation.verdict === "block" ? "pending" : "n/a", confidence, correlationId, details: { ...details, category: primary?.code, checkAuditId: event.id } });
     }
     return ComplianceCheckResponseSchema.parse({ issues: evaluation.issues, recommendedActions: evaluation.recommendedActions, verdict: evaluation.verdict, confidence, auditId: event.id, checkedAt: nowIso() });
   }

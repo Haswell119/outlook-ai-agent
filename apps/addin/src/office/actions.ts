@@ -122,10 +122,11 @@ export async function executeClientAction(instruction: ClientInstruction, lang: 
         if (!isSetSupported("Mailbox", "1.8") || typeof item.removeAttachmentAsync !== "function") {
           return { status: "manual", message: t("compliance.actionNotAvailable") };
         }
-        let attachmentId = str(p, "attachmentId", "id");
+        const firstOf = (v: unknown): string | undefined => (Array.isArray(v) && typeof v[0] === "string" ? v[0] : undefined);
+        let attachmentId = str(p, "attachmentId", "id") ?? firstOf(p.attachmentIds);
         if (!attachmentId) {
           const list = await asyncResult<Office.AttachmentDetailsCompose[]>((cb) => item.getAttachmentsAsync(cb));
-          const name = str(p, "name", "attachmentName");
+          const name = str(p, "name", "attachmentName") ?? firstOf(p.attachmentNames);
           const target = list.find((a) => (name ? a.name === name : !a.isInline));
           attachmentId = target?.id;
         }

@@ -33,11 +33,12 @@
 | GET | `/api/v1/compliance/escalations` | `compliance` | query: `{ status? }` | `z.array(EscalationSchema)` |
 | POST | `/api/v1/compliance/escalations` | `user` | `EscalationRequestSchema` | `EscalationSchema` |
 | GET | `/api/v1/compliance/escalations/:id` | `compliance` | — | `EscalationSchema` |
-| POST | `/api/v1/compliance/escalations/:id/decision` | `compliance` | `{ status: "approved"\|"rejected", comment? }` | `EscalationSchema` |
-| POST | `/api/v1/automations/observe` | `user` | `z.array(UserActionEventSchema)` | `{ accepted: number }` |
+| POST | `/api/v1/compliance/escalations/:id/decision` | `compliance`/`admin` | `EscalationDecisionRequestSchema` (`{ decision: "approved"\|"rejected", comment? }`) | `EscalationSchema` |
+| POST | `/api/v1/automations/observe` | `user` | `{ events: UserActionEvent[] }` (un tableau nu ou un événement seul sont aussi acceptés) | `202 { stored: number }` |
 | POST | `/api/v1/automations/detect` | `user` | — | `z.array(AutomationSchema)` (nouvellement détectées) |
 | GET | `/api/v1/automations` | `user` | query: `{ status? }` | `z.array(AutomationSchema)` |
 | GET | `/api/v1/automations/:id` | `user` | — | `AutomationSchema` |
+| PATCH | `/api/v1/automations/:id` | `user` | `AutomationPatchSchema` (« Edit rule », `status: "paused"\|"active"`) | `AutomationSchema` (une règle modifiée repasse en `proposed` et doit être re-simulée) |
 | POST | `/api/v1/automations/:id/simulate` | `user` | `SimulateAutomationRequestSchema` | `AutomationSchema` (avec `lastSimulation`) |
 | POST | `/api/v1/automations/:id/approve` | `user` | `AutomationDecisionRequestSchema` | `AutomationSchema` |
 | POST | `/api/v1/automations/:id/reject` | `user` | `AutomationDecisionRequestSchema` | `AutomationSchema` |
@@ -48,7 +49,7 @@
 | POST | `/api/v1/feedback` | `user` | `FeedbackRequestSchema` | `{ ok: true }` |
 | GET | `/api/v1/admin/policy` | `admin` | — | `PolicySchema` |
 | PUT | `/api/v1/admin/policy` | `admin` | `PolicySchema` (partiel accepté) | `PolicySchema` |
-| GET | `/api/v1/admin/users` | `admin` | query: `{ page?, pageSize? }` | `z.array(UserIdentitySchema)` |
+| GET | `/api/v1/admin/users` | `admin` | — | `z.array(AdminUserSchema)` |
 
 Toute erreur suit `ApiErrorSchema` avec un code parmi : `validation_error`
 (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict`

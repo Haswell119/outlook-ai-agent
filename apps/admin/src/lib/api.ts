@@ -332,7 +332,7 @@ export async function decideEscalation(
     Routes.escalationDecision(id),
     EscalationSchema,
     () => store().escalations.find((e) => e.id === id) as Escalation,
-    { method: "POST", body: JSON.stringify({ decision, comment }) },
+    { method: "POST", body: JSON.stringify({ decision: decision === "approve" ? "approved" : "rejected", comment }) },
   );
 }
 

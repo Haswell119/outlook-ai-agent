@@ -438,6 +438,32 @@ export const ApproveActionsResponseSchema = z.object({
 });
 export type ApproveActionsResponse = z.infer<typeof ApproveActionsResponseSchema>;
 
+/**
+ * Operations the add-in executes with Office.js for `pending_client` results.
+ * Parameters (all optional unless stated):
+ *  - displayReplyForm / displayReplyAllForm: { htmlBody | body, subject, intent, instructions } — when no body is
+ *    provided the add-in first calls `POST /draft/reply` with `intent`/`instructions`.
+ *  - addCategory: { category }
+ *  - flag: {}  (no Office.js API → user guidance; Graph executes it server-side when enabled)
+ *  - displayNewAppointmentForm: { subject, body, start?, end?, asTask? }
+ *  - openMoveDialog: { folder }
+ *  - applyLabel: { label, labelId? }
+ *  - removeAttachment: { attachmentId? | attachmentIds?[], name? | attachmentNames?[] } (compose only)
+ *  - none: {}
+ */
+export const ClientOperationSchema = z.enum([
+  "displayReplyForm",
+  "displayReplyAllForm",
+  "addCategory",
+  "flag",
+  "displayNewAppointmentForm",
+  "openMoveDialog",
+  "applyLabel",
+  "removeAttachment",
+  "none",
+]);
+export type ClientOperation = z.infer<typeof ClientOperationSchema>;
+
 /** Sent by the add-in after executing a `pending_client` action. */
 export const ReportActionResultRequestSchema = z.object({
   actionId: z.string(),
@@ -531,8 +557,19 @@ export const EscalationSchema = z.object({
   decidedAt: z.string().optional(),
   decisionComment: z.string().optional(),
   issues: z.array(ComplianceIssueSchema).default([]),
+  /** Draft the escalation is about (recipients, attachments…), when it came from compose mode. */
+  draft: ComposeContextSchema.optional(),
+  /** Proposed action blocked until the compliance decision, when any. */
+  actionId: z.string().optional(),
 });
 export type Escalation = z.infer<typeof EscalationSchema>;
+
+/** Body of `POST /compliance/escalations/:id/decision` (compliance or admin role). */
+export const EscalationDecisionRequestSchema = z.object({
+  decision: z.enum(["approved", "rejected"]),
+  comment: z.string().optional(),
+});
+export type EscalationDecisionRequest = z.infer<typeof EscalationDecisionRequestSchema>;
 
 /* ------------------------------------------------------------------------- */
 /*  7. Automation Coach                                                      */
@@ -618,6 +655,20 @@ export const AutomationSchema = z.object({
     .optional(),
 });
 export type Automation = z.infer<typeof AutomationSchema>;
+
+/** Body of `PATCH /automations/:id` ("Edit rule" / pause). */
+export const AutomationPatchSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  trigger: AutomationTriggerSchema.optional(),
+  steps: z.array(AutomationStepSchema).optional(),
+  status: z.enum(["paused", "active"]).optional(),
+  comment: z.string().optional(),
+});
+export type AutomationPatch = z.infer<typeof AutomationPatchSchema>;
+
+/** `GET /automations` and `POST /automations/detect` return a plain array. */
+export const AutomationListSchema = z.array(AutomationSchema);
 
 export const SimulateAutomationRequestSchema = z.object({
   sampleSize: z.number().int().min(1).max(50).default(10),
@@ -727,6 +778,18 @@ export type AuditStats = z.infer<typeof AuditStatsSchema>;
 /* ------------------------------------------------------------------------- */
 /*  9. Policies (admin)                                                      */
 /* ------------------------------------------------------------------------- */
+
+/** Row of `GET /admin/users` (admin role). */
+export const AdminUserSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  displayName: z.string().optional(),
+  roles: z.array(z.enum(["user", "compliance", "admin"])).default(["user"]),
+  /** Number of audited events for this user. */
+  actions: z.number().int().nonnegative().default(0),
+  lastActivityAt: z.string().optional(),
+});
+export type AdminUser = z.infer<typeof AdminUserSchema>;
 
 export const PolicySchema = z.object({
   /** Domains considered internal (e.g. ["longbow.ch"]). */

@@ -136,9 +136,10 @@ export interface ActionRepository {
 
 /* ---------------------------- Escalations ------------------------------ */
 
-export interface StoredEscalation extends Escalation {
+export interface StoredEscalation extends Omit<Escalation, "draft"> {
   userId: string;
   actionId?: string;
+  /** Raw draft as received (validated with ComposeContextSchema when exposed). */
   draft?: unknown;
 }
 

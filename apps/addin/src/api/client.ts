@@ -123,7 +123,7 @@ export function createLiveClient(options: LiveClientOptions): OaoApi {
     reportActionResult: (id, req) => request("POST", Routes.reportActionResult(id), req, null),
     complianceCheck: (req) => request("POST", Routes.complianceCheck, req, ComplianceCheckResponseSchema),
     createEscalation: (req) => request("POST", Routes.escalations, req, EscalationSchema),
-    observe: (event) => request("POST", Routes.automationsObserve, event, null, { timeoutMs: 10_000 }),
+    observe: (event) => request("POST", Routes.automationsObserve, { events: [event] }, null, { timeoutMs: 10_000 }),
     listAutomations: async () => {
       const data = await request("GET", Routes.automations, undefined, AutomationListSchema);
       return Array.isArray(data) ? data : data.items;

@@ -1,17 +1,7 @@
 import { z } from "zod";
-import { UserIdentitySchema } from "@oao/shared";
-
-/**
- * `GET /api/v1/admin/users` has a route in the contract but no response schema,
- * so the dashboard pins the shape it needs here. Keep it in sync with
- * `packages/shared/src/index.ts` if a schema is added there later.
- */
-export const AdminUserSchema = UserIdentitySchema.extend({
-  /** Number of audited actions over the queried period. */
-  actions: z.number().int().nonnegative().default(0),
-  lastActivityAt: z.string().optional(),
-});
-export type AdminUser = z.infer<typeof AdminUserSchema>;
+import { AdminUserSchema } from "@oao/shared";
+export { AdminUserSchema };
+export type { AdminUser } from "@oao/shared";
 
 export const AdminUsersResponseSchema = z.union([
   z.array(AdminUserSchema),

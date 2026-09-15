@@ -1,5 +1,5 @@
 import type { Escalation } from "@oao/shared";
-import { EscalationSchema } from "@oao/shared";
+import { ComposeContextSchema, EscalationSchema } from "@oao/shared";
 import { hasRole } from "../auth/identity.js";
 import { AppError } from "../errors.js";
 import type { StoredEscalation } from "../ports/repositories.js";
@@ -59,4 +59,7 @@ export class EscalationService {
   }
 }
 
-const toPublic = (e: StoredEscalation): Escalation => EscalationSchema.parse({ id: e.id, status: e.status, requestedBy: e.requestedBy, requestedAt: e.requestedAt, reason: e.reason, decidedBy: e.decidedBy, decidedAt: e.decidedAt, decisionComment: e.decisionComment, issues: e.issues });
+const toPublic = (e: StoredEscalation): Escalation => {
+  const draft = e.draft ? ComposeContextSchema.safeParse(e.draft) : undefined;
+  return EscalationSchema.parse({ id: e.id, status: e.status, requestedBy: e.requestedBy, requestedAt: e.requestedAt, reason: e.reason, decidedBy: e.decidedBy, decidedAt: e.decidedAt, decisionComment: e.decisionComment, issues: e.issues, actionId: e.actionId, draft: draft?.success ? draft.data : undefined });
+};

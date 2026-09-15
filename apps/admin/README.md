@@ -155,10 +155,10 @@ EXPOSE 3001
 CMD ["node", "apps/admin/server.js"]
 ```
 
-This exact Dockerfile ships as `apps/admin/Dockerfile`:
+The maintained Dockerfile lives in `infra/docker/admin.Dockerfile` (used by `docker-compose.yml`):
 
 ```bash
-docker build -f apps/admin/Dockerfile -t oao-admin:0.1.0 .
+docker build -f infra/docker/admin.Dockerfile -t oao-admin:0.1.0 .
 docker run --rm -p 3001:3001 \
   -e ORCHESTRATOR_URL=http://orchestrator:8080 \
   -e ADMIN_API_TOKEN=change-me \

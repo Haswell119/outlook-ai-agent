@@ -1,12 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { z } from "zod";
-import { ComplianceCheckRequestSchema, EscalationRequestSchema, PhishingCheckRequestSchema, Routes } from "@oao/shared";
+import { ComplianceCheckRequestSchema, EscalationDecisionRequestSchema, EscalationRequestSchema, PhishingCheckRequestSchema, Routes } from "@oao/shared";
 import { requireRole } from "../../auth/plugin.js";
 import type { Container } from "../../container.js";
 import { parseBody, requestContext } from "../helpers.js";
-
-/** Not in the shared contract (yet): decision body for POST /compliance/escalations/:id/decision. */
-export const EscalationDecisionSchema = z.object({ decision: z.enum(["approved", "rejected"]), comment: z.string().optional() });
 
 export async function complianceRoutes(app: FastifyInstance, c: Container) {
   app.post(Routes.complianceCheck, async (req) => {
@@ -26,7 +22,7 @@ export async function complianceRoutes(app: FastifyInstance, c: Container) {
   });
   app.get(Routes.escalation(":id"), async (req) => c.services.escalations.get(requestContext(req, c.cfg), (req.params as { id: string }).id));
   app.post(Routes.escalationDecision(":id"), { preHandler: requireRole("compliance", "admin") }, async (req) => {
-    const body = parseBody(EscalationDecisionSchema, req.body);
+    const body = parseBody(EscalationDecisionRequestSchema, req.body);
     return c.services.escalations.decide(requestContext(req, c.cfg), (req.params as { id: string }).id, body.decision, body.comment);
   });
 }

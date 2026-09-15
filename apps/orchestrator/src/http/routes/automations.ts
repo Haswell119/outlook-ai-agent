@@ -6,7 +6,10 @@ import { AutomationPatchSchema } from "../../services/AutomationCoachService.js"
 import { parseBody, requestContext } from "../helpers.js";
 
 /** Accepts `{ events: [...] }` or a bare array of UserActionEvent. */
-const ObserveSchema = z.union([z.object({ events: z.array(UserActionEventSchema).min(1).max(500) }), z.array(UserActionEventSchema).min(1).max(500)]).transform((v) => (Array.isArray(v) ? v : v.events));
+/** Accepts `{ events: [...] }`, a bare array, or a single `UserActionEvent`. */
+const ObserveSchema = z
+  .union([z.object({ events: z.array(UserActionEventSchema).min(1).max(500) }), z.array(UserActionEventSchema).min(1).max(500), UserActionEventSchema])
+  .transform((v) => (Array.isArray(v) ? v : "events" in v ? v.events : [v]));
 
 export async function automationRoutes(app: FastifyInstance, c: Container) {
   const id = (req: { params: unknown }) => (req.params as { id: string }).id;

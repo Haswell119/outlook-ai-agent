@@ -1,6 +1,6 @@
 import type { Automation, AutomationStep, AutomationTrigger, UserActionEvent } from "@oao/shared";
-import { AutomationSchema, AutomationStepSchema, AutomationTriggerSchema } from "@oao/shared";
-import { z } from "zod";
+import { AutomationPatchSchema, AutomationSchema } from "@oao/shared";
+import type { AutomationPatch } from "@oao/shared";
 import { hasRole } from "../auth/identity.js";
 import { automationFingerprint, detectAutomations } from "../domain/automation/detector.js";
 import { simulateAutomation, type SimulationEmail } from "../domain/automation/simulation.js";
@@ -10,14 +10,8 @@ import { newId, nowIso } from "../util/ids.js";
 import type { AuditService } from "./AuditService.js";
 import type { RequestContext, ServiceDeps } from "./context.js";
 
-export const AutomationPatchSchema = z.object({
-  name: z.string().min(1).optional(),
-  description: z.string().optional(),
-  trigger: AutomationTriggerSchema.optional(),
-  steps: z.array(AutomationStepSchema).min(1).optional(),
-  status: z.enum(["paused", "active"]).optional(),
-});
-export type AutomationPatch = z.infer<typeof AutomationPatchSchema>;
+export { AutomationPatchSchema };
+export type { AutomationPatch };
 
 const DETECTION_WINDOW_DAYS = 30;
 
@@ -124,7 +118,7 @@ export class AutomationCoachService {
     if (patch.name) a.name = patch.name;
     if (patch.description !== undefined) a.description = patch.description;
     if (patch.trigger) a.trigger = patch.trigger as AutomationTrigger;
-    if (patch.steps) a.steps = patch.steps as AutomationStep[];
+    if (patch.steps && patch.steps.length) a.steps = patch.steps as AutomationStep[];
     if (patch.trigger || patch.steps) {
       a.fingerprint = automationFingerprint(a.trigger, a.steps);
       a.lastSimulation = undefined;
