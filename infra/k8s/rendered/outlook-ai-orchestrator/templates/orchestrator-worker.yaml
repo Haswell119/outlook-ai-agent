@@ -1,0 +1,162 @@
+---
+# Source: outlook-ai-orchestrator/templates/orchestrator-worker.yaml
+# ClusterIP (not routed through the Ingress) so Prometheus can scrape the
+# worker's /metrics — sync lag and queue depth only exist on this role.
+apiVersion: v1
+kind: Service
+metadata:
+  name: oao-worker
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator-worker
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/component: orchestrator-worker
+---
+# Source: outlook-ai-orchestrator/templates/orchestrator-worker.yaml
+# Background role: mailbox sync (Graph), precompute, daily brief and retention
+# jobs. Leader election uses a PostgreSQL advisory lock, so a rolling restart
+# can never run two schedulers at once — but keep replicaCount at 1: a second
+# replica would only sit idle waiting for the lock.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oao-worker
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator-worker
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: orchestrator-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: outlook-ai-orchestrator
+        app.kubernetes.io/instance: oao
+        app.kubernetes.io/component: orchestrator-worker
+      annotations:
+        checksum/config: 32b527c926866ed9817ffe8b9f72ee4ab9082e634e5ce9be3809ea18df96eea6
+    spec:
+      serviceAccountName: oao
+      automountServiceAccountToken: false
+      
+      imagePullSecrets:
+      - name: ghcr-pull
+      securityContext:
+        fsGroup: 1001
+        runAsGroup: 1001
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: orchestrator
+          image: "ghcr.io/northbridge-capital/oao-orchestrator:0.1.0"
+          imagePullPolicy: IfNotPresent
+          command: ["node"]
+          args: ["apps/orchestrator/dist/server.js"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: ROLE
+              value: worker
+            
+            - name: LLM_API_KEY_FILE
+              value: "/run/secrets/oao/LLM_API_KEY"
+            - name: AAD_CLIENT_SECRET_FILE
+              value: "/run/secrets/oao/AAD_CLIENT_SECRET"
+            - name: ADMIN_API_TOKEN_FILE
+              value: "/run/secrets/oao/ADMIN_API_TOKEN"
+            - name: METRICS_TOKEN_FILE
+              value: "/run/secrets/oao/METRICS_TOKEN"
+            - name: DATABASE_URL_FILE
+              value: "/run/secrets/oao/DATABASE_URL"
+          envFrom:
+            - configMapRef:
+                name: oao-config
+          livenessProbe:
+            httpGet:
+              path: /api/v1/live
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /api/v1/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "2"
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            
+            - name: secrets
+              mountPath: "/run/secrets/oao"
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        
+        - name: secrets
+          secret:
+            secretName: oao-secrets
+            defaultMode: 0400
+            items:
+              - key: LLM_API_KEY
+                path: LLM_API_KEY
+              - key: AAD_CLIENT_SECRET
+                path: AAD_CLIENT_SECRET
+              - key: ADMIN_API_TOKEN
+                path: ADMIN_API_TOKEN
+              - key: METRICS_TOKEN
+                path: METRICS_TOKEN
+              - key: DATABASE_URL
+                path: DATABASE_URL

@@ -1,0 +1,188 @@
+---
+# Source: outlook-ai-orchestrator/templates/postgres.yaml
+# ---------------------------------------------------------------------------
+# In-cluster PostgreSQL 16 + pgvector, single replica.
+# Sized for ~50 users (see values-nkp.yaml). It is NOT highly available:
+# a node failure means a restart on another node with the same PVC, so the
+# storage class must support ReadWriteOnce re-attachment (nutanix-volume does).
+# Set postgres.enabled=false to use an external/managed database instead.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oao-postgres-init
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: postgres
+data:
+  01-extensions.sql: |
+    -- Runs once, on first initialisation of the data volume.
+    CREATE EXTENSION IF NOT EXISTS vector;
+    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+---
+# Source: outlook-ai-orchestrator/templates/postgres.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: oao-postgres
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: postgres
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/component: postgres
+---
+# Source: outlook-ai-orchestrator/templates/postgres.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: oao-postgres
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: oao-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: outlook-ai-orchestrator
+        app.kubernetes.io/instance: oao
+        app.kubernetes.io/component: postgres
+    spec:
+      serviceAccountName: oao
+      automountServiceAccountToken: false
+      
+      imagePullSecrets:
+      - name: ghcr-pull
+      securityContext:
+        fsGroup: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+        runAsUser: 999
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: postgres
+          image: "pgvector/pgvector:pg16"
+          imagePullPolicy: IfNotPresent
+          args:
+            - -c
+            - max_connections=100
+            - -c
+            - shared_buffers=512MB
+            - -c
+            - effective_cache_size=1536MB
+            - -c
+            - work_mem=16MB
+            - -c
+            - maintenance_work_mem=128MB
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_USER
+              value: "oao"
+            - name: POSTGRES_DB
+              value: "oao"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oao-secrets
+                  key: POSTGRES_PASSWORD
+            # The image refuses to initialise a non-empty mount point, so the
+            # data directory is a sub-path of the volume.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+            - name: run
+              mountPath: /var/run/postgresql
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "oao", "-d", "oao"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "oao", "-d", "oao"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            limits:
+              cpu: "2"
+              memory: 4Gi
+            requests:
+              cpu: "1"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
+      volumes:
+        - name: init
+          configMap:
+            name: oao-postgres-init
+        - name: run
+          emptyDir:
+            sizeLimit: 16Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          helm.sh/chart: outlook-ai-orchestrator-0.1.0
+          app.kubernetes.io/name: outlook-ai-orchestrator
+          app.kubernetes.io/instance: oao
+          app.kubernetes.io/version: "0.1.0"
+          app.kubernetes.io/managed-by: Helm
+          app.kubernetes.io/part-of: outlook-ai-orchestrator
+          app.kubernetes.io/component: postgres
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: "nutanix-volume"
+        resources:
+          requests:
+            storage: "20Gi"

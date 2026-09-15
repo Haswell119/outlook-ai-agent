@@ -65,7 +65,46 @@ pnpm test
 pnpm build
 ```
 
-Pour les changements touchant l'infra (`infra/`, `docker-compose.yml`,
-`.github/workflows/`) : valider les Dockerfiles/YAML localement (`bash -n`
-sur les scripts, `docker build` sur les Dockerfiles modifiés, `kubectl
-kustomize infra/k8s` si `kubectl` est disponible).
+## Changements d'infrastructure
+
+Périmètre concerné : `infra/**`, `docker-compose*.yml`, `.github/**`,
+`scripts/**`, `.env.example`.
+
+```bash
+# Chart Helm (source de vérité du déploiement)
+helm lint infra/helm/outlook-ai-orchestrator
+helm lint infra/helm/outlook-ai-orchestrator -f infra/helm/outlook-ai-orchestrator/values-nkp.yaml
+helm template oao infra/helm/outlook-ai-orchestrator -n oao | kubeconform -strict -summary -ignore-missing-schemas -
+
+# Manifests générés (ne jamais les éditer à la main)
+pnpm k8s:render
+
+# Scripts multi-OS
+node --check scripts/*.mjs scripts/lib/*.mjs
+node scripts/smoke.mjs --help
+
+# Compose et images
+docker compose config -q
+docker compose -f docker-compose.prod.yml config -q
+docker build -f infra/docker/orchestrator.Dockerfile -t oao/orchestrator:dev .
+```
+
+Règles :
+
+- **Le chart Helm est la source unique de vérité** du déploiement.
+  `infra/k8s/rendered/` est généré par `pnpm k8s:render` : corriger le chart,
+  jamais la sortie.
+- **`Chart.yaml: appVersion` doit rester égal à `package.json: version`** — la
+  CI le vérifie.
+- **Pas de bash dans l'outillage** : tout script développeur est un module
+  Node ESM dans `scripts/`, exposé par un alias `pnpm`, et doit fonctionner
+  sur Windows, macOS et Linux (la CI l'exécute sur les trois). Pas de `curl`,
+  pas de `sleep`, pas de chemin POSIX en dur.
+- **Jamais de secret**, même d'exemple réaliste : les valeurs de démonstration
+  sont vides ou explicitement des placeholders. Organisation fictive
+  « Northbridge Capital », hôtes en `*.northbridge.example`.
+- **Toute nouvelle dépendance réseau sortante** d'un composant doit être
+  ajoutée aux NetworkPolicies du chart (default-deny) et documentée dans
+  `docs/SECURITY.md` §9.
+- **Toute nouvelle variable d'environnement** apparaît dans `.env.example`,
+  dans `templates/_helpers.tpl` (`oao.config.data`) et dans `values.yaml`.

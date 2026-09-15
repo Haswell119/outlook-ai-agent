@@ -1,13 +1,53 @@
 # Keeps the Docker build context small for infra/docker/*.Dockerfile builds
-# (context = repo root). Each Dockerfile COPYs only the specific paths it
-# needs, but Docker still uploads everything not excluded here first.
+# (context = repo root). Each Dockerfile COPYs only the paths it needs, but
+# Docker still uploads everything not excluded here first.
+
+# --- build outputs & caches -------------------------------------------------
 **/node_modules
 **/dist
 **/.next
+**/out
+**/build
 **/coverage
 **/.turbo
+**/.pnpm-store
+**/*.tsbuildinfo
+**/.vite
+**/test-results
+**/playwright-report
+**/blob-report
+
+# --- vcs, ci & tooling ------------------------------------------------------
 .git
+.gitignore
+.gitattributes
 .github
+.editorconfig
+.vscode
+.idea
+
+# --- infra not needed inside images ----------------------------------------
+infra/helm
+infra/gitops
+infra/k8s
+docker-compose*.yml
+scripts
+
+# --- docs & screenshots (several MB of PNG) ---------------------------------
 docs
+**/docs/screenshots
 *.md
-apps/addin/certs
+**/*.md
+
+# --- local secrets / certificates (must never enter a layer) ---------------
+.env
+.env.*
+!.env.example
+**/certs
+**/*.pem
+**/*.key
+**/*.crt
+**/*.p12
+**/*.pfx
+*.log
+.DS_Store

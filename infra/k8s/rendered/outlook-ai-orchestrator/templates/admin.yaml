@@ -1,0 +1,170 @@
+---
+# Source: outlook-ai-orchestrator/templates/admin.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: oao-admin
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: admin
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/component: admin
+---
+# Source: outlook-ai-orchestrator/templates/admin.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oao-admin
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: admin
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: admin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: outlook-ai-orchestrator
+        app.kubernetes.io/instance: oao
+        app.kubernetes.io/component: admin
+      annotations:
+        checksum/config: 32b527c926866ed9817ffe8b9f72ee4ab9082e634e5ce9be3809ea18df96eea6
+    spec:
+      serviceAccountName: oao
+      automountServiceAccountToken: false
+      
+      imagePullSecrets:
+      - name: ghcr-pull
+      securityContext:
+        fsGroup: 1001
+        runAsGroup: 1001
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: admin
+          image: "ghcr.io/northbridge-capital/oao-admin:0.1.0"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3001
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3001"
+            - name: HOSTNAME
+              value: 0.0.0.0
+            - name: ORCHESTRATOR_URL
+              value: "http://oao-api:8080"
+            - name: ADMIN_MOCK
+              value: "false"
+            - name: ADMIN_AUTH_MODE
+              value: "aad"
+            - name: DEFAULT_LANGUAGE
+              value: "fr"
+            - name: ORGANIZATION_NAME
+              value: "Northbridge Capital"
+            - name: AUTH_TRUST_HOST
+              value: "true"
+            - name: AUTH_URL
+              value: "https://admin.oao.northbridge.example"
+            - name: AUTH_MICROSOFT_ENTRA_ID_ID
+              value: ""
+            - name: AUTH_MICROSOFT_ENTRA_ID_TENANT_ID
+              value: ""
+            - name: AUTH_MICROSOFT_ENTRA_ID_ISSUER
+              value: "https://login.microsoftonline.com//v2.0"
+            - name: AUTH_MICROSOFT_ENTRA_ID_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oao-secrets
+                  key: AUTH_MICROSOFT_ENTRA_ID_SECRET
+                  optional: true
+            - name: AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oao-secrets
+                  key: AUTH_SECRET
+                  optional: true
+            - name: ADMIN_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: oao-secrets
+                  key: ADMIN_API_TOKEN
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # Next.js writes its ISR/fetch cache next to the standalone server.
+            - name: next-cache
+              mountPath: /app/apps/admin/.next/cache
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: next-cache
+          emptyDir:
+            sizeLimit: 256Mi

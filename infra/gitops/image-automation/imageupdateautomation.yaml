@@ -1,0 +1,30 @@
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageUpdateAutomation
+metadata:
+  name: oao
+  namespace: flux-system
+spec:
+  interval: 30m
+  sourceRef:
+    kind: GitRepository
+    name: oao
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: flux-bot
+        email: flux-bot@northbridge.example
+      messageTemplate: |
+        chore(gitops): bump image tags
+
+        {{ range .Updated.Images }}- {{ . }}
+        {{ end }}
+    push:
+      # Branche dédiée : la mise à jour passe par une PR revue, jamais par un
+      # push direct sur main (exigence de traçabilité des changements).
+      branch: flux-image-updates
+  update:
+    strategy: Setters
+    path: ./infra/gitops/envs

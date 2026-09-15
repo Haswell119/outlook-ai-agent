@@ -1,0 +1,163 @@
+---
+# Source: outlook-ai-orchestrator/templates/job-migrate.yaml
+# ---------------------------------------------------------------------------
+# SQL migrations, as a Helm hook (pre-install + pre-upgrade): the schema is
+# always in place before the new orchestrator pods start.
+#
+# Hooks run BEFORE the release's own ConfigMap/Secret exist on a first
+# install, so the Job gets its own hook-scoped copies (weight -10). They are
+# deleted once the hook succeeds; a failed Job and its config are kept for
+# post-mortem (kubectl logs job/<name>).
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oao-migrate-config
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+  NODE_ENV: "production"
+  PORT: "8080"
+  HOST: "0.0.0.0"
+  APP_VERSION: "0.1.0"
+  ORGANIZATION_NAME: "Northbridge Capital"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  DEFAULT_LANGUAGE: "fr"
+  INTERNAL_DOMAINS: "northbridge.example"
+  CORS_ORIGINS: "https://addin.oao.northbridge.example"
+  RATE_LIMIT_PER_MINUTE: "120"
+  BODY_LIMIT_BYTES: "2.097152e+06"
+  REQUEST_TIMEOUT_MS: "30000"
+  SHUTDOWN_TIMEOUT_MS: "15000"
+  AUDIT_STORE_CONTENT: "false"
+  AUDIT_RETENTION_DAYS: "1095"
+  INDEX_RETENTION_DAYS: "365"
+  METRICS_ENABLED: "true"
+  API_DOCS_ENABLED: "false"
+  LLM_PROVIDER: "openai-compatible"
+  LLM_BASE_URL: "http://gpu-node.northbridge.example:8000/v1"
+  LLM_MODEL: "qwen3-30b-a3b"
+  LLM_TIMEOUT_MS: "60000"
+  LLM_MAX_TOKENS: "2048"
+  LLM_JSON_MODE: "auto"
+  LLM_CONCURRENCY: "4"
+  LLM_CIRCUIT_FAILURES: "5"
+  LLM_CIRCUIT_COOLDOWN_MS: "30000"
+  LLM_INPUT_MAX_CHARS: "24000"
+  LLM_QUEUE_TIMEOUT_MS: "30000"
+  EMBEDDINGS_ENABLED: "true"
+  EMBEDDING_MODEL: "bge-m3"
+  EMBEDDING_DIMENSIONS: "1024"
+  EMBEDDING_BATCH_SIZE: "16"
+  AUTH_MODE: "aad"
+  AAD_TENANT_ID: ""
+  AAD_CLIENT_ID: ""
+  AAD_ALLOWED_TENANTS: ""
+  AAD_REQUIRE_SCOPE: "access_as_user"
+  AAD_CLOCK_SKEW_SECONDS: "60"
+  ADMIN_EMAILS: ""
+  COMPLIANCE_EMAILS: ""
+  GRAPH_ENABLED: "false"
+  GRAPH_AUTH_MODE: "obo"
+  SYNC_GROUP_ID: ""
+  SYNC_USERS: ""
+  SYNC_INTERVAL_MINUTES: "15"
+  SYNC_MAX_MESSAGES_PER_RUN: "200"
+  PRECOMPUTE_ENABLED: "false"
+  DAILY_BRIEF_ENABLED: "false"
+  DAILY_BRIEF_HOUR: "7"
+  TRIAGE_ENABLED: "true"
+  ANALYSIS_CACHE_ENABLED: "true"
+  ANALYSIS_CACHE_TTL_HOURS: "72"
+  DEMO_SEED: "false"
+  DB_AUTO_MIGRATE: "false"
+---
+# Source: outlook-ai-orchestrator/templates/job-migrate.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: oao-migrate
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: outlook-ai-orchestrator
+        app.kubernetes.io/instance: oao
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: oao
+      automountServiceAccountToken: false
+      
+      imagePullSecrets:
+      - name: ghcr-pull
+      securityContext:
+        fsGroup: 1001
+        runAsGroup: 1001
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: "ghcr.io/northbridge-capital/oao-orchestrator:0.1.0"
+          imagePullPolicy: IfNotPresent
+          command: ["node"]
+          args: ["apps/orchestrator/dist/adapters/db/migrate.js"]
+          env:
+            - name: ROLE
+              value: migrate
+          envFrom:
+            - configMapRef:
+                name: oao-migrate-config
+            - secretRef:
+                name: oao-secrets
+                optional: true
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

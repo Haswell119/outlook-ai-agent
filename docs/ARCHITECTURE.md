@@ -176,7 +176,7 @@ orchestrator with an admin bearer token (`ADMIN_API_TOKEN`, dev) or AAD (prod).
 ```
 # --- AI model (OpenAI-compatible endpoint hosted internally) ---
 LLM_PROVIDER=openai-compatible        # openai-compatible | mock
-LLM_BASE_URL=http://gpu-node.northbridge.local:8000/v1
+LLM_BASE_URL=http://gpu-node.northbridge.example:8000/v1
 LLM_API_KEY=                          # optional
 LLM_MODEL=qwen3-30b-a3b
 LLM_TIMEOUT_MS=60000
@@ -217,3 +217,92 @@ DEFAULT_LANGUAGE=fr
 | 2     | Validated actions (HITL), conversational search, thread synthesis                 | done in this repo |
 | 3     | Multi-email chat, auto-categorisation, Automation Coach + simulation              | done in this repo |
 | 4     | Pre-send compliance checks, attachment analysis (text), anti-phishing, dashboard  | done in this repo |
+
+## 10. Déploiement NKP
+
+> Cette section décrit la **topologie de déploiement** (comment le système est
+> packagé et exécuté), pas les internes applicatifs. Procédure pas-à-pas :
+> [`NKP.md`](NKP.md) · Exploitation : [`OPERATIONS.md`](OPERATIONS.md).
+
+### 10.1 Un processus, deux rôles
+
+Le même binaire (`apps/orchestrator/dist/server.js`, la même image) sert deux
+rôles, sélectionnés par la variable `ROLE` :
+
+| `ROLE` | Ce qui tourne | Réplicas | Pourquoi |
+|---|---|---|---|
+| `api` | serveur HTTP `/api/v1/*`, `/metrics` | 2 → 6 (HPA) | sans état, scalable horizontalement |
+| `worker` | mailbox sync (Graph), précalcul, daily brief, rétention | **1** | un seul ordonnanceur ; élection de leader par advisory lock PostgreSQL |
+| `all` | les deux | 1 | dev, démo, Docker mono-machine |
+
+Séparer les deux rôles évite qu'un pic de trafic interactif (volet Outlook)
+n'entre en concurrence avec les jobs de fond pour les appels au GPU, et permet
+de redémarrer l'API sans interrompre un cycle de synchronisation.
+
+### 10.2 Topologie en cluster
+
+```
+                    Internet / LAN Northbridge
+                              │  (DNS -> VIP Traefik)
+        ┌─────────────────────┴──────────────────────┐
+        │             Traefik (ns kommander)         │   TLS cert-manager
+        └───┬──────────────┬─────────────────────┬───┘   (PKI interne)
+            │ api.         │ admin.              │ addin.
+  ┌─────────▼────────┐ ┌───▼──────────┐ ┌────────▼─────────┐
+  │ oao-api  ×2      │ │ oao-admin ×1 │ │ oao-addin ×2     │  TLS terminé
+  │ ROLE=api  8080   │ │ Next.js 3001 │ │ nginx 3000 (TLS) │  dans le pod
+  │ HPA + PDB        │ └───┬──────────┘ └──────────────────┘
+  └───┬────────┬─────┘     │ (server-side)
+      │        └───────────┘
+      │  ┌──────────────────┐        ┌───────────────────────────┐
+      ├─►│ oao-worker ×1    │───────►│ Microsoft Graph / Entra ID│ (443, si activé)
+      │  │ ROLE=worker      │        └───────────────────────────┘
+      │  └────────┬─────────┘
+      │           │           ┌────────────────────────────┐
+      ├───────────┴──────────►│ LLM interne (vLLM, Qwen3)  │ (CIDR déclaré)
+      │                       └────────────────────────────┘
+  ┌───▼──────────────────┐
+  │ oao-postgres (STS)   │  PVC nutanix-volume 20Gi
+  │ PostgreSQL + pgvector│  CronJob pg_dump quotidien
+  └──────────────────────┘
+
+  Hooks : Job oao-migrate (pre-install / pre-upgrade)
+  Observabilité : ServiceMonitor + PrometheusRule + dashboard Grafana
+  Réseau : NetworkPolicy default-deny + 8 politiques explicites
+```
+
+### 10.3 Packaging et livraison
+
+- **Source unique de vérité** : le chart Helm
+  `infra/helm/outlook-ai-orchestrator`. `infra/k8s/rendered/` n'en est qu'une
+  projection générée (`pnpm k8s:render`) pour les environnements sans Helm.
+- **Trois images**, construites depuis la racine du monorepo, non-root et
+  compatibles `readOnlyRootFilesystem` :
+  `oao-orchestrator` (API + worker + migrations), `oao-admin`, `oao-addin`.
+  Le bundle Vite **et** les manifests Office de l'add-in sont figés au build :
+  ce sont des artefacts de version, donc une image add-in par environnement.
+- **GitOps** : Flux (fourni par Kommander) applique un `HelmRelease` par
+  environnement (`infra/gitops/envs/{dev,prod}`), la production suivant les
+  tags git via `ref.semver`. Les secrets arrivent chiffrés (SOPS/age) ou par
+  External Secrets Operator ; ils sont **montés en fichiers** et lus par
+  l'orchestrator via `<NOM>_FILE`.
+- **Chaîne d'approvisionnement** : images et chart signés (cosign keyless),
+  SBOM attestée, scan trivy bloquant sur `CRITICAL`, vérification possible à
+  l'admission (Kyverno) — voir [`SECURITY.md`](SECURITY.md) §11.
+
+### 10.4 Conséquences architecturales
+
+Ce que le déploiement impose au code applicatif — et qui explique certains
+choix visibles dans `apps/orchestrator` :
+
+| Contrainte de déploiement | Implication dans l'application |
+|---|---|
+| Probes Kubernetes distinctes | `/api/v1/live` (processus vivant) et `/api/v1/ready` (dépendances) doivent avoir des sémantiques différentes : un LLM en panne ne doit pas provoquer un redémarrage en boucle |
+| Rootfs en lecture seule | aucun fichier temporaire hors `/tmp` ; pas d'écriture de cache sur disque |
+| Secrets montés en fichiers | support de `<NOM>_FILE` pour toute variable sensible, résolu une fois au démarrage |
+| Plusieurs répliques d'API | aucun état en mémoire de processus qui ne soit reconstructible ; les caches sont des optimisations, pas des sources de vérité |
+| Un seul worker | les jobs de fond prennent un advisory lock PostgreSQL plutôt que de supposer l'unicité |
+| Arrêt propre (rolling update) | `SHUTDOWN_TIMEOUT_MS` : fin des requêtes en cours, fermeture du pool, libération du verrou |
+| Migrations en hook `pre-upgrade` | les migrations doivent être rétro-compatibles avec la version N-1 le temps du rollout |
+| NetworkPolicy default-deny | toute nouvelle dépendance sortante est une décision d'architecture, à déclarer explicitement dans les values |
+| Scrape Prometheus | `/metrics` protégé par `METRICS_TOKEN`, noms de métriques stables (contrat listé dans [`OPERATIONS.md`](OPERATIONS.md) §3) |

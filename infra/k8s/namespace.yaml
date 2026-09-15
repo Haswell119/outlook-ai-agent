@@ -1,6 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: oao
-  labels:
-    app.kubernetes.io/part-of: outlook-ai-orchestrator

@@ -1,0 +1,115 @@
+---
+# Source: outlook-ai-orchestrator/templates/backup-cronjob.yaml
+# ---------------------------------------------------------------------------
+# Logical backup: pg_dump -Fc of the whole database, daily.
+#   destination=pvc -> a ReadWriteOnce volume in the cluster (restore with
+#                      pg_restore, see docs/OPERATIONS.md)
+#   destination=s3  -> an S3-compatible bucket (Nutanix Objects, MinIO)
+# A logical dump is NOT a substitute for storage-level snapshots on a
+# regulated workload: keep both (docs/OPERATIONS.md, DR/RPO/RTO).
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: oao-backup
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: backup
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: "nutanix-volume"
+  resources:
+    requests:
+      storage: "50Gi"
+---
+# Source: outlook-ai-orchestrator/templates/backup-cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: oao-backup
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "30 1 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: outlook-ai-orchestrator
+            app.kubernetes.io/instance: oao
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: oao
+          automountServiceAccountToken: false
+          
+          imagePullSecrets:
+          - name: ghcr-pull
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: dump
+              image: "pgvector/pgvector:pg16"
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  set -eu
+                  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+                  OUT="/backup/oao-${STAMP}.dump"
+                  echo "==> pg_dump -> ${OUT}"
+                  pg_dump --format=custom --compress=6 --no-owner --no-acl \
+                    --file="${OUT}" "${DATABASE_URL}"
+                  ls -lh "${OUT}"
+                  echo "==> pruning dumps older than 14 days"
+                  find /backup -name 'oao-*.dump' -type f -mtime +14 -print -delete
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: oao-secrets
+                      key: DATABASE_URL
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: oao-backup

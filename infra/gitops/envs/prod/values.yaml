@@ -1,0 +1,64 @@
+# Overlay d'environnement PRODUCTION (aucun secret ici).
+# Appliqué par-dessus values.yaml + values-nkp.yaml du chart.
+hosts:
+  api: api.oao.northbridge.example
+  admin: admin.oao.northbridge.example
+  addin: addin.oao.northbridge.example
+
+image:
+  # Bumpé par la CI / Flux image automation (voir image-automation/).
+  tag: "0.1.0" # {"$imagepolicy": "flux-system:oao:tag"}
+
+config:
+  nodeEnv: production
+  logLevel: info
+  auditStoreContent: false
+  auditRetentionDays: 1095
+
+llm:
+  provider: openai-compatible
+  baseUrl: http://gpu-node.northbridge.example:8000/v1
+  model: qwen3-30b-a3b
+  embeddings:
+    enabled: true
+    model: bge-m3
+    dimensions: 1024
+  egress:
+    cidrs:
+      - 10.42.17.0/24 # nœuds GPU internes — à ajuster
+    ports:
+      - 8000
+
+auth:
+  mode: aad
+  aad:
+    tenantId: "00000000-0000-0000-0000-000000000000"
+    clientId: "00000000-0000-0000-0000-000000000000"
+
+admin:
+  authMode: aad
+  entra:
+    clientId: "00000000-0000-0000-0000-000000000000"
+
+graph:
+  enabled: true
+  authMode: app
+  sync:
+    # Groupe de sécurité mail-enabled ciblé par l'Exchange application
+    # access policy (docs/SETUP.md §Graph).
+    groupId: "00000000-0000-0000-0000-000000000000"
+    intervalMinutes: 15
+
+features:
+  precompute: true
+  dailyBrief: true
+  demoSeed: false
+
+postgres:
+  enabled: true
+  persistence:
+    size: 20Gi
+    storageClass: nutanix-volume
+  backup:
+    enabled: true
+    destination: pvc

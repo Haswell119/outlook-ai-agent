@@ -1,0 +1,23 @@
+# Flux Kustomization : point d'entrée du cluster de production.
+# Applique infra/gitops/envs/prod et déchiffre les Secrets SOPS.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: oao-prod
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 10m
+  prune: true
+  wait: false
+  sourceRef:
+    kind: GitRepository
+    name: oao-release
+  path: ./infra/gitops/envs/prod
+  decryption:
+    provider: sops
+    secretRef:
+      # kubectl -n flux-system create secret generic sops-age \
+      #   --from-file=age.agekey=age.agekey
+      name: sops-age

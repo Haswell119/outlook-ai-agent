@@ -1,138 +1,445 @@
 # Runbook opérationnel — Outlook AI Orchestrator
 
-> Destiné aux équipes qui exploitent le service en production (SRE / IT
-> Northbridge). Termes techniques laissés en anglais.
+> Pour les équipes qui exploitent le service en production (SRE / IT
+> Northbridge). Aligné sur le chart Helm `infra/helm/outlook-ai-orchestrator`
+> et le déploiement GitOps `infra/gitops`. Termes techniques en anglais.
+>
+> Installation : [`NKP.md`](NKP.md) · Configuration : [`SETUP.md`](SETUP.md) ·
+> Sécurité : [`SECURITY.md`](SECURITY.md)
 
-## 1. Logs
+## Sommaire
 
-- **orchestrator** : logs structurés JSON via `pino` (niveau contrôlé par
-  `LOG_LEVEL`). En dev, `pino-pretty` est utilisé automatiquement
-  (`pnpm dev`). Chaque requête porte un `request-id` (corrélé à
-  `correlationId` dans les `AuditEvent` correspondants) permettant de relier
-  une ligne de log à une entrée d'audit.
-- **Docker Compose** : `docker compose logs -f orchestrator admin addin`.
-- **Kubernetes** : `kubectl -n oao logs -f deploy/orchestrator`
-  (`deploy/admin`, `deploy/addin`). Pour les erreurs de démarrage :
-  `kubectl -n oao describe pod <pod>`.
-- **admin (Next.js)** : logs serveur (SSR) sur stdout du conteneur ; les
-  erreurs client (React) ne remontent pas côté serveur — s'appuyer sur les
-  retours utilisateurs + l'audit log orchestrator pour diagnostiquer.
-- Ne jamais activer `AUDIT_STORE_CONTENT=true` en production sans validation
-  explicite compliance : cela persiste le corps des emails dans les logs
-  d'audit (voir `docs/SECURITY.md`).
+1. [Carte du système](#1-carte-du-système)
+2. [Santé et probes](#2-santé-et-probes)
+3. [Métriques](#3-métriques)
+4. [Catalogue d'alertes](#4-catalogue-dalertes)
+5. [Logs et requêtes utiles](#5-logs-et-requêtes-utiles)
+6. [Mises à jour, rollback, migrations](#6-mises-à-jour-rollback-migrations)
+7. [Scaling et capacité (50 utilisateurs)](#7-scaling-et-capacité-50-utilisateurs)
+8. [Secrets et rotation](#8-secrets-et-rotation)
+9. [Sauvegardes et restauration](#9-sauvegardes-et-restauration)
+10. [DR — RPO / RTO](#10-dr--rpo--rto)
+11. [Panne du modèle IA](#11-panne-du-modèle-ia)
+12. [Worker de synchronisation](#12-worker-de-synchronisation)
+13. [Rétention et purge de l'audit](#13-rétention-et-purge-de-laudit)
+14. [Incidents fréquents](#14-incidents-fréquents)
 
-## 2. Health / readiness
+---
 
-| Service | Endpoint | Attendu |
+## 1. Carte du système
+
+| Composant | Objet Kubernetes | Rôle | Sans lui |
+|---|---|---|---|
+| API | `deploy/oao-api` (`ROLE=api`) | `/api/v1/*`, `/metrics` | le volet Outlook et le dashboard sont hors service |
+| Worker | `deploy/oao-worker` (`ROLE=worker`) | sync Graph, précalcul, daily brief, rétention | pas de précalcul ni de brief, l'audit n'est plus purgé |
+| Dashboard | `deploy/oao-admin` | supervision, approbations compliance | pas de supervision ; l'API continue |
+| Add-in | `deploy/oao-addin` | bundle statique + manifests | le volet ne se charge plus (les données restent) |
+| Base | `statefulset/oao-postgres` | audit, policies, index pgvector | **arrêt total** : rien n'est audité, donc rien ne doit tourner |
+| Migrations | `job/oao-migrate` (hook Helm) | schéma | un upgrade ne démarre pas |
+| Sauvegarde | `cronjob/oao-backup` | `pg_dump` quotidien | perte de données en cas de sinistre |
+
+Le worker s'élit leader via un **advisory lock PostgreSQL** : un redémarrage
+progressif ne peut pas produire deux ordonnanceurs simultanés. Garder
+`replicaCount: 1` — une seconde réplique attendrait le verrou sans rien faire.
+
+## 2. Santé et probes
+
+| Endpoint | Sert à | Sémantique |
 |---|---|---|
-| orchestrator | `GET /api/v1/health` | `200`, `{"status":"ok"}` (ou `degraded` si LLM/Graph en panne, voir §6) |
-| admin | `GET /` | `200` |
-| addin | `GET /healthz` (nginx, HTTPS) | `200 ok` |
-| postgres | `pg_isready` | healthy |
+| `GET /api/v1/live` | liveness Kubernetes | le processus répond. Un échec ⇒ redémarrage du pod |
+| `GET /api/v1/ready` | readiness Kubernetes | dépendances joignables (base, modèle). Un échec ⇒ retrait du Service, **pas** de redémarrage |
+| `GET /api/v1/health` | supervision humaine | `ok` / `degraded` / `down` + détail par dépendance |
+| `GET /metrics` | Prometheus | exposition prom-client, protégée par `METRICS_TOKEN` |
+| `GET /healthz` (add-in) | nginx | `200 ok` |
+| `GET /api/health` (admin) | Next.js | `200` |
 
 ```bash
-curl -s http://localhost:8080/api/v1/health | jq
-./scripts/smoke-test.sh          # health + analyze/email + compliance/check + chat
+kubectl -n oao get pods -o wide
+kubectl -n oao describe deploy/oao-api | sed -n '/Conditions/,$p'
+curl -sS https://api.oao.northbridge.example/api/v1/health | jq
+pnpm smoke --url https://api.oao.northbridge.example --token "$JWT"
 ```
 
-Kubernetes : `kubectl -n oao get pods` (colonnes READY/RESTARTS),
-`kubectl -n oao describe deploy/orchestrator` pour l'historique des probes.
+Distinguer les deux échecs : `live` KO = bug/blocage du processus ; `ready` KO
+= dépendance externe. Un pod qui boucle en `CrashLoopBackOff` alors que
+`ready` seul échouait signale une liveness mal réglée, pas une panne.
 
 ## 3. Métriques
 
-Le contrat `AuditStats` (`GET /api/v1/audit/stats`, consommé par le dashboard
-admin — page *Overview*) expose les KPIs métier :
+`/metrics` expose le contrat prom-client suivant (préfixe `oao_`), scrapé par
+le `ServiceMonitor` du chart sur les Services `oao-api` et `oao-worker` :
 
-- emails résumés, brouillons générés, automatisations proposées/approuvées,
-  alertes de conformité, "erreurs évitées" ;
-- activité dans le temps (résumés / brouillons / automatisations / alertes) ;
-- répartition des actions par type, alertes de conformité par catégorie ;
-- taux d'approbation des automatisations, top utilisateurs.
+| Métrique | Type | Labels | Lecture |
+|---|---|---|---|
+| `oao_http_requests_total` | counter | `method`, `route`, `status` | trafic et taux d'erreur |
+| `oao_http_request_duration_seconds` | histogram | `method`, `route` | latence p50/p95/p99 |
+| `oao_llm_calls_total` | counter | `outcome` (`ok`/`error`/`timeout`/`circuit_open`/`fallback`), `model` | santé du modèle interne |
+| `oao_llm_call_duration_seconds` | histogram | `model` | latence GPU |
+| `oao_llm_circuit_open` | gauge | — | `1` = circuit breaker ouvert |
+| `oao_llm_queue_depth` / `oao_llm_queue_running` | gauge | — | saturation de la file d'appels |
+| `oao_cache_hits_total` / `oao_cache_misses_total` | counter | `cache` (`analysis`/`embedding`) | efficacité du cache |
+| `oao_mailbox_sync_lag_seconds` | gauge | — | fraîcheur de la synchronisation |
+| `oao_mailbox_sync_runs_total` | counter | `outcome` | succès/échec des cycles |
+| `oao_audit_events_total` | counter | `type` | volume d'événements audités |
+| `oao_db_up` | gauge | — | connectivité PostgreSQL |
+| `oao_build_info` | gauge | `version` | version déployée |
 
-Pour une supervision infra classique (latence, taux d'erreur HTTP, usage
-CPU/mémoire), s'appuyer sur les probes Kubernetes + les logs structurés
-(`latencyMs` est déjà présent sur chaque `AuditEvent`) ; brancher un
-collecteur (Prometheus via un sidecar ou un exporter de logs) reste à la
-charge de l'environnement cible — non fourni par ce repo.
+Les KPI **métier** (emails résumés, brouillons, automatisations approuvées,
+alertes de conformité, erreurs évitées) restent exposés par
+`GET /api/v1/audit/stats` et affichés dans le dashboard admin — ils ne
+dupliquent pas les métriques d'infrastructure.
 
-## 4. Rotation des secrets
-
-| Secret | Où | Rotation |
-|---|---|---|
-| `LLM_API_KEY` | `.env` / K8s Secret | Sur demande de l'équipe GPU interne, ou tous les 90 jours si la politique Northbridge l'exige. Mettre à jour puis `kubectl -n oao rollout restart deploy/orchestrator`. |
-| `AAD_CLIENT_SECRET` | `.env` / K8s Secret | Avant expiration (Azure Portal → App registration → Certificates & secrets → date d'expiration). Générer le nouveau secret **avant** de supprimer l'ancien (fenêtre de recouvrement), déployer, puis révoquer l'ancien. |
-| `ADMIN_API_TOKEN` | `.env` / K8s Secret | À chaque changement de personnel ayant eu accès en clair, ou tous les 90 jours. |
-| `POSTGRES_PASSWORD` | `.env` / K8s Secret | Selon la politique DB de l'environnement (managé = géré par le provider). |
-
-Procédure générique K8s :
+Dashboard Grafana : **Outlook AI Orchestrator** (uid `oao-overview`), déployé
+par le chart via une ConfigMap labellisée `grafana_dashboard: "1"`.
 
 ```bash
-kubectl -n oao create secret generic oao-secrets \
-  --from-literal=LLM_API_KEY=... --from-literal=AAD_CLIENT_SECRET=... \
-  --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n oao rollout restart deploy/orchestrator deploy/admin
+# Vérifier que le scrape fonctionne
+kubectl -n oao get servicemonitor oao -o yaml | head -30
+kubectl -n oao run -it --rm curl --image=curlimages/curl --restart=Never -- \
+  curl -sS -H "Authorization: Bearer $METRICS_TOKEN" http://oao-api:8080/metrics | head
 ```
 
-## 5. Sauvegarde Postgres
+## 4. Catalogue d'alertes
 
-- **Managé (recommandé en prod)** : utiliser les sauvegardes automatiques du
-  provider (snapshots point-in-time). Vérifier que la fenêtre de rétention
-  couvre au moins la durée légale de conservation de l'audit (voir
-  `docs/SECURITY.md`).
-- **Self-hosted (StatefulSet non-prod, ou VM dédiée)** :
+Règles livrées par le chart (`PrometheusRule oao`, seuils dans
+`metrics.prometheusRule.thresholds`) :
 
-  ```bash
-  # Sauvegarde
-  docker compose exec postgres pg_dump -U oao -Fc oao > oao_$(date +%Y%m%d).dump
-  # ou en K8s :
-  kubectl -n oao exec statefulset/postgres -- pg_dump -U oao -Fc oao > oao_$(date +%Y%m%d).dump
+| Alerte | Déclenchement | Gravité | Première action |
+|---|---|---|---|
+| `OaoApiDown` | aucune cible `-api` UP pendant 5 min | critical | `kubectl -n oao get pods`, `describe`, `logs --previous` ; vérifier Postgres et le nœud |
+| `OaoReadinessFailing` | container `orchestrator` non ready 10 min | warning | `GET /api/v1/health` : quelle dépendance est KO ? |
+| `OaoLlmCircuitOpen` | `oao_llm_circuit_open == 1` pendant 5 min | critical | §11 — le produit tourne en mode dégradé |
+| `OaoLlmErrorRateHigh` | > 25 % d'appels LLM en échec sur 10 min | warning | saturation GPU, `--served-model-name`, timeout |
+| `OaoHttp5xxRateHigh` | > 5 % de 5xx sur 5 min | critical | logs par `correlationId`, état de Postgres |
+| `OaoLatencyHigh` | p95 > 15 s sur 10 min | warning | `oao_llm_queue_depth`, latence GPU, index Postgres |
+| `OaoMailboxSyncLag` | retard de sync > 60 min | warning | §12 |
+| `OaoWorkerAbsent` | aucune cible `-worker` UP 15 min | warning | pas de brief ni de rétention : redémarrer le worker |
+| `OaoDatabaseUnreachable` | `oao_db_up == 0` pendant 5 min | critical | **incident compliance** : plus rien n'est audité, §14 |
 
-  # Restauration
-  docker compose exec -T postgres pg_restore -U oao -d oao --clean --if-exists < oao_20260101.dump
-  ```
+Toute alerte `critical` doit joindre l'astreinte ; `OaoDatabaseUnreachable` et
+`OaoApiDown` justifient l'ouverture d'un incident formel (traçabilité).
 
-- Tester la restauration périodiquement sur un environnement isolé (jamais
-  directement sur la prod).
-- Les tables les plus critiques à couvrir : `audit_events` (traçabilité
-  légale/compliance), `policies`, `automations`, `escalations`.
+## 5. Logs et requêtes utiles
 
-## 6. Comportement de repli (dégradé)
+- Logs structurés JSON (`pino`), niveau via `config.logLevel`. Chaque requête
+  porte un `request-id` corrélé au `correlationId` des `AuditEvent`.
+- Le corps des emails n'est **jamais** journalisé ; les secrets sont rédigés
+  (`***`) par le module `util/secrets`.
 
-| Panne | Comportement | Où c'est géré |
+```bash
+# Suivre l'API et le worker
+kubectl -n oao logs -f -l app.kubernetes.io/component=orchestrator-api --max-log-requests=6
+kubectl -n oao logs -f deploy/oao-worker
+
+# Erreurs des 15 dernières minutes
+kubectl -n oao logs -l app.kubernetes.io/component=orchestrator-api --since=15m \
+  | jq -c 'select(.level >= 50)'
+
+# Suivre une requête de bout en bout
+kubectl -n oao logs -l app.kubernetes.io/component=orchestrator-api --since=1h \
+  | jq -c 'select(.["request-id"] == "<id>")'
+
+# Crash au démarrage
+kubectl -n oao logs deploy/oao-api --previous
+kubectl -n oao describe pod -l app.kubernetes.io/component=orchestrator-api
+```
+
+Côté base, pour recouper avec l'audit :
+
+```sql
+-- Les 20 derniers événements d'un utilisateur
+SELECT timestamp, type, risk_level, latency_ms, correlation_id
+FROM audit_events WHERE user_email = $1 ORDER BY timestamp DESC LIMIT 20;
+
+-- Volume par type sur 24 h (doit être non nul sous trafic)
+SELECT type, count(*) FROM audit_events
+WHERE timestamp > now() - interval '24 hours' GROUP BY type ORDER BY 2 DESC;
+```
+
+## 6. Mises à jour, rollback, migrations
+
+### Mise à jour applicative (GitOps, chemin nominal)
+
+```bash
+# 1. Publier la version : un tag git déclenche release.yml
+git tag v1.2.3 && git push origin v1.2.3
+# 2. Bump de l'image dans l'overlay d'environnement (PR revue)
+#    infra/gitops/envs/prod/values.yaml -> image.tag: "1.2.3"
+# 3. Flux applique : Job de migration (hook pre-upgrade) puis rollout
+flux reconcile kustomization oao-prod --with-source
+flux get helmreleases -n oao
+kubectl -n oao rollout status deploy/oao-api
+```
+
+`maxUnavailable: 0` + PDB `minAvailable: 1` : le rollout de l'API est sans
+coupure. Le worker utilise `strategy: Recreate` (l'advisory lock interdit deux
+ordonnanceurs) : une courte interruption des jobs de fond est normale.
+
+### Rollback
+
+```bash
+flux suspend helmrelease oao -n oao         # rendre la main à Helm
+helm history oao -n oao
+helm rollback oao <revision> -n oao
+# puis corriger le dépôt (tag/valeurs) et
+flux resume helmrelease oao -n oao
+```
+
+Flux remédie déjà automatiquement : `upgrade.remediation.retries: 2` avec
+`strategy: rollback`. Un rollback applicatif **ne défait pas** une migration
+SQL : les migrations doivent rester rétro-compatibles d'une version à la
+suivante (ajout de colonnes nullable, pas de `DROP` dans la même version).
+
+### Migrations
+
+- Nominal : hook Helm `pre-install,pre-upgrade` → `job/oao-migrate`.
+- En cas d'échec, le Job et ses ConfigMap/Secret hook-scoped sont **conservés** :
+
+```bash
+kubectl -n oao logs job/oao-migrate
+kubectl -n oao describe job/oao-migrate
+# Corriger, puis relancer l'upgrade (le Job est recréé) :
+flux reconcile helmrelease oao -n oao
+```
+
+- Manuellement, hors Helm :
+
+```bash
+kubectl -n oao run oao-migrate-manual --rm -it --restart=Never \
+  --image=ghcr.io/northbridge-capital/oao-orchestrator:1.2.3 \
+  --env=DATABASE_URL="$DATABASE_URL" \
+  -- node apps/orchestrator/dist/adapters/db/migrate.js
+```
+
+- `migration.autoAtBoot=true` (`DB_AUTO_MIGRATE`) existe pour le bootstrap avec
+  External Secrets ; à repasser à `false` ensuite (deux répliques qui migrent
+  au démarrage se marchent dessus).
+
+## 7. Scaling et capacité (50 utilisateurs)
+
+Hypothèses de dimensionnement retenues : 50 utilisateurs, ~120 emails
+analysés par utilisateur et par jour, pic de 3× entre 08:00 et 10:00, cache
+d'analyse à ~40 % de hit.
+
+| Ressource | Réglage livré | Marge |
 |---|---|---|
-| **LLM down** | Analyse heuristique (règles/regex) uniquement, `confidence ≤ 0.3`, risque `ai_output_unreliable` ajouté, un `AuditEvent` de type `error` est écrit. `/api/v1/health` répond `degraded` sur la vérification LLM. L'utilisateur voit une réponse utilisable mais explicitement marquée peu fiable (barre de confiance basse). | `apps/orchestrator/src/domain/*`, `services/*` (dossier `ARCHITECTURE.md` §4) |
-| **Graph down** | Les actions `server` (ex. `create_reminder`, `move_to_folder`) renvoient `pending_client` avec une `clientInstruction` : l'add-in exécute l'équivalent via Office.js (ex. ouvrir le formulaire de rendez-vous) au lieu d'échouer silencieusement. `/api/v1/health` répond `degraded` sur la vérification Graph si `GRAPH_ENABLED=true`. | `ActionResultStatus = pending_client` (contrat `@oao/shared`) |
-| **Postgres down / DATABASE_URL=memory non voulu** | L'orchestrator ne démarre pas en mode `postgres://...` si la connexion échoue au démarrage (fail-fast) ; en K8s, la readiness probe le sort du Service jusqu'à récupération. Pas de dégradation silencieuse — utiliser `DATABASE_URL=memory` uniquement pour la démo. | `adapters/db/` |
-| **LLM output invalide (JSON malformé)** | Une tentative de réparation automatique (repair retry), puis repli sur une réponse dégradée sûre si l'échec persiste (même traitement que "LLM down" côté confiance/risque). | `services/*` |
+| API | 2 répliques, `500m/1Gi` → `2 CPU/2Gi` | HPA jusqu'à 6 répliques (CPU 70 %) |
+| Worker | 1 réplique, `500m/1Gi` | non scalable horizontalement (par construction) |
+| Dashboard | 1 réplique, `250m/512Mi` | quelques utilisateurs simultanés |
+| Add-in | 2 répliques, `50m/64Mi` | fichiers statiques, coût négligeable |
+| PostgreSQL | 1 CPU/2Gi, PVC 20 Gi | ~6 000 emails indexés/jour ⇒ ≈ 8 Gi/an avec `INDEX_RETENTION_DAYS=365` |
+| Débit LLM | `LLM_CONCURRENCY=4` | c'est le **vrai** facteur limitant : ajouter des répliques d'API ne crée pas de GPU |
 
-## 7. Incidents fréquents
+Scaling :
+
+```bash
+# Ajuster les bornes de l'HPA (via git/values, pas kubectl edit)
+# orchestrator.api.autoscaling: { minReplicas: 2, maxReplicas: 8 }
+kubectl -n oao get hpa oao-api
+kubectl -n oao top pods
+```
+
+Scaling sur le trafic plutôt que sur le CPU : renseigner
+`orchestrator.api.autoscaling.targetRequestsPerSecond` — cela suppose
+`prometheus-adapter` exposant la métrique custom
+`oao_http_requests_per_second`.
+
+Signaux de saturation, dans l'ordre d'apparition :
+
+1. `oao_llm_queue_depth` durablement > `LLM_CONCURRENCY` → GPU saturé ;
+2. p95 `oao_http_request_duration_seconds` qui dérive → idem ;
+3. CPU des pods API > 70 % → l'HPA prend le relais ;
+4. `pg_stat_activity` avec des attentes longues → augmenter `DB_POOL_MAX`
+   **et** `postgres.parameters.maxConnections` de concert.
+
+Croissance du stockage :
+
+```sql
+SELECT pg_size_pretty(pg_database_size(current_database()));
+SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) AS size
+FROM pg_catalog.pg_statio_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 10;
+```
+
+Prévoir un redimensionnement du PVC (la StorageClass `nutanix-volume` supporte
+l'expansion en ligne) quand l'occupation dépasse 70 %.
+
+## 8. Secrets et rotation
+
+| Secret | Emplacement | Cadence | Procédure |
+|---|---|---|---|
+| `AAD_CLIENT_SECRET` | Secret SOPS / ESO | avant expiration Entra ID | créer le nouveau secret **avant** de révoquer l'ancien (fenêtre de recouvrement), déployer, puis révoquer |
+| `AUTH_MICROSOFT_ENTRA_ID_SECRET`, `AUTH_SECRET` | idem | 12 mois / à chaque départ | idem ; `AUTH_SECRET` invalide les sessions du dashboard |
+| `ADMIN_API_TOKEN` | idem | 90 jours ou départ | changer, redémarrer API **et** dashboard ensemble |
+| `METRICS_TOKEN` | idem | 90 jours | redémarrer l'API ; Prometheus relit le Secret automatiquement |
+| `LLM_API_KEY` | idem | selon l'équipe GPU | souvent vide en interne |
+| `POSTGRES_PASSWORD` / `DATABASE_URL` | idem | selon politique DB | `ALTER ROLE … PASSWORD` puis mise à jour du Secret, puis rollout |
+| Certificats TLS | cert-manager | automatique (`renewBefore: 360h`) | `kubectl -n oao get certificate` |
+
+Rotation avec SOPS :
+
+```bash
+sops infra/gitops/envs/prod/secrets.enc.yaml    # édition en clair, chiffrement au save
+git commit -am "chore(secrets): rotate ADMIN_API_TOKEN" && git push
+flux reconcile kustomization oao-prod --with-source
+kubectl -n oao rollout restart deploy/oao-api deploy/oao-worker deploy/oao-admin
+```
+
+Les secrets sont montés en **fichiers** (`/run/secrets/oao/<NOM>`) et lus via
+`<NOM>_FILE` : ils n'apparaissent ni dans l'environnement du pod, ni dans
+`kubectl describe pod`. Un `rollout restart` est donc nécessaire pour prendre
+en compte une nouvelle valeur.
+
+## 9. Sauvegardes et restauration
+
+Deux niveaux, complémentaires :
+
+1. **Snapshots de volume** (Nutanix CSI / VolumeSnapshot) : restauration
+   rapide, cohérence au niveau bloc.
+2. **Dump logique** (`cronjob/oao-backup`, `pg_dump -Fc`, quotidien 01:30 UTC,
+   rétention 14 jours) : portable, permet la restauration partielle et la
+   migration de version majeure.
+
+```bash
+# État des sauvegardes
+kubectl -n oao get cronjob oao-backup
+kubectl -n oao get jobs -l app.kubernetes.io/component=backup
+kubectl -n oao logs job/<dernier job de backup>
+
+# Sauvegarde à la demande
+kubectl -n oao create job --from=cronjob/oao-backup oao-backup-manual
+```
+
+### Restauration
+
+```bash
+# 1. Arrêter les écritures
+kubectl -n oao scale deploy/oao-api deploy/oao-worker --replicas=0
+
+# 2. Restaurer le dump (sur une base VIDE de préférence)
+kubectl -n oao exec -i statefulset/oao-postgres -- \
+  pg_restore -U oao -d oao --clean --if-exists --no-owner < oao-20260101T013000Z.dump
+
+# 3. Vérifier le schéma et l'extension
+kubectl -n oao exec statefulset/oao-postgres -- \
+  psql -U oao -d oao -c "SELECT extname FROM pg_extension;"        # doit contenir 'vector'
+kubectl -n oao exec statefulset/oao-postgres -- \
+  psql -U oao -d oao -c "SELECT count(*) FROM audit_events;"
+
+# 4. Réappliquer les migrations manquantes puis redémarrer
+kubectl -n oao create job oao-migrate-restore \
+  --from=cronjob/oao-backup --dry-run=client -o yaml   # ou §6 "manuellement"
+kubectl -n oao scale deploy/oao-api --replicas=2
+kubectl -n oao scale deploy/oao-worker --replicas=1
+```
+
+**Tester la restauration au moins une fois par trimestre** sur un namespace
+isolé (`oao-restore-test`), jamais sur la production, et consigner le résultat
+— c'est la preuve attendue par un régulateur, pas l'existence du CronJob.
+
+Tables critiques : `audit_events` (trace légale), `policies`, `automations`,
+`escalations`. L'index `email_index` (pgvector) est reconstructible : sa perte
+dégrade la recherche sémantique sans perte de conformité.
+
+## 10. DR — RPO / RTO
+
+| Scénario | RPO visé | RTO visé | Moyen |
+|---|---|---|---|
+| Perte d'un pod / d'un nœud | 0 | < 2 min | 2 répliques API + PDB, PVC réattaché par le CSI |
+| Corruption logique (mauvaise purge, bug) | ≤ 24 h | < 2 h | dump `pg_dump` quotidien + rejeu des migrations |
+| Perte du PVC PostgreSQL | ≤ 24 h | < 4 h | dump quotidien (+ snapshot CSI si activé : RPO ≈ 1 h) |
+| Perte du cluster NKP | ≤ 24 h | < 8 h | tout est en git (chart + GitOps) : re-bootstrap Flux sur un cluster neuf, restauration du dump |
+| Perte du registre GHCR | 0 | < 4 h | images reconstructibles depuis un tag git ; miroir interne recommandé |
+
+Hypothèses : sauvegarde quotidienne à 01:30 UTC, secrets disponibles dans le
+coffre, DNS modifiable sous 1 h. Le RPO effectif est l'âge du dernier dump :
+passer à `schedule: "0 */6 * * *"` si un RPO de 6 h est exigé par la
+compliance.
+
+Non couvert par défaut : PostgreSQL n'est **pas** en haute disponibilité
+(1 réplique). Pour un RTO < 5 min sur panne de base, utiliser un PostgreSQL
+managé/HA externe (`postgres.enabled=false`, `postgres.external.*`).
+
+## 11. Panne du modèle IA
+
+Comportement attendu (dégradation contrôlée, jamais de panne totale) :
+
+| Panne | Comportement | Visible via |
+|---|---|---|
+| **LLM injoignable** | analyse heuristique (règles/regex), `confidence ≤ 0.3`, risque `ai_output_unreliable`, `AuditEvent` de type `error`. `/api/v1/health` → `degraded` | `oao_llm_circuit_open`, alerte `OaoLlmCircuitOpen` |
+| **Sortie LLM invalide (JSON malformé)** | tentative de réparation, puis repli dégradé identique | `oao_llm_calls_total{outcome="fallback"}` |
+| **File saturée** | requêtes en attente jusqu'à `LLM_QUEUE_TIMEOUT_MS`, puis erreur explicite | `oao_llm_queue_depth` |
+| **Graph indisponible** | les actions serveur renvoient `pending_client` + `clientInstruction` (l'add-in exécute l'équivalent via Office.js) | `/api/v1/health` |
+| **PostgreSQL indisponible** | démarrage refusé (fail-fast) ; en vol, readiness KO ⇒ retrait du Service | `oao_db_up`, `OaoDatabaseUnreachable` |
+
+Diagnostic :
+
+```bash
+pnpm check:llm                       # depuis un poste ayant la même route réseau
+kubectl -n oao exec deploy/oao-api -- node -e "fetch(process.env.LLM_BASE_URL+'/models').then(r=>console.log(r.status)).catch(e=>console.log('KO',e.message))"
+kubectl -n oao get networkpolicy oao-api -o yaml | grep -A5 ipBlock
+```
+
+Trois causes par ordre de fréquence : CIDR GPU absent de `llm.egress.cidrs`
+(NetworkPolicy en default-deny), `LLM_MODEL` qui ne correspond pas au
+`--served-model-name`, GPU saturé.
+
+Repli temporaire assumé : `llm.provider: mock` rend le service utilisable mais
+**sans valeur ajoutée IA** — à n'utiliser que pour isoler une panne, jamais
+comme état durable (les analyses produites seraient trompeuses).
+
+## 12. Worker de synchronisation
+
+```bash
+kubectl -n oao logs -f deploy/oao-worker
+kubectl -n oao get deploy oao-worker -o jsonpath='{.spec.replicas}'   # doit valoir 1
+```
 
 | Symptôme | Cause probable | Action |
 |---|---|---|
-| `502 llm_unavailable` sur la plupart des endpoints IA | Endpoint `LLM_BASE_URL` injoignable ou modèle mal nommé | `./scripts/check-llm.sh` ; vérifier `--served-model-name` côté vLLM correspond à `LLM_MODEL` |
-| `503 graph_unavailable` | Token Graph expiré / `AAD_CLIENT_SECRET` invalide ou expiré | Vérifier l'expiration du secret (Azure Portal), régénérer (§4), `GRAPH_ENABLED=false` en repli temporaire |
-| Add-in refuse de charger dans Outlook | Certificat HTTPS non fiable / CSP bloque l'iframe | Vérifier `scripts/gen-dev-cert.sh` (dev) ou le certificat monté en prod ; vérifier que la réponse nginx contient bien `Content-Security-Policy: frame-ancestors ...` et **pas** `X-Frame-Options: DENY` |
-| `401 unauthorized` généralisé après déploiement | `AUTH_MODE=aad` mais `AAD_TENANT_ID`/`AAD_CLIENT_ID` incorrects, ou horloge serveur désynchronisée (validation JWT `exp`/`nbf`) | Vérifier les variables, `date -u` sur le nœud vs. NTP |
-| Dashboard admin vide malgré activité | `ADMIN_API_TOKEN` ne correspond pas entre `.env` orchestrator et admin, ou `ADMIN_MOCK=true` resté actif | Aligner les tokens, vérifier `ADMIN_MOCK=false` en prod |
-| Alertes de conformité en nombre anormalement élevé après une mise à jour | `policies` modifiée (patterns trop larges) via `/api/v1/admin/policy` | Comparer avec la version précédente (`policy_updated` dans l'audit), ajuster via le Policy Center |
-| Automatisation qui s'exécute alors qu'elle ne devrait pas encore être active | Statut `Automation.status` pas encore `active` mais un job externe l'a déclenchée manuellement | Vérifier `status` avant toute exécution manuelle ; seule `active` doit déclencher une exécution automatique |
-| Job de migration (`job-migrate.yaml`) reste `Pending`/`Error` | Image orchestrator pas encore poussée sur le registre référencé, ou Postgres pas prêt | `kubectl -n oao describe job/oao-migrate` ; s'assurer que le StatefulSet/service managé Postgres est `Ready` avant d'appliquer le Job |
+| `oao_mailbox_sync_lag_seconds` qui croît | worker arrêté, ou cycle plus long que `SYNC_INTERVAL_MINUTES` | vérifier le pod, augmenter l'intervalle ou réduire `SYNC_MAX_MESSAGES_PER_RUN` |
+| `403` Graph par boîte | l'utilisateur n'est pas dans le groupe de l'application access policy | l'ajouter au groupe, ou l'exclure de `SYNC_USERS` |
+| `401` Graph global | `AAD_CLIENT_SECRET` expiré | §8 |
+| Aucun cycle ne démarre | `WORKERS_ENABLED=false`, ou `ROLE` mal réglé | vérifier le ConfigMap `oao-config` |
+| Deux ordonnanceurs suspectés | `replicaCount > 1` | remettre à 1 ; l'advisory lock protège, mais la configuration est fausse |
+| Daily brief non envoyé | `DAILY_BRIEF_HOUR` en UTC ≠ heure locale attendue | le worker raisonne en UTC : régler l'heure en conséquence |
 
-## 8. Purge de l'audit
+Relance propre d'un cycle : `kubectl -n oao rollout restart deploy/oao-worker`
+(le verrou est libéré à l'arrêt du pod).
 
-L'audit (`audit_events`) est la trace légale/compliance du système — ne pas
-purger sans validation de l'équipe conformité et respect de la durée légale de
-conservation applicable (réglementation FINMA-friendly, voir
-`docs/SECURITY.md`). Quand une purge est validée (ex. fin de rétention
-contractuelle) :
+## 13. Rétention et purge de l'audit
+
+`audit_events` est la **trace légale** du système. La rétention est appliquée
+par le worker selon `AUDIT_RETENTION_DAYS` (730 par défaut, 1095 dans les
+values NKP) et `INDEX_RETENTION_DAYS`.
+
+- Ne jamais purger sans validation compliance et sans sauvegarde préalable.
+- Exporter avant suppression si une obligation de conservation externe existe :
+  `GET /api/v1/audit/export` (CSV), archivé hors ligne.
+- Réduire `AUDIT_RETENTION_DAYS` est une **décision de conformité**, pas une
+  décision technique : elle se documente et se fait valider.
+
+Purge exceptionnelle, validée, sous sauvegarde :
 
 ```sql
--- Exemple : purge des événements de plus de N mois, hors escalades encore
--- pertinentes pour une procédure en cours (à adapter/valider avec compliance).
-DELETE FROM audit_events
-WHERE timestamp < now() - interval '36 months';
+BEGIN;
+SELECT count(*) FROM audit_events WHERE timestamp < now() - interval '36 months';
+DELETE FROM audit_events WHERE timestamp < now() - interval '36 months';
+-- Vérifier le compte attendu avant de valider
+COMMIT;
 ```
 
-Exécuter via une migration contrôlée (pas un accès direct non tracé), avec
-sauvegarde préalable (§5) et export CSV (`GET /api/v1/audit/export`) archivé
-avant suppression si une obligation de conservation externe existe.
+## 14. Incidents fréquents
+
+| Symptôme | Cause probable | Action |
+|---|---|---|
+| `502 llm_unavailable` sur les endpoints IA | endpoint LLM injoignable ou modèle mal nommé | §11 |
+| `503 graph_unavailable` | jeton Graph expiré / secret Entra ID expiré | §8, repli `graph.enabled=false` |
+| Volet refusé par Outlook | chaîne TLS inconnue du poste, ou en-têtes | CA interne par GPO ; vérifier `Content-Security-Policy: frame-ancestors …` et l'**absence** de `X-Frame-Options` |
+| `401` généralisé après déploiement | `auth.aad.*` incorrects, ou horloge du nœud désynchronisée (validation `exp`/`nbf`) | vérifier les valeurs, `date -u` sur les nœuds vs NTP |
+| Dashboard vide malgré du trafic | `ADMIN_API_TOKEN` désaligné entre API et dashboard, ou `ADMIN_MOCK=true` | aligner le secret, `admin.mock: false` |
+| Explosion des alertes de conformité | `policies` modifiée (patterns trop larges) | comparer avec `policy_updated` dans l'audit, ajuster via le Policy Center |
+| Automatisation déclenchée trop tôt | statut ≠ `active` mais déclenchée manuellement | seule une automatisation `active` doit s'exécuter ; vérifier le statut |
+| `job/oao-migrate` en `BackoffLimitExceeded` | image absente du registre, base pas prête, migration en erreur | `kubectl -n oao logs job/oao-migrate` |
+| Pods `Pending` | PVC non provisionné, ressources insuffisantes | `kubectl -n oao describe pod`, `kubectl get sc`, `kubectl describe node` |
+| Trafic bloqué après un changement réseau | NetworkPolicy default-deny + flux non déclaré | `kubectl -n oao get networkpolicy`, ajouter le CIDR/namespace nécessaire |
+| **`oao_db_up == 0`** | PostgreSQL injoignable | **incident compliance** : plus aucune action n'est auditée. Suspendre le service (`scale --replicas=0`) plutôt que de servir sans audit, restaurer, documenter |

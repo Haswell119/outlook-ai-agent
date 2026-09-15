@@ -1,0 +1,360 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (without the leading v), e.g. 1.2.3"
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  PNPM_VERSION: "10.33.0"
+  NODE_VERSION: "20"
+  # Office manifests and the add-in bundle are baked per environment: these
+  # repository variables hold the production hosts.
+  ADDIN_HOST: ${{ vars.ADDIN_HOST || 'addin.oao.northbridge.example' }}
+  API_HOST: ${{ vars.API_HOST || 'api.oao.northbridge.example' }}
+  ADMIN_HOST: ${{ vars.ADMIN_HOST || 'admin.oao.northbridge.example' }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      owner: ${{ steps.v.outputs.owner }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          pkg=$(node -p "require('./package.json').version")
+          echo "tag version=$version  package.json=$pkg"
+          if [ "$version" != "$pkg" ]; then
+            echo "::warning::tag version ($version) differs from package.json ($pkg) — bump package.json and Chart.yaml appVersion"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  images:
+    name: Image ${{ matrix.image.name }}
+    runs-on: ubuntu-latest
+    needs: [version]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # cosign keyless (OIDC)
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - { name: orchestrator, dockerfile: infra/docker/orchestrator.Dockerfile }
+          - { name: admin, dockerfile: infra/docker/admin.Dockerfile }
+          - { name: addin, dockerfile: infra/docker/addin.Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ needs.version.outputs.owner }}/oao-${{ matrix.image.name }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.version.outputs.version }}
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.title=oao-${{ matrix.image.name }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.image.dockerfile }}
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.version.outputs.version }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            ADDIN_HOST=${{ env.ADDIN_HOST }}
+            API_HOST=${{ env.API_HOST }}
+            ADMIN_HOST=${{ env.ADMIN_HOST }}
+            AAD_CLIENT_ID=${{ vars.AAD_CLIENT_ID }}
+            ADDIN_VERSION=${{ needs.version.outputs.version }}.0
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+
+      - name: SBOM (syft, SPDX + CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ needs.version.outputs.owner }}/oao-${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          artifact-name: sbom-${{ matrix.image.name }}-${{ needs.version.outputs.version }}.spdx.json
+          upload-artifact: true
+
+      - name: Vulnerability scan (trivy, fail on CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ needs.version.outputs.owner }}/oao-${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign the image (keyless, by digest)
+        env:
+          COSIGN_YES: "true"
+        run: |
+          cosign sign --recursive \
+            ${{ env.REGISTRY }}/${{ needs.version.outputs.owner }}/oao-${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
+
+      - name: Attach the SBOM as a signed attestation
+        env:
+          COSIGN_YES: "true"
+        run: |
+          set -euo pipefail
+          file=$(ls sbom-${{ matrix.image.name }}-*.spdx.json 2>/dev/null | head -n1 || true)
+          if [ -z "$file" ]; then
+            echo "no SBOM file found in the workspace — skipping attestation"
+            exit 0
+          fi
+          cosign attest --predicate "$file" --type spdxjson \
+            ${{ env.REGISTRY }}/${{ needs.version.outputs.owner }}/oao-${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
+
+      - name: Record the digest
+        run: |
+          mkdir -p digests
+          echo "${{ steps.build.outputs.digest }}" > digests/oao-${{ matrix.image.name }}.digest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.image.name }}
+          path: digests
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  chart:
+    name: Helm chart (OCI)
+    runs-on: ubuntu-latest
+    needs: [version]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      CHART: infra/helm/outlook-ai-orchestrator
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Lint and render
+        run: |
+          helm lint $CHART
+          helm lint $CHART -f $CHART/values-nkp.yaml
+          helm template oao $CHART -n oao > /dev/null
+
+      - name: Package
+        id: package
+        run: |
+          set -euo pipefail
+          v="${{ needs.version.outputs.version }}"
+          helm package $CHART --version "$v" --app-version "$v" --destination dist-chart
+          ls -l dist-chart
+          echo "file=dist-chart/outlook-ai-orchestrator-$v.tgz" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR (helm registry)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push as an OCI artifact
+        id: push
+        run: |
+          set -euo pipefail
+          out=$(helm push "${{ steps.package.outputs.file }}" \
+            oci://${{ env.REGISTRY }}/${{ needs.version.outputs.owner }}/charts 2>&1 | tee /dev/stderr)
+          digest=$(echo "$out" | sed -nE 's/.*Digest: (sha256:[0-9a-f]+).*/\1/p')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign the chart
+        if: steps.push.outputs.digest != ''
+        env:
+          COSIGN_YES: "true"
+        run: |
+          cosign sign ${{ env.REGISTRY }}/${{ needs.version.outputs.owner }}/charts/outlook-ai-orchestrator@${{ steps.push.outputs.digest }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: dist-chart/*.tgz
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  manifests:
+    name: Office manifests + rendered Kubernetes manifests
+    runs-on: ubuntu-latest
+    needs: [version]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Render the production Office manifests
+        env:
+          ADDIN_HOST: https://${{ env.ADDIN_HOST }}
+          API_HOST: https://${{ env.API_HOST }}
+          AAD_CLIENT_ID: ${{ vars.AAD_CLIENT_ID }}
+          ADDIN_VERSION: ${{ needs.version.outputs.version }}.0
+          ORGANIZATION_NAME: Northbridge Capital
+        run: |
+          pnpm --filter @oao/shared build
+          pnpm --filter @oao/addin run --if-present manifest:render
+          pnpm --filter @oao/addin run --if-present validate-manifest
+
+      - name: Render the Helm-free Kubernetes manifests
+        run: |
+          pnpm k8s:render --clean
+          tar -czf oao-k8s-manifests-${{ needs.version.outputs.version }}.tar.gz -C infra/k8s rendered
+
+      - name: Collect release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp apps/addin/manifest/manifest.xml release-assets/manifest.xml
+          [ -f apps/addin/manifest/manifest.json ] && cp apps/addin/manifest/manifest.json release-assets/manifest.json
+          cp oao-k8s-manifests-*.tar.gz release-assets/
+          ls -l release-assets
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  publish:
+    name: GitHub release
+    runs-on: ubuntu-latest
+    needs: [version, images, chart, manifests]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble release notes
+        id: notes
+        run: |
+          set -euo pipefail
+          v="${{ needs.version.outputs.version }}"
+          owner="${{ needs.version.outputs.owner }}"
+          previous=$(git describe --tags --abbrev=0 "v$v^" 2>/dev/null || echo "")
+          {
+            echo "## Outlook AI Orchestrator $v"
+            echo
+            echo "### Images (signées cosign keyless, SBOM SPDX attaché)"
+            for i in orchestrator admin addin; do
+              digest=$(cat artifacts/digest-$i/oao-$i.digest 2>/dev/null || echo "")
+              echo "- \`ghcr.io/$owner/oao-$i:$v\` ${digest:+(\`$digest\`)}"
+            done
+            echo
+            echo "### Chart Helm"
+            echo '```bash'
+            echo "helm pull oci://ghcr.io/$owner/charts/outlook-ai-orchestrator --version $v"
+            echo '```'
+            echo
+            echo "### Vérification de la chaîne d'approvisionnement"
+            echo '```bash'
+            echo "cosign verify ghcr.io/$owner/oao-orchestrator:$v \\"
+            echo "  --certificate-identity-regexp '^https://github.com/$owner/.*' \\"
+            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+            echo '```'
+            echo
+            echo "### Déploiement"
+            echo "- NKP / GitOps : bumper \`image.tag\` dans \`infra/gitops/envs/prod/values.yaml\` (Flux applique)."
+            echo "- Manifest Office \`manifest.xml\` joint à cette release : à déployer via Microsoft 365 admin center → Integrated apps."
+            echo "- Runbook : \`docs/OPERATIONS.md\` · Déploiement : \`docs/NKP.md\`"
+            echo
+            if [ -n "$previous" ]; then
+              echo "### Changements depuis $previous"
+              git log --no-merges --pretty=format:'- %s (%h)' "$previous..v$v"
+            else
+              echo "### Changements"
+              git log --no-merges --pretty=format:'- %s (%h)' -n 50
+            fi
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ needs.version.outputs.version }}"
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ contains(needs.version.outputs.version, '-') }}
+          files: |
+            artifacts/release-assets/*
+            artifacts/helm-chart/*.tgz
+            artifacts/sbom-*/*.json

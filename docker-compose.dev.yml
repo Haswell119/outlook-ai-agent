@@ -1,10 +1,13 @@
 # ---------------------------------------------------------------------------
-# Dev override: only starts Postgres/pgvector. Developers run the three apps
-# themselves with pnpm (hot reload) — see scripts/dev-up.sh.
+# Dev: PostgreSQL/pgvector only. Developers run the three apps themselves with
+# pnpm (hot reload).
 #
-#   docker compose -f docker-compose.dev.yml up -d
-#   pnpm --filter @oao/shared build
-#   pnpm dev   # orchestrator :8080, addin :3000, admin :3001
+#   pnpm dev:db          # up + wait until healthy (wraps this file)
+#   pnpm dev:db reset    # wipe the volume and start again
+#   pnpm dev             # orchestrator :8080 · addin :3000 · admin :3001
+#
+# Named volume only and no host networking, so it behaves the same on Docker
+# Desktop (Windows/macOS) and Docker Engine (Linux).
 # ---------------------------------------------------------------------------
 
 name: oao-dev
@@ -17,10 +20,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-oao}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oao}
       POSTGRES_DB: ${POSTGRES_DB:-oao}
+      # Sub-path: the image refuses to initialise a non-empty mount point.
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - oao_dev_postgres_data:/var/lib/postgresql/data
+      # Creates the `vector` extension on first init (empty volume only).
       - ./infra/docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oao} -d ${POSTGRES_DB:-oao}"]

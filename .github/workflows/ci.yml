@@ -5,12 +5,26 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+# Only the latest run of a branch/PR matters.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   PNPM_VERSION: "10.33.0"
   NODE_VERSION: "20"
+  # Demo-mode defaults: tests never need a real Postgres or LLM.
+  LLM_PROVIDER: mock
+  DATABASE_URL: memory
+  AUTH_MODE: dev
 
 jobs:
+  # ---------------------------------------------------------------------------
   secret-scan:
     name: Secret scan
     runs-on: ubuntu-latest
@@ -29,8 +43,7 @@ jobs:
           set -euo pipefail
           # Belt-and-braces in case the gitleaks action is unavailable/skipped:
           # fail on likely AWS keys, PEM private keys, or leaked client secrets
-          # committed anywhere in the tree (excluding this workflow file itself
-          # and node_modules/.git).
+          # committed anywhere in the tree.
           if grep -RInE 'AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|client_secret\s*=\s*["'"'"']?[A-Za-z0-9._~+/-]{8,}' \
               --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.next \
               --exclude='*.lock' --exclude='ci.yml' .; then
@@ -39,13 +52,15 @@ jobs:
           fi
           echo "no obvious secret pattern found"
 
+  # ---------------------------------------------------------------------------
   build:
-    name: Build, typecheck, test
+    name: Build · typecheck · test (${{ matrix.package.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        app:
+        package:
+          - { name: shared, filter: "@oao/shared" }
           - { name: orchestrator, filter: "@oao/orchestrator" }
           - { name: addin, filter: "@oao/addin" }
           - { name: admin, filter: "@oao/admin" }
@@ -62,45 +77,277 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile=false
+        run: pnpm install --frozen-lockfile
 
       - name: Build @oao/shared
         run: pnpm --filter @oao/shared build
 
-      - name: Typecheck ${{ matrix.app.filter }}
-        run: pnpm --filter ${{ matrix.app.filter }} typecheck
+      - name: Typecheck
+        run: pnpm --filter ${{ matrix.package.filter }} typecheck
 
-      - name: Test ${{ matrix.app.filter }}
-        # LLM_PROVIDER=mock / DATABASE_URL=memory let orchestrator tests run
-        # with no external Postgres/LLM dependency, matching demo mode.
-        env:
-          LLM_PROVIDER: mock
-          DATABASE_URL: memory
-          AUTH_MODE: dev
-        run: pnpm --filter ${{ matrix.app.filter }} test
+      - name: Lint
+        run: pnpm --filter ${{ matrix.package.filter }} lint
 
-      - name: Build ${{ matrix.app.filter }}
+      - name: Test
+        run: pnpm --filter ${{ matrix.package.filter }} test
+
+      - name: Build
+        if: matrix.package.name != 'shared'
         env:
-          VITE_API_BASE_URL: https://api.oao.northbridge.local/api/v1
-          VITE_ADMIN_URL: https://admin.oao.northbridge.local
+          ADDIN_HOST: https://addin.oao.northbridge.example
+          API_HOST: https://api.oao.northbridge.example
+          VITE_API_BASE_URL: https://api.oao.northbridge.example/api/v1
+          VITE_ADMIN_URL: https://admin.oao.northbridge.example
           VITE_AUTH_MODE: aad
           VITE_API_MOCK: "false"
-        run: pnpm --filter ${{ matrix.app.filter }} build
+        run: pnpm --filter ${{ matrix.package.filter }} build
 
-      - name: Upload addin build + manifests
-        if: matrix.app.name == 'addin'
+      - name: Render and validate the Office manifests
+        if: matrix.package.name == 'addin'
+        env:
+          ADDIN_HOST: https://addin.oao.northbridge.example
+          API_HOST: https://api.oao.northbridge.example
+          ORGANIZATION_NAME: Northbridge Capital
+        run: |
+          pnpm --filter @oao/addin run --if-present manifest:render
+          pnpm --filter @oao/addin run --if-present validate-manifest
+
+      - name: Upload add-in bundle + manifests
+        if: matrix.package.name == 'addin'
         uses: actions/upload-artifact@v4
         with:
           name: addin-dist
           path: |
             apps/addin/dist
-            apps/addin/manifest/manifest.xml
-            apps/addin/manifest/manifest.dev.xml
+            apps/addin/manifest
           if-no-files-found: error
           retention-days: 14
 
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: Playwright e2e (${{ matrix.app.name }})
+    runs-on: ubuntu-latest
+    needs: [build]
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - { name: addin, filter: "@oao/addin" }
+          - { name: admin, filter: "@oao/admin" }
+    env:
+      # Both apps read this: keep the browser cache inside the workspace so
+      # actions/cache can pick it up and the e2e runners agree on the path.
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw-browsers
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build @oao/shared
+        run: pnpm --filter @oao/shared build
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install chromium
+        run: pnpm --filter ${{ matrix.app.filter }} exec playwright install --with-deps chromium
+
+      - name: Resolve the chromium binary
+        # Both playwright.config.ts default `executablePath` to
+        # /opt/pw-browsers/chromium (the dev image layout). Point them at the
+        # browser actually installed above instead of guessing.
+        run: |
+          set -euo pipefail
+          bin=$(pnpm --filter ${{ matrix.app.filter }} exec node -e \
+            "console.log(require('@playwright/test').chromium.executablePath())")
+          echo "resolved chromium: $bin"
+          test -x "$bin"
+          echo "PW_CHROMIUM_PATH=$bin" >> "$GITHUB_ENV"
+
+      - name: Run e2e
+        env:
+          VITE_API_MOCK: "true"
+          ADMIN_MOCK: "true"
+          ADMIN_AUTH_MODE: token
+        # `--if-present` keeps the job green for a package that does not
+        # expose an `e2e` script (yet).
+        run: pnpm --filter ${{ matrix.app.filter }} run --if-present e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.app.name }}
+          path: |
+            apps/${{ matrix.app.name }}/playwright-report
+            apps/${{ matrix.app.name }}/e2e-report
+            apps/${{ matrix.app.name }}/test-results
+            apps/${{ matrix.app.name }}/e2e-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  scripts:
+    name: Developer scripts (OS matrix)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The developer tooling must run without pnpm install, without bash and
+      # without curl — that is the whole point of scripts/*.mjs.
+      - name: Syntax check
+        shell: bash
+        run: |
+          for f in scripts/*.mjs scripts/lib/*.mjs; do
+            node --check "$f"
+            echo "ok $f"
+          done
+
+      - name: --help dry runs
+        shell: bash
+        run: |
+          node scripts/setup-dev.mjs --help
+          node scripts/dev-db.mjs --help
+          node scripts/certs.mjs --help
+          node scripts/check-llm.mjs --help
+          node scripts/smoke.mjs --help
+          node scripts/sideload-manifest.mjs --help
+          node scripts/render-k8s.mjs --help
+
+      - name: Sideload instructions render on this OS
+        shell: bash
+        run: node scripts/sideload-manifest.mjs --print
+
+      - name: No bash dependency in package.json scripts
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const bad = [];
+            for (const p of ['package.json','apps/addin/package.json','apps/admin/package.json','apps/orchestrator/package.json','packages/shared/package.json']) {
+              const s = JSON.parse(fs.readFileSync(p,'utf8')).scripts || {};
+              for (const [k,v] of Object.entries(s)) {
+                if (/(^|\s)(bash|sh|source)\s|\.sh\b|(^|\s)curl\s|(^|\s)sleep\s|&&\s*cp\s|\brm\s+-rf\b/.test(v)) bad.push(p+' -> '+k+': '+v);
+              }
+            }
+            if (bad.length) { console.error('POSIX-only constructs found:\n' + bad.join('\n')); process.exit(1); }
+            console.log('package.json scripts are OS-independent');
+          "
+
+  # ---------------------------------------------------------------------------
+  helm:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    env:
+      CHART: infra/helm/outlook-ai-orchestrator
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: helm lint (default values)
+        run: helm lint $CHART
+
+      - name: helm lint (NKP values)
+        run: helm lint $CHART -f $CHART/values-nkp.yaml
+
+      - name: Chart appVersion matches package.json
+        run: |
+          set -euo pipefail
+          app=$(grep -E '^appVersion:' $CHART/Chart.yaml | sed -E 's/.*"(.*)".*/\1/')
+          pkg=$(node -p "require('./package.json').version")
+          echo "chart appVersion=$app  package.json version=$pkg"
+          [ "$app" = "$pkg" ] || { echo "::error::Chart.yaml appVersion ($app) != package.json version ($pkg)"; exit 1; }
+
+      - name: helm template (default + NKP + prod-like)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rendered
+          helm template oao $CHART -n oao > /tmp/rendered/default.yaml
+          helm template oao $CHART -n oao -f $CHART/values-nkp.yaml \
+            --set secrets.postgresPassword=ci-placeholder \
+            --set secrets.adminApiToken=ci-placeholder \
+            --set secrets.metricsToken=ci-placeholder \
+            --set auth.aad.tenantId=00000000-0000-0000-0000-000000000000 \
+            --set auth.aad.clientId=00000000-0000-0000-0000-000000000000 \
+            --set admin.entra.clientId=00000000-0000-0000-0000-000000000000 \
+            > /tmp/rendered/nkp.yaml
+          # External database + External Secrets + Traefik IngressRoute variant.
+          helm template oao $CHART -n oao -f $CHART/values-nkp.yaml \
+            --set postgres.enabled=false \
+            --set postgres.external.host=postgres.northbridge.example \
+            --set postgres.external.existingSecret=oao-db \
+            --set secrets.create=false \
+            --set externalSecrets.enabled=true \
+            --set ingress.enabled=false \
+            --set traefik.ingressRoute.enabled=true \
+            > /tmp/rendered/external.yaml
+          wc -l /tmp/rendered/*.yaml
+
+      - name: kubeconform
+        run: |
+          set -euo pipefail
+          curl -sSL -o kubeconform.tgz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf kubeconform.tgz kubeconform
+          # CRDs (cert-manager, Traefik, Prometheus Operator, ESO) are not part
+          # of the Kubernetes schema set: skip them rather than pretend.
+          ./kubeconform -strict -summary -kubernetes-version 1.29.0 \
+            -ignore-missing-schemas /tmp/rendered/*.yaml
+
+      - name: GitOps manifests parse
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, sys, yaml
+          bad = 0
+          for f in sorted(glob.glob('infra/gitops/**/*.yaml', recursive=True)) + ['infra/gitops/.sops.yaml']:
+              try:
+                  list(yaml.safe_load_all(open(f)))
+              except Exception as exc:
+                  bad = 1
+                  print(f"::error file={f}::{exc}")
+          sys.exit(bad)
+          PY
+
+      - name: No stale reference to removed shell scripts
+        run: |
+          set -euo pipefail
+          if grep -RIn --exclude-dir=.git --exclude-dir=node_modules \
+               -e 'scripts/dev-up\.sh' -e 'scripts/dev-down\.sh' \
+               -e 'scripts/smoke-test\.sh' -e 'scripts/check-llm\.sh' \
+               -e 'scripts/gen-dev-cert\.sh' -e 'scripts/sideload-manifest\.ps1' . ; then
+            echo "::error::documentation or CI still references a removed shell script"
+            exit 1
+          fi
+          echo "no stale shell script reference"
+
+  # ---------------------------------------------------------------------------
   docker-build:
-    name: Docker build (no push)
+    name: Docker build (${{ matrix.image.name }}, no push)
     runs-on: ubuntu-latest
     needs: [build]
     strategy:
@@ -115,12 +362,28 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build ${{ matrix.image.name }} image
+      - name: Build ${{ matrix.image.name }}
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.image.dockerfile }}
           push: false
+          load: true
           tags: oao/${{ matrix.image.name }}:ci
+          build-args: |
+            VERSION=ci-${{ github.sha }}
+            REVISION=${{ github.sha }}
+            ADDIN_HOST=addin.oao.northbridge.example
+            API_HOST=api.oao.northbridge.example
+            ADMIN_HOST=admin.oao.northbridge.example
           cache-from: type=gha,scope=${{ matrix.image.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+
+      - name: Image runs as non-root
+        run: |
+          set -euo pipefail
+          uid=$(docker image inspect oao/${{ matrix.image.name }}:ci --format '{{.Config.User}}')
+          echo "USER=$uid"
+          case "$uid" in
+            ""|"root"|"0"|"0:0") echo "::error::image must not run as root"; exit 1 ;;
+          esac

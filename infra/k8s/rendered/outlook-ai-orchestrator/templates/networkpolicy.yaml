@@ -1,0 +1,423 @@
+---
+# Source: outlook-ai-orchestrator/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oao-default-deny
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Source: outlook-ai-orchestrator/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oao-api
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: orchestrator-api
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Ingress controller (Traefik on NKP)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kommander
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Admin dashboard -> orchestrator API
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: outlook-ai-orchestrator
+              app.kubernetes.io/instance: oao
+              app.kubernetes.io/component: admin
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Prometheus scraping /metrics
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kommander
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: outlook-ai-orchestrator
+              app.kubernetes.io/instance: oao
+              app.kubernetes.io/component: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+    
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+      ports:
+        - port: 8000
+          protocol: TCP
+    
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# Source: outlook-ai-orchestrator/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oao-worker
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator-worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: orchestrator-worker
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kommander
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: outlook-ai-orchestrator
+              app.kubernetes.io/instance: oao
+              app.kubernetes.io/component: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+    
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+      ports:
+        - port: 8000
+          protocol: TCP
+    
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# Source: outlook-ai-orchestrator/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oao-admin
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: admin
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: admin
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kommander
+      ports:
+        - port: 3001
+          protocol: TCP
+  egress:
+    
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Admin -> orchestrator API (server-side rendering / route handlers)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: outlook-ai-orchestrator
+              app.kubernetes.io/instance: oao
+              app.kubernetes.io/component: orchestrator-api
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Entra ID sign-in (login.microsoftonline.com)
+    
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# Source: outlook-ai-orchestrator/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oao-addin
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: addin
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: addin
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kommander
+      ports:
+        - port: 3000
+          protocol: TCP
+  # Static files only: nothing but DNS is needed outbound.
+  egress:
+    
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# Source: outlook-ai-orchestrator/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oao-postgres
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: postgres
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: postgres
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [outlook-ai-orchestrator]
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [orchestrator-api, orchestrator-worker, migrate, backup]
+      ports:
+        - port: 5432
+          protocol: TCP
+  egress:
+    
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# Source: outlook-ai-orchestrator/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oao-backup
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: backup
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: backup
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: outlook-ai-orchestrator
+              app.kubernetes.io/instance: oao
+              app.kubernetes.io/component: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+---
+# Source: outlook-ai-orchestrator/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oao-migrate
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: migrate
+  annotations:
+    # Must exist before the pre-install migration hook runs.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: migrate
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: outlook-ai-orchestrator
+              app.kubernetes.io/instance: oao
+              app.kubernetes.io/component: postgres
+      ports:
+        - port: 5432
+          protocol: TCP

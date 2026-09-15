@@ -140,5 +140,12 @@ curl -s "$API/audit?page=1&pageSize=25" \
   -H "x-user-email: admin@northbridge.example" -H "x-user-name: Admin" | jq
 ```
 
-Voir `scripts/smoke-test.sh` pour un script prêt à l'emploi couvrant health +
-analyze/email + compliance/check + chat.
+Voir `pnpm smoke` (`scripts/smoke.mjs`) pour un script prêt à l'emploi,
+multi-plateforme, couvrant les probes (`/live`, `/ready`), `/metrics`,
+`/config/features`, analyze/email, compliance/check et chat :
+
+```bash
+pnpm smoke                                              # instance locale
+pnpm smoke --url https://api.oao.northbridge.example \
+           --token "$JWT" --metrics-token "$METRICS_TOKEN" --wait 60
+```

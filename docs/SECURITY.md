@@ -27,7 +27,7 @@ Acteurs de menace considérés :
 | Compromission de compte (jeton volé) | Rejeu d'un jeton SSO/Graph | Jetons courte durée (SSO Office), validation JWT stricte (issuer/audience/JWKS) en `AUTH_MODE=aad`, `TENANT_ID` épinglé, pas de session longue durée côté orchestrator |
 | Fuite depuis les logs / la base d'audit | Corps d'email en clair dans les logs ou la DB | `AUDIT_STORE_CONTENT=false` par défaut (hashes SHA-256 uniquement), voir §3 |
 | Modèle IA interne compromis / malveillant | Sortie IA manipulatrice (auto-approbation, fuite de contexte) | Sortie toujours validée par des schémas zod stricts, jamais de champ "exécuter directement" dans la sortie LLM — l'exécution passe uniquement par le pipeline `propose → approve (humain) → execute` |
-| Déni de service sur le modèle interne | Le GPU/LLM interne devient indisponible | Repli heuristique dégradé documenté (`docs/OPERATIONS.md` §6), pas de blocage total du produit |
+| Déni de service sur le modèle interne | Le GPU/LLM interne devient indisponible | Repli heuristique dégradé documenté (`docs/OPERATIONS.md` §11), pas de blocage total du produit |
 
 ## 2. Flux de données
 
@@ -98,7 +98,7 @@ d'email → prompt → réponse" reste sur le réseau interne.
 | `admin` | Accès complet au dashboard admin : audit global, policy (`/api/v1/admin/policy`), gestion des utilisateurs (`/api/v1/admin/users`), toutes les analytics. |
 
 - En `AUTH_MODE=aad` : rôles portés par les **app roles** / groupes Azure AD
-  (assignés dans Enterprise Applications, voir `docs/SETUP.md` §6).
+  (assignés dans Enterprise Applications, voir `docs/SETUP.md` §3).
 - En `AUTH_MODE=dev` (local uniquement, refusé si `NODE_ENV=production`) :
   rôles dérivés de `ADMIN_EMAILS` / `COMPLIANCE_EMAILS` (listes d'emails dans
   `.env`), tout le reste est `user`.
@@ -126,7 +126,7 @@ hébergement interne) :
 - **Réversibilité / auditabilité des automatisations** : toute automatisation
   passe par `proposed → simulated → approved/active`, avec un historique
   d'activité consultable (`lastSimulation`, `View activity history`).
-- **Conservation et purge contrôlées** de l'audit (`docs/OPERATIONS.md` §8),
+- **Conservation et purge contrôlées** de l'audit (`docs/OPERATIONS.md` §13),
   alignées sur les durées légales applicables (à valider avec l'équipe
   compliance/juridique de Northbridge selon le flux concerné — ce document ne
   fixe pas de durée réglementaire précise, il documente le mécanisme).
@@ -175,3 +175,269 @@ correspondante (`docs/ARCHITECTURE.md` §9) est activée en production, et le
 consentement admin (§6 de `docs/SETUP.md`) est donné scope par scope au fur et
 à mesure du déploiement des phases, pas en une seule fois pour toutes les
 phases futures.
+
+## 9. Modèle réseau — NetworkPolicies
+
+Le chart Helm applique un **default-deny** sur le namespace (ingress *et*
+egress), puis ouvre uniquement les flux nécessaires. Conséquence
+opérationnelle à connaître : tout endpoint non déclaré est silencieusement
+injoignable (voir `docs/OPERATIONS.md` §11).
+
+```
+                    ┌──────────────── namespace oao (default-deny) ────────────────┐
+  Traefik           │                                                              │
+ (ns kommander) ────┼──► oao-api:8080 ──┬──► oao-postgres:5432                     │
+                    │                   ├──► LLM interne (llm.egress.cidrs:8000)   │
+                    │                   └──► 443/tcp hors RFC1918                  │
+                    │                        (login.microsoftonline.com,           │
+                    │                         graph.microsoft.com)                 │
+  Traefik ──────────┼──► oao-admin:3001 ─┬─► oao-api:8080                          │
+                    │                    └─► 443/tcp (Entra ID, si authMode=aad)   │
+  Traefik ──────────┼──► oao-addin:3000  ──► (DNS uniquement)                      │
+                    │                                                              │
+  Prometheus        │                                                              │
+ (ns kommander) ────┼──► oao-api / oao-worker :8080/metrics                         │
+                    │      oao-worker ──► postgres, LLM, Microsoft                 │
+                    │      oao-migrate / oao-backup ──► postgres                   │
+                    └──────────────────────────────────────────────────────────────┘
+        Tout le reste (est-ouest, sortie Internet, accès direct à Postgres) : refusé.
+```
+
+| Politique | podSelector | Ingress autorisé | Egress autorisé |
+|---|---|---|---|
+| `oao-default-deny` | tous | — | — |
+| `oao-api` | `component=orchestrator-api` | ns ingress (`kommander`), pods `admin`, ns monitoring | DNS, postgres, CIDR LLM, 443 Microsoft |
+| `oao-worker` | `component=orchestrator-worker` | ns monitoring | idem API |
+| `oao-admin` | `component=admin` | ns ingress | DNS, `oao-api:8080`, 443 Entra ID |
+| `oao-addin` | `component=addin` | ns ingress | DNS uniquement (fichiers statiques) |
+| `oao-postgres` | `component=postgres` | api, worker, migrate, backup | DNS |
+| `oao-migrate` / `oao-backup` | jobs | — | DNS, postgres (+443 si backup S3) |
+
+Limite assumée : `NetworkPolicy` ne sait pas filtrer par nom de domaine. Les
+flux vers Entra ID et Graph sont donc exprimés comme « 443/tcp vers
+l'Internet public, toutes les plages RFC1918 exclues ». Deux façons de
+resserrer :
+
+- renseigner `networkPolicy.microsoft.cidrs` avec les plages publiées par
+  Microsoft (à maintenir), ou
+- sur un NKP à CNI Cilium, doubler la politique d'une `CiliumNetworkPolicy`
+  avec `toFQDNs` :
+
+```yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: oao-api-microsoft-fqdn
+  namespace: oao
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: orchestrator-api
+  egress:
+    - toFQDNs:
+        - matchName: login.microsoftonline.com
+        - matchPattern: "*.graph.microsoft.com"
+        - matchName: graph.microsoft.com
+      toPorts:
+        - ports: [{ port: "443", protocol: TCP }]
+```
+
+Durcissement complémentaire appliqué par le chart : namespace en
+`pod-security.kubernetes.io/enforce=restricted`, `runAsNonRoot`,
+`readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`,
+`capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault`,
+`automountServiceAccountToken: false` (aucun composant n'appelle l'API
+Kubernetes).
+
+## 10. Gestion des secrets
+
+Aucun secret — même chiffré — n'est nécessaire au fonctionnement du dépôt
+public. Trois stratégies, dans l'ordre de préférence :
+
+| Stratégie | Où vit le secret | Quand l'utiliser |
+|---|---|---|
+| **External Secrets Operator** | coffre (Vault, Key Vault, Nutanix) ; rien en git | Northbridge dispose déjà d'un coffre |
+| **SOPS + age** | git, chiffré ; clé age dans le coffre / `Secret sops-age` de Flux | GitOps pur, pas de coffre |
+| `secrets.existingSecret` | Secret créé hors flux (kubectl, Sealed Secrets) | bootstrap, cluster de test |
+
+Règles communes :
+
+- Les secrets sont **montés en fichiers** (`secrets.mountAsFiles=true`,
+  `/run/secrets/oao/<NOM>`, mode `0400`) et lus via `<NOM>_FILE`. Ils
+  n'apparaissent ni dans l'environnement du pod, ni dans `kubectl describe
+  pod`, ni dans un `docker inspect`.
+- Les clés propres au dashboard (`AUTH_SECRET`,
+  `AUTH_MICROSOFT_ENTRA_ID_SECRET`) ne sont **jamais** injectées dans les pods
+  orchestrator, et inversement : cloisonnement par composant.
+- Le module `apps/orchestrator/src/util/secrets.ts` rédige (`***`) toute valeur
+  sensible dans les logs et le banner de démarrage, et masque le mot de passe
+  des URL de connexion.
+- La CI exécute **gitleaks** sur l'historique complet à chaque PR, doublé d'un
+  `grep` de motifs évidents (clés AWS, blocs PEM, `client_secret=`).
+- `.gitignore` exclut `.env`, `*.pem`, `*.key`, `*.crt` ; `.dockerignore`
+  exclut en plus `**/certs` afin qu'aucun certificat n'entre dans une couche
+  d'image.
+
+Chiffrement SOPS (voir `infra/gitops/.sops.yaml`) : `encrypted_regex:
+^(data|stringData)$` — seules les valeurs sont chiffrées, les métadonnées
+(`kind`, `name`, `namespace`) restent lisibles pour kustomize et pour la
+revue de code.
+
+Rotation : `docs/OPERATIONS.md` §8.
+
+## 11. Chaîne d'approvisionnement (supply chain)
+
+Ce que produit `.github/workflows/release.yml` pour chaque tag `vX.Y.Z` :
+
+| Artefact | Protection |
+|---|---|
+| Images `ghcr.io/<owner>/oao-{orchestrator,admin,addin}` | tags semver + sha, **signature cosign keyless** (OIDC GitHub, pas de clé à garder), build provenance SLSA (`provenance: mode=max`) |
+| SBOM SPDX (syft) | publiée en asset de release **et** attachée comme attestation signée (`cosign attest --type spdxjson`) |
+| Scan `trivy` | la release **échoue** sur toute vulnérabilité `CRITICAL` corrigeable |
+| Chart Helm OCI | `ghcr.io/<owner>/charts/outlook-ai-orchestrator`, signé cosign |
+| Manifests Office | `manifest.xml` / `manifest.json` rendus pour l'environnement de production, joints à la release |
+
+Vérification côté opérateur, avant un déploiement :
+
+```bash
+cosign verify ghcr.io/northbridge-capital/oao-orchestrator:1.2.3 \
+  --certificate-identity-regexp '^https://github.com/northbridge-capital/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign verify-attestation --type spdxjson \
+  ghcr.io/northbridge-capital/oao-orchestrator:1.2.3 \
+  --certificate-identity-regexp '^https://github.com/northbridge-capital/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Vérification **imposée par le cluster** (admission) — Kyverno, disponible dans
+le catalogue Kommander :
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: oao-require-signed-images
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: verify-oao-images
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [oao, oao-dev]
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/northbridge-capital/oao-*"
+          mutateDigest: true   # épingle le digest : plus de tag mutable en vol
+          verifyDigest: true
+          required: true
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subject: "https://github.com/northbridge-capital/outlook-ai-agent/.github/workflows/release.yml@refs/tags/*"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev
+```
+
+Une politique complémentaire interdit les images non signées venant d'ailleurs :
+
+```yaml
+    - name: disallow-unsigned-third-party
+      match:
+        any: [{ resources: { kinds: [Pod], namespaces: [oao] } }]
+      validate:
+        message: "Seules les images GHCR Northbridge signées et les bases validées sont autorisées."
+        pattern:
+          spec:
+            containers:
+              - image: "ghcr.io/northbridge-capital/* | pgvector/pgvector:* | nginxinc/nginx-unprivileged:*"
+```
+
+Sur un cluster air-gapped, l'étape de vérification Rekor doit pointer vers une
+instance interne, ou la politique passer en mode clé publique (`keys:` plutôt
+que `keyless:`).
+
+Autres contrôles de la chaîne :
+
+- `pnpm install --frozen-lockfile` partout (CI et images) : un `pnpm-lock.yaml`
+  désynchronisé fait échouer le build plutôt que de résoudre une version
+  imprévue.
+- Dependabot sur npm, GitHub Actions et images de base, groupé par famille.
+- CodeQL (`javascript-typescript` + `actions`, requêtes `security-extended`)
+  sur chaque PR et chaque semaine.
+- Images sans `curl` ni shell superflu, healthcheck en Node/busybox, rootfs en
+  lecture seule (surface d'exploitation réduite).
+
+## 12. Ajouts au modèle de menace (déploiement)
+
+Compléments à §1, propres à l'exécution en cluster :
+
+| Acteur / scénario | Vecteur | Mitigation |
+|---|---|---|
+| Compromission d'un autre workload du cluster | déplacement latéral vers PostgreSQL ou l'API | default-deny + politiques par composant (§9) ; PostgreSQL n'est jamais exposé par l'ingress ; `automountServiceAccountToken: false` |
+| Compromission de la chaîne de build | image altérée poussée sous un tag existant | signature cosign keyless + admission Kyverno avec `mutateDigest` (§11) ; lockfile gelé ; SBOM attestée |
+| Exfiltration par le pod applicatif | egress arbitraire vers Internet | egress limité à DNS, PostgreSQL, CIDR du LLM, 443 hors RFC1918 ; le pod add-in n'a **aucun** egress |
+| Vol de secret via l'API Kubernetes | lecture de Secret depuis un pod | secrets montés en fichiers `0400`, pas de token de ServiceAccount monté, RBAC namespace |
+| Administrateur cluster curieux | lecture du contenu des emails | rien n'est stocké en clair par défaut (hashes SHA-256, `AUDIT_STORE_CONTENT=false`) ; l'accès à la base est journalisé |
+| Scrape non autorisé de `/metrics` | énumération d'activité (volumétrie par utilisateur) | `METRICS_TOKEN` obligatoire + NetworkPolicy limitant l'ingress au namespace de monitoring |
+| Dérive de configuration (changement manuel en prod) | `kubectl edit` non tracé | `driftDetection: enabled` de Flux réapplique l'état du dépôt ; git est la source de vérité |
+| Perte de disponibilité du GPU interne | le produit devient inutilisable | dégradation heuristique documentée, alerte `OaoLlmCircuitOpen`, aucune bascule vers un cloud public |
+
+## 13. Localisation des données (data residency)
+
+- **Tout reste dans le périmètre Northbridge** : le contenu des emails ne
+  quitte jamais le couple « cluster NKP on-premise + GPU interne ». Aucun
+  fournisseur d'IA public n'est appelé, dans aucun mode de fonctionnement
+  (`llm.provider` ne connaît que `openai-compatible` — pointé vers l'endpoint
+  interne — et `mock`).
+- Les seuls flux sortants du cluster sont : l'endpoint LLM interne (réseau
+  privé), PostgreSQL (dans le cluster ou base interne), et — uniquement si
+  `graph.enabled=true` — Entra ID et Microsoft Graph, qui sont déjà les
+  systèmes d'origine des emails traités. Aucune donnée n'est envoyée à un
+  tiers qui ne la détenait pas déjà.
+- Les sauvegardes restent dans le cluster (PVC) ou sur le stockage objet
+  interne (Nutanix Objects) : `postgres.backup.s3.endpoint` doit pointer vers
+  un endpoint interne, jamais vers un bucket cloud public.
+- Les images et le chart sont hébergés sur GHCR : ils contiennent du **code**,
+  jamais de données clients. Pour un cluster air-gapped, les miroiter sur le
+  registre interne.
+- Télémétrie : désactivée (`NEXT_TELEMETRY_DISABLED=1`) ; aucun appel
+  analytics, aucun CDN externe dans le bundle de l'add-in.
+
+## 14. Correspondance des contrôles (FINMA-friendly)
+
+Tableau de correspondance entre les attentes usuelles d'un régulateur
+financier suisse (FINMA 2018/3 sur l'externalisation, circulaires sur les
+risques opérationnels et informatiques) et l'implémentation. Ce tableau
+documente des **contrôles techniques** ; il ne remplace pas une revue
+juridique.
+
+| Domaine de contrôle | Attente | Implémentation | Preuve / vérification |
+|---|---|---|---|
+| Traçabilité des décisions | toute suggestion et toute action automatisée est journalisée et attribuable | `AuditEvent` obligatoire sur chaque chemin (invariant du projet), `correlationId` reliant log et audit | `GET /api/v1/audit`, export CSV, `oao_audit_events_total` |
+| Contrôle humain (HITL) | pas d'exécution autonome d'action à impact | `requiresApproval` dès le risque `low`, `approvedBy` nominatif, `send`/`delete` hors périmètre | §4, §7, page *Approvals* du dashboard |
+| Séparation des tâches | l'équipe compliance dispose d'un chemin décisionnel distinct | RBAC `user`/`compliance`/`admin` via app roles Entra ID, `compliance_escalated` → `compliance_decision` | §5, assignations Enterprise Applications |
+| Moindre privilège (identité) | scopes strictement utilisés | aucun `Mail.Send`, aucun `*.All` délégué ; mode applicatif restreint par Exchange application access policy sur un groupe | `Test-ApplicationAccessPolicy` (`docs/SETUP.md` §4) |
+| Moindre privilège (réseau) | cloisonnement des flux | NetworkPolicy default-deny + 8 politiques explicites | §9, `kubectl -n oao get networkpolicy` |
+| Moindre privilège (exécution) | pas de privilèges superflus | non-root, rootfs en lecture seule, `capabilities: [ALL]` retirées, PSA `restricted` | manifests du chart |
+| Minimisation des données | ne conserver que le nécessaire | hashes SHA-256 au lieu du contenu (`AUDIT_STORE_CONTENT=false`), métadonnées de pièces jointes seulement | §3 |
+| Chiffrement en transit | TLS de bout en bout | HTTPS sur les 3 Ingress (cert-manager), TLS re-chiffré jusqu'au pod add-in, `sslmode=require` vers une base externe | `kubectl -n oao get certificate` |
+| Chiffrement au repos | données persistantes chiffrées | chiffrement du datastore Nutanix (couche infrastructure) + `encryption at rest` etcd du cluster ; les sauvegardes héritent du même stockage | configuration Nutanix/NKP, hors périmètre applicatif |
+| Conservation et suppression | durée définie, purge contrôlée et tracée | `AUDIT_RETENTION_DAYS`, `INDEX_RETENTION_DAYS` appliqués par le worker ; purge manuelle sous sauvegarde + export | §13 de `docs/OPERATIONS.md` |
+| Continuité (BCM) | RPO/RTO définis et testés | sauvegarde quotidienne + snapshots, RPO ≤ 24 h / RTO ≤ 4 h documentés, test de restauration trimestriel | `docs/OPERATIONS.md` §9–10 |
+| Gestion des changements | changements revus, traçables, réversibles | GitOps : tout changement est un commit revu ; `driftDetection` ; rollback Helm/Flux | historique git, `helm history` |
+| Intégrité des livrables | provenance des artefacts déployés | signature cosign keyless, SBOM attestée, scan trivy bloquant, admission Kyverno | §11 |
+| Détection et supervision | alertes techniques et métier | 9 règles Prometheus + dashboard Grafana + KPI d'audit | §4 de `docs/OPERATIONS.md` |
+| Gestion des vulnérabilités | veille et correction | Dependabot (npm/actions/docker), CodeQL, trivy en release | PR Dependabot, onglet Security |
+| Localisation des données | pas de transfert hors périmètre | modèle IA interne, aucun fournisseur cloud d'IA | §13 |
+| Gestion des accès privilégiés | accès admin restreint et auditable | *Assignment required* sur l'app dashboard, groupes dédiés, actions admin auditées | Entra ID + audit |
+
+Points à porter explicitement au dossier de conformité, car **non couverts**
+par ce dépôt : chiffrement au repos (propriété de la plateforme Nutanix),
+gestion des identités et revue périodique des accès (processus Entra ID),
+et la revue juridique de l'usage de l'IA sur des données clients.

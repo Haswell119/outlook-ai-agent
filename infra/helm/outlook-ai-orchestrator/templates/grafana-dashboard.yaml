@@ -1,0 +1,17 @@
+{{- if .Values.metrics.grafanaDashboard.enabled }}
+# Picked up by the Grafana sidecar of kube-prometheus-stack (label selector
+# `grafana_dashboard: "1"` by default on NKP/Kommander).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oao.fullname" . }}-dashboard
+  namespace: {{ .Values.metrics.grafanaDashboard.namespace | default .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator") | indent 4 }}
+    {{- with .Values.metrics.grafanaDashboard.labels }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+data:
+  outlook-ai-orchestrator.json: |
+{{ .Files.Get "dashboards/outlook-ai-orchestrator.json" | indent 4 }}
+{{- end }}

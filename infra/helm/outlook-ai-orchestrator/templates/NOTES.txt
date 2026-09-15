@@ -1,0 +1,53 @@
+Outlook AI Orchestrator {{ .Chart.AppVersion }} — release "{{ .Release.Name }}" (namespace {{ .Release.Namespace }})
+
+URLs:
+  API        https://{{ .Values.hosts.api }}/api/v1/health
+  Dashboard  https://{{ .Values.hosts.admin }}
+  Add-in     https://{{ .Values.hosts.addin }}/taskpane.html
+
+Vérifications (checklist complète : docs/NKP.md §vérification) :
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "oao.fullname" . }}-api
+  kubectl -n {{ .Release.Namespace }} get pods,svc,ingress,networkpolicy
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/component=orchestrator-worker --tail=50
+
+{{- $problems := list }}
+{{- if and .Values.postgres.enabled (not .Values.secrets.postgresPassword) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- $problems = append $problems "secrets.postgresPassword est vide alors que postgres.enabled=true : ni DATABASE_URL ni POSTGRES_PASSWORD ne seront créés et les pods resteront en CreateContainerConfigError." }}
+{{- end }}
+{{- if and (not .Values.postgres.enabled) (not .Values.secrets.databaseUrl) (not .Values.postgres.external.existingSecret) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) (not .Values.postgres.external.host) }}
+{{- $problems = append $problems "postgres.enabled=false mais aucune base externe n'est configurée (postgres.external.host / secrets.databaseUrl / postgres.external.existingSecret)." }}
+{{- end }}
+{{- if and (eq .Values.auth.mode "aad") (not .Values.auth.aad.tenantId) }}
+{{- $problems = append $problems "auth.mode=aad mais auth.aad.tenantId est vide : toutes les requêtes seront rejetées en 401." }}
+{{- end }}
+{{- if and (eq .Values.auth.mode "aad") (not .Values.auth.aad.clientId) }}
+{{- $problems = append $problems "auth.mode=aad mais auth.aad.clientId est vide." }}
+{{- end }}
+{{- if and (ne .Values.auth.mode "aad") (eq .Values.config.nodeEnv "production") }}
+{{- $problems = append $problems "auth.mode n'est pas 'aad' : l'orchestrator refuse de démarrer avec NODE_ENV=production." }}
+{{- end }}
+{{- if and .Values.config.metricsEnabled (not .Values.secrets.metricsToken) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- $problems = append $problems "secrets.metricsToken est vide : /metrics ne pourra pas être scrapé (ou sera exposé sans jeton selon la config de l'app)." }}
+{{- end }}
+{{- if and .Values.admin.enabled (eq .Values.admin.authMode "aad") (not .Values.admin.entra.clientId) }}
+{{- $problems = append $problems "admin.authMode=aad mais admin.entra.clientId est vide : la connexion au dashboard échouera." }}
+{{- end }}
+{{- if .Values.features.demoSeed }}
+{{- $problems = append $problems "features.demoSeed=true : des données de démonstration seront insérées. À bannir en production." }}
+{{- end }}
+{{- if .Values.config.auditStoreContent }}
+{{- $problems = append $problems "config.auditStoreContent=true : le corps des emails est persisté dans l'audit. Validation compliance obligatoire (docs/SECURITY.md)." }}
+{{- end }}
+{{- if and .Values.addin.enabled (eq .Values.addin.tls.mode "selfSigned") }}
+{{- $problems = append $problems "addin.tls.mode=selfSigned : certificat auto-signé, Outlook refusera de charger le volet. Utiliser certManager ou secret en production." }}
+{{- end }}
+{{- if $problems }}
+
+!!  CONFIGURATION INCOMPLÈTE — {{ len $problems }} point(s) à corriger :
+{{- range $i, $p := $problems }}
+  {{ add1 $i }}. {{ $p }}
+{{- end }}
+{{- else }}
+
+OK : aucun réglage obligatoire manquant détecté.
+{{- end }}

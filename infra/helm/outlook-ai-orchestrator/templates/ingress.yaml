@@ -1,0 +1,129 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullname := include "oao.fullname" . -}}
+{{- $isNginx := contains "nginx" .Values.ingress.className -}}
+{{- $isTraefik := contains "traefik" .Values.ingress.className -}}
+{{- $bodyLimitMw := and $isTraefik .Values.traefik.middleware.bodyLimit.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-api") | indent 4 }}
+  annotations:
+{{ include "oao.ingress.baseAnnotations" . | indent 4 }}
+    {{- if $bodyLimitMw }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s-body-limit@kubernetescrd" .Release.Namespace $fullname }}
+    {{- end }}
+    {{- with .Values.ingress.apiAnnotations }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.hosts.api | quote }}
+      secretName: {{ include "oao.tls.apiSecretName" . }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.hosts.api | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-api
+                port:
+                  number: {{ .Values.orchestrator.service.port }}
+{{- if .Values.admin.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-admin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "admin") | indent 4 }}
+  annotations:
+{{ include "oao.ingress.baseAnnotations" . | indent 4 }}
+    {{- with .Values.ingress.adminAnnotations }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.hosts.admin | quote }}
+      secretName: {{ include "oao.tls.adminSecretName" . }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.hosts.admin | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-admin
+                port:
+                  number: {{ .Values.admin.service.port }}
+{{- end }}
+{{- if .Values.addin.enabled }}
+---
+# The add-in pod terminates TLS itself (Office requires HTTPS for the task
+# pane host), so the controller must re-encrypt towards the backend:
+#   nginx   -> backend-protocol: HTTPS annotation (below)
+#   traefik -> serversscheme: https annotation on the Service (see addin.yaml)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-addin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "addin") | indent 4 }}
+  annotations:
+{{ include "oao.ingress.baseAnnotations" . | indent 4 }}
+    {{- if $isNginx }}
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    {{- end }}
+    {{- with .Values.ingress.addinAnnotations }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.hosts.addin | quote }}
+      secretName: {{ include "oao.tls.addinSecretName" . }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.hosts.addin | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-addin
+                port:
+                  number: {{ .Values.addin.service.port }}
+{{- end }}
+{{- if $bodyLimitMw }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $fullname }}-body-limit
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-api") | indent 4 }}
+spec:
+  buffering:
+    maxRequestBodyBytes: {{ .Values.config.bodyLimitBytes }}
+    memRequestBodyBytes: {{ .Values.traefik.middleware.bodyLimit.memoryRequestBodyBytes }}
+{{- end }}
+{{- end }}

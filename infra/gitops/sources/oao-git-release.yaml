@@ -1,0 +1,18 @@
+# Source Git suivie par la production : dernier tag `vX.Y.Z` (immuable).
+# Une mise en production = un tag git, pas un commit sur main.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: oao-release
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://github.com/northbridge-capital/outlook-ai-agent.git
+  ref:
+    semver: ">=0.1.0"
+  secretRef:
+    name: oao-git-auth
+  ignore: |
+    /*
+    !/infra/helm
+    !/infra/gitops

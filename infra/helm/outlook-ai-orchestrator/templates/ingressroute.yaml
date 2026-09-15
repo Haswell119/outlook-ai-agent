@@ -1,0 +1,95 @@
+{{- if .Values.traefik.ingressRoute.enabled }}
+{{- $fullname := include "oao.fullname" . -}}
+{{/*
+  Traefik-native alternative to the Ingress objects (ingress.enabled=false).
+  Use it when you need middlewares, TLSOptions or a certResolver that plain
+  Ingress annotations cannot express.
+*/}}
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ $fullname }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-api") | indent 4 }}
+spec:
+  entryPoints:
+{{ toYaml .Values.traefik.ingressRoute.entryPoints | indent 4 }}
+  routes:
+    - kind: Rule
+      match: {{ printf "Host(`%s`)" .Values.hosts.api | quote }}
+      services:
+        - name: {{ $fullname }}-api
+          port: {{ .Values.orchestrator.service.port }}
+      {{- if or .Values.traefik.ingressRoute.middlewares .Values.traefik.middleware.bodyLimit.enabled }}
+      middlewares:
+        {{- if .Values.traefik.middleware.bodyLimit.enabled }}
+        - name: {{ $fullname }}-body-limit
+          namespace: {{ .Release.Namespace }}
+        {{- end }}
+        {{- range .Values.traefik.ingressRoute.middlewares }}
+        - name: {{ .name }}
+          namespace: {{ .namespace | default $.Release.Namespace }}
+        {{- end }}
+      {{- end }}
+  tls:
+    secretName: {{ .Values.traefik.ingressRoute.tlsSecretName | default (include "oao.tls.apiSecretName" .) }}
+    {{- with .Values.traefik.ingressRoute.tlsOptionRef }}
+    options:
+      name: {{ . }}
+    {{- end }}
+{{- if .Values.admin.enabled }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ $fullname }}-admin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "admin") | indent 4 }}
+spec:
+  entryPoints:
+{{ toYaml .Values.traefik.ingressRoute.entryPoints | indent 4 }}
+  routes:
+    - kind: Rule
+      match: {{ printf "Host(`%s`)" .Values.hosts.admin | quote }}
+      services:
+        - name: {{ $fullname }}-admin
+          port: {{ .Values.admin.service.port }}
+      {{- with .Values.traefik.ingressRoute.middlewares }}
+      middlewares:
+        {{- range . }}
+        - name: {{ .name }}
+          namespace: {{ .namespace | default $.Release.Namespace }}
+        {{- end }}
+      {{- end }}
+  tls:
+    secretName: {{ include "oao.tls.adminSecretName" . }}
+{{- end }}
+{{- if .Values.addin.enabled }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ $fullname }}-addin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "addin") | indent 4 }}
+spec:
+  entryPoints:
+{{ toYaml .Values.traefik.ingressRoute.entryPoints | indent 4 }}
+  routes:
+    - kind: Rule
+      match: {{ printf "Host(`%s`)" .Values.hosts.addin | quote }}
+      services:
+        # scheme https: the pod terminates TLS itself.
+        - name: {{ $fullname }}-addin
+          port: {{ .Values.addin.service.port }}
+          scheme: https
+          {{- if .Values.addin.traefik.serversTransport.enabled }}
+          serversTransport: {{ $fullname }}-addin
+          {{- end }}
+  tls:
+    secretName: {{ include "oao.tls.addinSecretName" . }}
+{{- end }}
+{{- end }}

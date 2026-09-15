@@ -1,0 +1,69 @@
+version: 2
+
+updates:
+  # --- npm / pnpm workspace --------------------------------------------------
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 10
+    versioning-strategy: increase
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    labels: [dependencies, javascript]
+    groups:
+      # One PR per coherent family: less review noise, easier rollback.
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      next:
+        patterns: ["next", "eslint-config-next"]
+      fluentui:
+        patterns: ["@fluentui/*"]
+      radix:
+        patterns: ["@radix-ui/*"]
+      fastify:
+        patterns: ["fastify", "@fastify/*", "fastify-plugin"]
+      office:
+        patterns: ["office-addin-*", "@types/office-*"]
+      testing:
+        patterns: ["vitest", "@vitest/*", "@testing-library/*", "jsdom", "playwright", "@playwright/*"]
+      typescript-toolchain:
+        patterns: ["typescript", "tsx", "vite", "@vitejs/*"]
+    ignore:
+      # Node 20 is the supported runtime (see engines + Dockerfiles).
+      - dependency-name: "@types/node"
+        versions: [">=21"]
+
+  # --- GitHub Actions -------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:15"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci(deps)"
+    labels: [dependencies, github-actions]
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # --- Base images ----------------------------------------------------------
+  - package-ecosystem: docker
+    directories:
+      - "/infra/docker"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:30"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(docker)"
+    labels: [dependencies, docker]

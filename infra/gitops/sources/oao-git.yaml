@@ -1,0 +1,22 @@
+# Source Git suivie par l'environnement de dev : branche `main`.
+# Attachée dans Kommander via Applications -> Git repository, ou appliquée
+# directement (kubectl apply -f infra/gitops/sources/).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: oao
+  namespace: flux-system
+spec:
+  interval: 5m
+  url: https://github.com/northbridge-capital/outlook-ai-agent.git
+  ref:
+    branch: main
+  # Dépôt privé : Secret (type Opaque) contenant `username` + `password`
+  # (PAT) ou `identity`/`known_hosts` pour SSH.
+  secretRef:
+    name: oao-git-auth
+  ignore: |
+    # Ne synchroniser que ce dont Flux a besoin.
+    /*
+    !/infra/helm
+    !/infra/gitops

@@ -1,0 +1,124 @@
+{{- if .Values.metrics.prometheusRule.enabled }}
+{{- $t := .Values.metrics.prometheusRule.thresholds -}}
+{{- $ns := .Release.Namespace -}}
+# Alert catalogue — documented one-by-one in docs/OPERATIONS.md §alertes.
+# Metric names are the orchestrator's /metrics contract (prom-client).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "oao.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator") | indent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: outlook-ai-orchestrator.rules
+      rules:
+        - alert: OaoApiDown
+          expr: |
+            sum(up{namespace="{{ $ns }}", job=~".*-api"}) == 0
+            or absent(up{namespace="{{ $ns }}", job=~".*-api"})
+          for: 5m
+          labels:
+            severity: critical
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "Orchestrator API injoignable ({{ $ns }})"
+            description: "Aucune instance de l'API ne répond au scrape depuis 5 minutes. L'add-in Outlook est hors service."
+            runbook_url: "https://github.com/northbridge-capital/outlook-ai-agent/blob/main/docs/OPERATIONS.md#incidents"
+
+        - alert: OaoReadinessFailing
+          expr: |
+            kube_pod_container_status_ready{namespace="{{ $ns }}", container="orchestrator"} == 0
+          for: 10m
+          labels:
+            severity: warning
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "Pod orchestrator non ready depuis 10 min"
+            description: "La readiness probe (/api/v1/ready) échoue : dépendance Postgres ou LLM indisponible."
+
+        - alert: OaoLlmCircuitOpen
+          expr: max(oao_llm_circuit_open{namespace="{{ $ns }}"}) == 1
+          for: 5m
+          labels:
+            severity: critical
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "Circuit breaker LLM ouvert"
+            description: "L'endpoint LLM interne est en échec : le produit bascule en mode heuristique dégradé (confiance ≤ 0.3)."
+
+        - alert: OaoLlmErrorRateHigh
+          expr: |
+            sum(rate(oao_llm_calls_total{namespace="{{ $ns }}", outcome!="ok"}[10m]))
+              / clamp_min(sum(rate(oao_llm_calls_total{namespace="{{ $ns }}"}[10m])), 0.001)
+              > {{ $t.llmErrorRatio }}
+          for: 15m
+          labels:
+            severity: warning
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "Taux d'échec des appels LLM > {{ mulf $t.llmErrorRatio 100 }}%"
+            description: "Vérifier le endpoint vLLM/TGI interne (pnpm check:llm) et la saturation GPU."
+
+        - alert: OaoHttp5xxRateHigh
+          expr: |
+            sum(rate(oao_http_requests_total{namespace="{{ $ns }}", status=~"5.."}[5m]))
+              / clamp_min(sum(rate(oao_http_requests_total{namespace="{{ $ns }}"}[5m])), 0.001)
+              > {{ $t.http5xxRatio }}
+          for: 10m
+          labels:
+            severity: critical
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "Plus de {{ mulf $t.http5xxRatio 100 }}% de réponses 5xx"
+            description: "Regarder les logs orchestrator (correlationId) et l'état de Postgres."
+
+        - alert: OaoLatencyHigh
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(oao_http_request_duration_seconds_bucket{namespace="{{ $ns }}"}[10m]))
+            ) > {{ $t.p95LatencySeconds }}
+          for: 15m
+          labels:
+            severity: warning
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "Latence p95 > {{ $t.p95LatencySeconds }}s"
+            description: "File d'attente LLM saturée (oao_llm_queue_depth) ou Postgres lent."
+
+        - alert: OaoMailboxSyncLag
+          expr: max(oao_mailbox_sync_lag_seconds{namespace="{{ $ns }}"}) > {{ mul $t.syncLagMinutes 60 }}
+          for: 15m
+          labels:
+            severity: warning
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "Retard de synchronisation mailbox > {{ $t.syncLagMinutes }} min"
+            description: "Le worker (ROLE=worker) n'a pas terminé de cycle de sync récent : vérifier le pod worker, le token Graph et l'Exchange application access policy."
+
+        - alert: OaoWorkerAbsent
+          expr: |
+            sum(up{namespace="{{ $ns }}", job=~".*-worker"}) == 0
+            or absent(up{namespace="{{ $ns }}", job=~".*-worker"})
+          for: 15m
+          labels:
+            severity: warning
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "Worker orchestrator absent"
+            description: "Plus de précalcul, de daily brief ni d'application de la rétention d'audit."
+
+        - alert: OaoDatabaseUnreachable
+          expr: max(oao_db_up{namespace="{{ $ns }}"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "PostgreSQL injoignable depuis l'orchestrator"
+            description: "Audit non persisté : incident compliance. Voir docs/OPERATIONS.md §base de données."
+{{- end }}
