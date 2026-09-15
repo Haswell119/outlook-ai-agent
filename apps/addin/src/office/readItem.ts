@@ -1,6 +1,6 @@
 import type { AttachmentMeta, EmailAddress, EmailContext } from "@oao/shared";
-import { asyncResult, isOfficeAvailable, isSetSupported, officeGlobal, tryAsync } from "./env";
-import { sampleEmail } from "./sample";
+import { asyncResult, isOfficeAvailable, isSetSupported, officeGlobal, queryParam, tryAsync } from "./env";
+import { sampleEmail, sampleNewsletter } from "./sample";
 import { cacheItem } from "./cache";
 
 function toAddress(d: Office.EmailAddressDetails | undefined): EmailAddress | undefined {
@@ -29,8 +29,10 @@ function toAttachment(a: Office.AttachmentDetails): AttachmentMeta {
  */
 export async function readCurrentItem(): Promise<EmailContext> {
   if (!isOfficeAvailable()) {
-    cacheItem(sampleEmail);
-    return sampleEmail;
+    // Browser preview: `?sample=newsletter` shows the compact triage layout.
+    const sample = queryParam("sample") === "newsletter" ? sampleNewsletter : sampleEmail;
+    cacheItem(sample);
+    return sample;
   }
   const item = officeGlobal()!.context.mailbox.item as unknown as Office.MessageRead;
 

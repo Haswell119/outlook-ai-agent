@@ -7,6 +7,7 @@
  */
 import type { Language } from "@oao/shared";
 import { translate } from "@/i18n";
+import { escapeHtml } from "@/security/sanitize";
 import { asyncResult, isOfficeAvailable, isSetSupported, officeGlobal } from "./env";
 
 export interface ClientInstruction {
@@ -29,9 +30,14 @@ function str(params: Record<string, unknown> | undefined, ...keys: string[]): st
   return undefined;
 }
 
+/**
+ * The one place in the add-in that *produces* HTML: the reply body handed to
+ * `displayReplyForm`. Every character of model output is escaped first
+ * (`security/sanitize`), so a draft can never inject markup into the compose
+ * window.
+ */
 export function textToHtml(text: string): string {
-  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:11pt">${escaped.replace(/\r?\n/g, "<br/>")}</div>`;
+  return `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:11pt">${escapeHtml(text).replace(/\r?\n/g, "<br/>")}</div>`;
 }
 
 /** Ensure a master category exists (Mailbox 1.8), best effort. */

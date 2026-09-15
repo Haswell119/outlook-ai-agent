@@ -1,4 +1,17 @@
-import { ActionProposalSchema, ApproveActionsResponseSchema, AutomationSchema, ChatResponseSchema, ComplianceCheckResponseSchema, DraftReplySchema, EmailAnalysisSchema, EscalationSchema, ThreadSynthesisSchema } from "@oao/shared";
+import {
+  ActionProposalSchema,
+  ApproveActionsResponseSchema,
+  AutomationSchema,
+  ChatResponseSchema,
+  ComplianceCheckResponseSchema,
+  DailyBriefSchema,
+  DraftReplySchema,
+  EmailAnalysisSchema,
+  EscalationSchema,
+  FeatureFlagsSchema,
+  MailboxSyncStatusSchema,
+  ThreadSynthesisSchema,
+} from "@oao/shared";
 import { describe, expect, it } from "vitest";
 import { createMockClient } from "@/api/mock";
 import { sampleCompose, sampleEmail, sampleThread } from "@/office/sample";
@@ -43,5 +56,61 @@ describe("mock API responses validate against the shared schemas", () => {
     expect(AutomationSchema.safeParse(sim).success).toBe(true);
     expect(sim.lastSimulation?.checks).toHaveLength(4);
     expect(sim.stats.estimatedMinutesSavedPerWeek).toBe(18);
+  });
+});
+
+describe("new endpoints (precomputation, brief, sync, features)", () => {
+  it("analysisByEmail returns a precomputed analysis for a known id and null otherwise", async () => {
+    const precomputed = await api.analysisByEmail(sampleEmail.id);
+    expect(precomputed).not.toBeNull();
+    expect(EmailAnalysisSchema.safeParse(precomputed).success).toBe(true);
+    expect(precomputed!.source).toBe("precomputed");
+    // 404 → null, which is what sends the caller down the POST path.
+    expect(await api.analysisByEmail("msg-never-seen-42")).toBeNull();
+  });
+
+  it("analysisByEmail returns a triaged analysis for bulk senders", async () => {
+    const triaged = await api.analysisByEmail("msg-newsletter-weekly");
+    expect(triaged?.triage?.kind).toBe("newsletter");
+    expect(triaged?.source).toBe("heuristic");
+    expect(triaged?.suggestedActions).toHaveLength(0);
+    expect(EmailAnalysisSchema.safeParse(triaged).success).toBe(true);
+  });
+
+  it("an analysed email becomes available through the id lookup", async () => {
+    const fresh = createMockClient(() => "en", 0);
+    expect(await fresh.analysisByEmail("msg-brand-new")).toBeNull();
+    await fresh.analyzeEmail({ email: { ...sampleEmail, id: "msg-brand-new" }, includeThread: false });
+    expect(await fresh.analysisByEmail("msg-brand-new")).not.toBeNull();
+  });
+
+  it("dailyBrief and generateDailyBrief validate and mark their source", async () => {
+    const stored = await api.dailyBrief({ date: "2025-05-26" });
+    expect(DailyBriefSchema.safeParse(stored).success).toBe(true);
+    expect(stored!.source).toBe("precomputed");
+    expect(stored!.priorityEmails).toHaveLength(3);
+    expect(stored!.stats.newEmails).toBe(42);
+
+    const fresh = await api.generateDailyBrief({ date: "2025-05-26", refresh: true });
+    expect(DailyBriefSchema.safeParse(fresh).success).toBe(true);
+    expect(fresh.source).toBe("llm");
+  });
+
+  it("mailboxSync and syncNow validate", async () => {
+    const status = await api.mailboxSync();
+    expect(MailboxSyncStatusSchema.safeParse(status).success).toBe(true);
+    expect(status.enabled).toBe(true);
+    const syncing = await api.syncNow();
+    expect(MailboxSyncStatusSchema.safeParse(syncing).success).toBe(true);
+    expect(syncing.state).toBe("syncing");
+  });
+
+  it("features validates and exposes the new flags", async () => {
+    const flags = await api.features();
+    expect(FeatureFlagsSchema.safeParse(flags).success).toBe(true);
+    expect(flags.precomputeEnabled).toBe(true);
+    expect(flags.dailyBriefEnabled).toBe(true);
+    expect(flags.llmFastModel).toBeTruthy();
+    expect(flags.organizationName).toBe("Northbridge Capital");
   });
 });

@@ -7,6 +7,9 @@ import { Header } from "@/app/Header";
 import { useI18n } from "@/i18n";
 import { executeClientAction } from "@/office/actions";
 import { onComposeChanged, readCompose } from "@/office/readCompose";
+import { clearComplianceBanner, showComplianceBanner } from "@/office/notifications";
+import { composeContentHash } from "@/util/hash";
+import { track } from "@/telemetry";
 import { ConfidenceBar, ErrorState, RiskBadge, SectionCard, Skeleton, colors, useErrorMessage, useToast } from "@/ui";
 import { actionIcon } from "@/features/actions/actionIcons";
 
@@ -56,26 +59,53 @@ export function ComplianceGuardian() {
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const runId = useRef(0);
+  /** Hash of the draft the last check ran on — re-checking identical content
+   *  would cost a model call for a guaranteed-identical answer. */
+  const lastHash = useRef<string | null>(null);
 
-  const check = useCallback(async () => {
-    const my = ++runId.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const d = await readCompose();
-      if (my !== runId.current) return;
-      setDraft(d);
-      const r = await api.complianceCheck({ draft: d, language: lang });
-      if (my !== runId.current) return;
-      setResult(r);
-    } catch (e) {
-      if (my === runId.current) setError(e);
-    } finally {
-      if (my === runId.current) setLoading(false);
-    }
-  }, [api, lang]);
+  const check = useCallback(
+    async (opts: { force?: boolean } = {}) => {
+      const my = ++runId.current;
+      setError(null);
+      try {
+        const d = await readCompose();
+        if (my !== runId.current) return;
+        setDraft(d);
 
-  // Auto-run on load; re-run (1.5 s debounce) when recipients or attachments change.
+        // Nothing changed since the previous check (the debounce fired because
+        // the user clicked in and out of a field) → keep the current verdict.
+        const hash = composeContentHash(d);
+        if (!opts.force && lastHash.current === hash) {
+          track("compliance.skipped", { reason: "unchanged" });
+          setLoading(false);
+          return;
+        }
+
+        setLoading(true);
+        const r = await api.complianceCheck({ draft: d, language: lang });
+        if (my !== runId.current) return;
+        lastHash.current = hash;
+        setResult(r);
+        track("compliance.checked", { verdict: r.verdict, issues: r.issues.length });
+
+        // Mock-up E: the banner inside the compose window itself.
+        void showComplianceBanner({
+          lang,
+          issueCount: r.issues.length,
+          highestSeverity: r.issues.some((i) => i.severity === "high") ? "high" : r.issues.some((i) => i.severity === "medium") ? "medium" : r.issues[0]?.severity ?? null,
+          verdict: r.verdict,
+        }).catch(() => undefined);
+      } catch (e) {
+        if (my === runId.current) setError(e);
+      } finally {
+        if (my === runId.current) setLoading(false);
+      }
+    },
+    [api, lang],
+  );
+
+  // Auto-run on load; re-run (1.5 s debounce) when recipients or attachments
+  // change — and skip the call entirely when the content hash is unchanged.
   useEffect(() => {
     void check();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -86,6 +116,7 @@ export function ComplianceGuardian() {
     return () => {
       if (timer) clearTimeout(timer);
       off();
+      void clearComplianceBanner();
     };
   }, [check]);
 
@@ -101,7 +132,7 @@ export function ComplianceGuardian() {
         case "remove_attachment": {
           const out = await executeClientAction({ operation: "removeAttachment", parameters: action.parameters }, lang);
           if (out.message) (out.status === "executed" ? toast.success : out.status === "failed" ? toast.error : toast.info)(out.message);
-          if (out.status === "executed") void check();
+          if (out.status === "executed") void check({ force: true });
           break;
         }
         case "request_approval":
@@ -132,13 +163,13 @@ export function ComplianceGuardian() {
         <div className={s.titleRow}>
           <ShieldCheckmark24Regular style={{ color: colors.primary }} />
           <Text className={s.title}>{t("compliance.title")}</Text>
-          <Button size="small" appearance="subtle" icon={loading ? <Spinner size="extra-tiny" /> : <ArrowSync20Regular />} onClick={() => void check()} disabled={loading} data-testid="recheck">
+          <Button size="small" appearance="subtle" icon={loading ? <Spinner size="extra-tiny" /> : <ArrowSync20Regular />} onClick={() => void check({ force: true })} disabled={loading} data-testid="recheck">
             {t("compliance.recheck")}
           </Button>
         </div>
 
         {loading && !result && <Skeleton cards={2} label={t("compliance.checking")} />}
-        {!!error && !result && <ErrorState error={error} onRetry={() => void check()} />}
+        {!!error && !result && <ErrorState error={error} onRetry={() => void check({ force: true })} />}
 
         {result && (
           <>

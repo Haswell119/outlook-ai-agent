@@ -2,15 +2,47 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "target": "ES2020",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "jsx": "react-jsx",
     "noEmit": true,
     "declaration": false,
     "sourceMap": false,
     "allowImportingTsExtensions": true,
-    "types": ["vite/client", "office-js", "office-runtime", "node"],
+    "types": [
+      "vite/client",
+      "office-js",
+      "office-runtime",
+      "node"
+    ],
     "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] }
+    // `react` / `react-dom` are pinned to *this* package's @types so the
+    // workspace's other apps (which run React 19) cannot leak their newer
+    // @types/react into the Fluent UI v9 typings through pnpm's virtual store.
+    "paths": {
+      "@/*": [
+        "src/*"
+      ],
+      "react": [
+        "./node_modules/@types/react"
+      ],
+      "react/jsx-runtime": [
+        "./node_modules/@types/react/jsx-runtime"
+      ],
+      "react-dom": [
+        "./node_modules/@types/react-dom"
+      ],
+      "react-dom/*": [
+        "./node_modules/@types/react-dom/*"
+      ]
+    }
   },
-  "include": ["src", "vite.config.ts", "vitest.config.ts"]
+  "include": [
+    "src",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
 }

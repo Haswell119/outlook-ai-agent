@@ -3,8 +3,9 @@ import { Open16Regular, ShieldError20Regular, Tag20Regular, Translate20Regular }
 import type { EmailAnalysis, EmailContext } from "@oao/shared";
 import { useApp } from "@/app/AppContext";
 import { formatDate, useI18n } from "@/i18n";
-import { BulletList, ConfidenceBar, RiskBadge, SectionCard, Skeleton, colors } from "@/ui";
+import { BulletList, ConfidenceBar, RiskBadge, SectionCard, Skeleton, SourceBadge, colors, type DisplaySource } from "@/ui";
 import { AutomationCoach } from "@/features/automation/AutomationCoach";
+import { SyncStatusPill } from "./SyncStatusPill";
 
 const useStyles = makeStyles({
   stack: { display: "flex", flexDirection: "column", gap: "10px" },
@@ -13,7 +14,16 @@ const useStyles = makeStyles({
   mono: { fontFamily: "Consolas, monospace", fontSize: "11px", wordBreak: "break-all" },
 });
 
-export function InsightsTab({ analysis, loading }: { email: EmailContext; analysis: EmailAnalysis | null; loading: boolean }) {
+export function InsightsTab({
+  analysis,
+  loading,
+  source,
+}: {
+  email: EmailContext;
+  analysis: EmailAnalysis | null;
+  loading: boolean;
+  source?: DisplaySource;
+}) {
   const s = useStyles();
   const { t, lang } = useI18n();
   const { adminUrl } = useApp();
@@ -23,6 +33,9 @@ export function InsightsTab({ analysis, loading }: { email: EmailContext; analys
 
   return (
     <div className={s.stack} data-testid="insights-tab">
+      {/* Precomputation status first: it explains why the pane was instant. */}
+      <SyncStatusPill />
+
       {loading && !analysis && <Skeleton cards={2} />}
       {analysis && (
         <>
@@ -53,18 +66,36 @@ export function InsightsTab({ analysis, loading }: { email: EmailContext; analys
             <BulletList items={analysis.phishing?.indicators ?? []} empty={t("insights.noIndicators")} />
           </SectionCard>
 
-          <SectionCard icon={<Translate20Regular />} title={t("insights.details")}>
+          <SectionCard icon={<Translate20Regular />} title={t("insights.details")} actions={<SourceBadge source={source ?? (analysis.source as DisplaySource | undefined)} />}>
             <div className={s.kv}>
               <span className={s.k}>{t("insights.language")}</span>
               <span>{analysis.language.toUpperCase()}</span>
               <span className={s.k}>{t("insights.model")}</span>
               <span>{analysis.model ?? "—"}</span>
+              <span className={s.k}>{t("insights.source")}</span>
+              <span data-testid="insights-source">{t(`source.${source ?? analysis.source ?? "llm"}`)}</span>
+              {analysis.triage && (
+                <>
+                  <span className={s.k}>{t("insights.triage")}</span>
+                  <span>{t(`triage.kind.${analysis.triage.kind}`)}</span>
+                </>
+              )}
               <span className={s.k}>{t("insights.auditId")}</span>
               <span className={s.mono}>{analysis.auditId}</span>
               <span className={s.k}>{t("insights.generatedAt")}</span>
               <span>{formatDate(analysis.generatedAt, lang)}</span>
             </div>
-            <Button as="a" size="small" appearance="outline" icon={<Open16Regular />} iconPosition="after" href={`${adminUrl}/audit?search=${encodeURIComponent(analysis.auditId)}`} target="_blank" rel="noopener" style={{ marginTop: "8px" }}>
+            <Button
+              as="a"
+              size="small"
+              appearance="outline"
+              icon={<Open16Regular />}
+              iconPosition="after"
+              href={`${adminUrl}/audit?search=${encodeURIComponent(analysis.auditId)}`}
+              target="_blank"
+              rel="noopener"
+              style={{ marginTop: "8px" }}
+            >
               {t("insights.viewAuditLog")}
             </Button>
           </SectionCard>

@@ -1,2 +1,7 @@
 public/commands.js
 dist/
+# Playwright output
+e2e-results/
+e2e-report/
+playwright-report/
+test-results/

@@ -1,4 +1,14 @@
-export type ApiErrorKind = "network" | "timeout" | "unauthorized" | "forbidden" | "validation" | "not_found" | "llm" | "graph" | "generic";
+export type ApiErrorKind =
+  | "network"
+  | "timeout"
+  | "unauthorized"
+  | "forbidden"
+  | "validation"
+  | "not_found"
+  | "llm"
+  | "graph"
+  | "sso"
+  | "generic";
 
 /** Error thrown by the API client; `i18nKey` maps to `errors.*` in the resources. */
 export class ApiClientError extends Error {
@@ -13,6 +23,18 @@ export class ApiClientError extends Error {
     this.name = "ApiClientError";
   }
 
+  /**
+   * Map an SSO failure onto a user-facing error. `office/sso.ts` throws an
+   * `SsoError` carrying the Office error code (13001…13013).
+   */
+  static fromAuthFailure(err: unknown, correlationId?: string): ApiClientError {
+    const code = (err as { officeErrorCode?: number } | null)?.officeErrorCode;
+    if (typeof code === "number") {
+      return new ApiClientError("sso", err instanceof Error ? err.message : "SSO failed", undefined, String(code), correlationId);
+    }
+    return new ApiClientError("unauthorized", err instanceof Error ? err.message : "SSO failed", undefined, undefined, correlationId);
+  }
+
   get i18nKey(): string {
     switch (this.kind) {
       case "network":
@@ -21,10 +43,14 @@ export class ApiClientError extends Error {
         return "errors.timeout";
       case "unauthorized":
         return "errors.unauthorized";
+      case "sso":
+        return `errors.sso.${this.code ?? "generic"}`;
       case "forbidden":
         return "errors.forbidden";
       case "validation":
         return "errors.validation";
+      case "not_found":
+        return "errors.notFound";
       case "llm":
         return "errors.llm";
       case "graph":
@@ -43,4 +69,11 @@ export function kindFromStatus(status: number, code?: string): ApiErrorKind {
   if (status === 502 || code === "llm_unavailable") return "llm";
   if (status === 503 || code === "graph_unavailable") return "graph";
   return "generic";
+}
+
+/** Correlation id of any error, for the "Report" button of the error boundary. */
+export function correlationIdOf(err: unknown): string | undefined {
+  if (err instanceof ApiClientError) return err.correlationId;
+  const c = (err as { correlationId?: unknown } | null)?.correlationId;
+  return typeof c === "string" ? c : undefined;
 }

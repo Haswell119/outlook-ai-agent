@@ -91,3 +91,28 @@ export const sampleCompose: ComposeContext = {
     { id: "att-q2", name: "Client A – Q2 Performance Report.pdf", size: 1_204_331, contentType: "application/pdf", isInline: false },
   ],
 };
+
+/**
+ * A bulk newsletter, used to review the compact triage layout in browser
+ * preview (`taskpane.html?sample=newsletter`). Its id matches the mock API's
+ * "this was triaged, no model call" rule.
+ */
+export const sampleNewsletter: EmailContext = {
+  id: "msg-newsletter-weekly-2025-05-26",
+  conversationId: "conv-newsletter-weekly",
+  subject: "Weekly market commentary — week 22",
+  from: { name: "Market Research", address: "noreply@research.example" },
+  to: [{ name: "Jane Smith", address: "jane.smith@northbridge.example" }],
+  cc: [],
+  bcc: [],
+  receivedAt: "2025-05-26T05:03:00.000Z",
+  body:
+    "This week in markets: rates held steady, credit spreads tightened slightly and the energy complex lagged.\n\n" +
+    "You are receiving this because you subscribed to the weekly commentary. Unsubscribe at any time.",
+  bodyPreview: "This week in markets: rates held steady…",
+  attachments: [],
+  categories: [],
+  importance: "normal",
+  isRead: false,
+  folder: "Inbox",
+};

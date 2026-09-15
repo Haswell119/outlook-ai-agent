@@ -34,7 +34,8 @@ export function isMockRequested(): boolean {
  *  - VITE_API_MOCK=true or `?mock=1` → mock
  *  - otherwise health-check the backend; when it fails in a dev build or in
  *    browser-preview mode → mock (so the UI can always be reviewed)
- *  - production inside Outlook → live even when the health check fails (errors surface in the UI)
+ *  - production inside Outlook → live even when the health check fails (errors
+ *    surface in the UI and the offline banner explains it)
  */
 export async function initApi(opts: { preview: boolean }): Promise<OaoApi> {
   if (isMockRequested()) {

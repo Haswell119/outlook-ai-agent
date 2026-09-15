@@ -18,9 +18,9 @@ const useStyles = makeStyles({
   low: { backgroundColor: colors.lowBg, color: colors.lowText },
   medium: { backgroundColor: colors.mediumBg, color: colors.mediumText },
   high: { backgroundColor: colors.highBg, color: colors.highText },
-  dot: { width: "8px", height: "8px", borderRadius: "50%", display: "inline-block", flexShrink: 0 },
+  dot: { width: "8px", height: "8px", borderRadius: "50%", display: "inline-block", flexShrink: 0, marginTop: "5px" },
   dotLow: { backgroundColor: colors.lowText },
-  dotMedium: { backgroundColor: "#C19C00" },
+  dotMedium: { backgroundColor: colors.mediumDot },
   dotHigh: { backgroundColor: colors.highText },
 });
 

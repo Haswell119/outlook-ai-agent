@@ -1,32 +1,44 @@
 import { Button, makeStyles, Spinner, Text } from "@fluentui/react-components";
 import { Add16Regular, CheckboxChecked20Regular, ClipboardTask20Regular, DocumentBulletList20Regular, Lightbulb20Regular, Warning20Regular, Warning24Filled } from "@fluentui/react-icons";
-import type { ActionType, EmailAnalysis, EmailContext, SuggestedAction } from "@oao/shared";
-import { useState } from "react";
+import type { ActionType, EmailContext, SuggestedAction } from "@oao/shared";
+import { Suspense, useState } from "react";
 import { useApp } from "@/app/AppContext";
-import type { AsyncState } from "@/app/useAsync";
 import { useI18n } from "@/i18n";
-import { AiFooter, BulletList, ErrorState, SectionCard, SeverityDot, Skeleton, colors, useErrorMessage, useToast } from "@/ui";
-import { ActionApprovalDialog } from "@/features/actions/ActionApprovalDialog";
+import { toPlainText } from "@/security/sanitize";
+import { AiFooter, BulletList, ErrorState, SectionCard, SeverityDot, Skeleton, SourceBadge, colors, useErrorMessage, useToast } from "@/ui";
+import { LazyActionApprovalDialog, prefetchApproval } from "@/features/lazy";
 import { actionIcon } from "@/features/actions/actionIcons";
 import { runDraftReply } from "@/features/actions/actionRunner";
+import { TriageCard } from "./TriageCard";
+import { isCompactTriage, type AnalysisState } from "./useAnalysis";
 
 const useStyles = makeStyles({
   stack: { display: "flex", flexDirection: "column", gap: "10px" },
-  phishing: { backgroundColor: colors.highBg, border: `1px solid #F1BBC1`, borderRadius: "8px", padding: "10px 12px", display: "flex", gap: "8px", alignItems: "flex-start", color: colors.text },
-  riskRow: { display: "flex", alignItems: "center", gap: "8px" },
-  actionRow: { display: "flex", alignItems: "center", gap: "10px", padding: "8px 0", borderTop: `1px solid ${colors.border}` },
+  phishing: {
+    backgroundColor: colors.highBg,
+    border: `1px solid ${colors.highBorder}`,
+    borderRadius: "8px",
+    paddingBlock: "10px",
+    paddingInline: "12px",
+    display: "flex",
+    gap: "8px",
+    alignItems: "flex-start",
+    color: colors.text,
+  },
+  riskRow: { display: "flex", alignItems: "flex-start", gap: "8px" },
+  actionRow: { display: "flex", alignItems: "center", gap: "10px", paddingBlock: "8px", borderTop: `1px solid ${colors.border}` },
   actionIcon: { color: colors.primary, display: "inline-flex", flexShrink: 0 },
   actionText: { flexGrow: 1, minWidth: 0, display: "flex", flexDirection: "column" },
   actionTitle: { fontWeight: 600, fontSize: "13px" },
   actionSub: { color: colors.textSecondary, fontSize: "12px" },
   chips: { display: "flex", flexWrap: "wrap", gap: "6px" },
-  chip: { borderRadius: "14px", fontSize: "12px", fontWeight: 400, height: "auto", padding: "4px 10px", whiteSpace: "normal", textAlign: "left" },
+  chip: { borderRadius: "14px", fontSize: "12px", fontWeight: 400, height: "auto", paddingBlock: "4px", paddingInline: "10px", whiteSpace: "normal", textAlign: "start" },
   review: { width: "100%" },
 });
 
 export interface SummaryTabProps {
   email: EmailContext;
-  state: AsyncState<EmailAnalysis>;
+  state: AnalysisState;
 }
 
 export function SummaryTab({ email, state }: SummaryTabProps) {
@@ -63,8 +75,16 @@ export function SummaryTab({ email, state }: SummaryTabProps) {
   };
 
   if (state.loading && !a) return <Skeleton cards={4} label={t("summary.analyzing")} />;
-  if (state.error && !a) return <ErrorState error={state.error} onRetry={state.reload} />;
+  if (state.error && !a) return <ErrorState error={state.error} onRetry={state.refresh} />;
   if (!a) return null;
+
+  // Newsletters, notifications, OOO replies… get the one-line layout and an
+  // explicit opt-in to spend a model call.
+  if (isCompactTriage(a)) {
+    return (
+      <TriageCard analysis={a} source={state.source} ageMs={state.ageMs} busy={state.revalidating} onAnalyseAnyway={state.analyseAnyway} />
+    );
+  }
 
   const phishing = a.phishing && a.phishing.verdict !== "clean" ? a.phishing : null;
 
@@ -72,7 +92,7 @@ export function SummaryTab({ email, state }: SummaryTabProps) {
     <div className={s.stack} data-testid="summary-tab">
       {phishing && (
         <div className={s.phishing} role="alert" data-testid="phishing-banner">
-          <Warning24Filled style={{ color: colors.red, flexShrink: 0 }} />
+          <Warning24Filled style={{ color: colors.red, flexShrink: 0 }} aria-hidden="true" />
           <div>
             <div style={{ fontWeight: 600 }}>{t("summary.phishingWarning")}</div>
             <div style={{ fontSize: "12px" }}>{t(phishing.verdict === "likely_phishing" ? "summary.phishingLikely" : "summary.phishingSuspicious", { score: Math.round(phishing.score * 100) })}</div>
@@ -80,16 +100,21 @@ export function SummaryTab({ email, state }: SummaryTabProps) {
         </div>
       )}
 
-      <SectionCard icon={<DocumentBulletList20Regular />} title={t("summary.summary")}>
-        {a.summary}
+      <SectionCard
+        icon={<DocumentBulletList20Regular />}
+        title={t("summary.summary")}
+        actions={<SourceBadge source={state.source} ageMs={state.ageMs} />}
+        testId="summary-card"
+      >
+        {toPlainText(a.summary, 2_000)}
       </SectionCard>
 
       <SectionCard icon={<CheckboxChecked20Regular />} iconColor={colors.lowText} iconBg={colors.lowBg} title={t("summary.decisions")}>
-        <BulletList items={a.decisions} empty={t("summary.noDecisions")} />
+        <BulletList items={a.decisions.map((d) => toPlainText(d, 500))} empty={t("summary.noDecisions")} />
       </SectionCard>
 
-      <SectionCard icon={<ClipboardTask20Regular />} iconColor="#8A6D00" iconBg={colors.mediumBg} title={t("summary.pendingTasks")}>
-        <BulletList items={a.pendingTasks} empty={t("summary.noTasks")} />
+      <SectionCard icon={<ClipboardTask20Regular />} iconColor={colors.mediumText} iconBg={colors.mediumBg} title={t("summary.pendingTasks")}>
+        <BulletList items={a.pendingTasks.map((p) => toPlainText(p, 500))} empty={t("summary.noTasks")} />
       </SectionCard>
 
       <SectionCard icon={<Warning20Regular />} iconColor={colors.red} iconBg={colors.highBg} title={t("summary.detectedRisks")}>
@@ -98,8 +123,8 @@ export function SummaryTab({ email, state }: SummaryTabProps) {
             <span className={s.riskRow} key={r.code}>
               <SeverityDot level={r.severity} />
               <span>
-                {r.title}
-                {r.description ? <span style={{ color: colors.textSecondary }}> — {r.description}</span> : null}
+                {toPlainText(r.title, 300)}
+                {r.description ? <span style={{ color: colors.textSecondary }}> — {toPlainText(r.description, 300)}</span> : null}
               </span>
             </span>
           ))}
@@ -111,7 +136,9 @@ export function SummaryTab({ email, state }: SummaryTabProps) {
         <SectionCard icon={<Lightbulb20Regular />} title={t("summary.suggestedActions")} testId="suggested-actions">
           {a.suggestedActions.map((action, i) => (
             <div key={`${action.type}-${i}`} className={s.actionRow} style={i === 0 ? { borderTop: "none", paddingTop: 0 } : undefined}>
-              <span className={s.actionIcon}>{actionIcon(action.type)}</span>
+              <span className={s.actionIcon} aria-hidden="true">
+                {actionIcon(action.type)}
+              </span>
               <span className={s.actionText}>
                 <Text className={s.actionTitle}>{action.title}</Text>
                 <Text className={s.actionSub}>{action.description}</Text>
@@ -123,6 +150,7 @@ export function SummaryTab({ email, state }: SummaryTabProps) {
                 icon={busy === action.type ? <Spinner size="extra-tiny" /> : <Add16Regular />}
                 aria-label={`${t("summary.addAction")}: ${action.title}`}
                 onClick={() => onSuggested(action)}
+                onMouseEnter={prefetchApproval}
                 disabled={busy !== null}
               />
             </div>
@@ -132,7 +160,7 @@ export function SummaryTab({ email, state }: SummaryTabProps) {
 
       {a.quickReplies.length > 0 && (
         <SectionCard title={t("summary.quickReplies")}>
-          <div className={s.chips}>
+          <div className={s.chips} role="group" aria-label={t("summary.quickReplies")}>
             {a.quickReplies.map((q) => (
               <Button key={q} size="small" appearance="outline" className={s.chip} disabled={busy !== null} onClick={() => void draft("custom", q, `chip:${q}`)}>
                 {busy === `chip:${q}` ? <Spinner size="extra-tiny" /> : q}
@@ -142,13 +170,17 @@ export function SummaryTab({ email, state }: SummaryTabProps) {
         </SectionCard>
       )}
 
-      <Button appearance="primary" className={s.review} onClick={() => setDialog({ open: true })} data-testid="review-actions">
+      <Button appearance="primary" className={s.review} onClick={() => setDialog({ open: true })} onMouseEnter={prefetchApproval} data-testid="review-actions">
         {t("summary.reviewActions")}
       </Button>
 
       <AiFooter auditId={a.auditId} confidence={a.confidence} />
 
-      {dialog.open && <ActionApprovalDialog open onClose={() => setDialog({ open: false })} email={email} filterType={dialog.filter} analysisAuditId={a.auditId} />}
+      {dialog.open && (
+        <Suspense fallback={null}>
+          <LazyActionApprovalDialog open onClose={() => setDialog({ open: false })} email={email} filterType={dialog.filter} analysisAuditId={a.auditId} />
+        </Suspense>
+      )}
     </div>
   );
 }

@@ -1,16 +1,21 @@
 /**
- * Takes screenshots of the task pane in browser-preview mode (mock API) with Playwright.
- * Usage: pnpm build && pnpm preview &  then  node scripts/screenshots.mjs [baseUrl]
- * Uses the globally installed playwright if the local one is missing (PLAYWRIGHT_BROWSERS_PATH honoured).
+ * Screenshots of the task pane in browser-preview mode (mock API) with Playwright.
+ *
+ * Usage:  pnpm build && pnpm preview &   then   node scripts/screenshots.mjs [baseUrl]
+ * (or just `node scripts/screenshots.mjs` — it starts `vite preview` itself).
+ *
+ * Every shot starts from a clean browser context so the local analysis cache and
+ * the persisted language of a previous shot cannot leak into the next one.
  */
 import { createRequire } from "node:module";
-import { mkdirSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 function loadPlaywright() {
-  for (const spec of ["playwright", "playwright-core", "/opt/node22/lib/node_modules/playwright", "/usr/lib/node_modules/playwright"]) {
+  for (const spec of ["playwright", "playwright-core", "@playwright/test", "/opt/node22/lib/node_modules/playwright", "/usr/lib/node_modules/playwright"]) {
     try {
       return require(spec);
     } catch {
@@ -20,75 +25,144 @@ function loadPlaywright() {
   throw new Error("playwright not found — npm i -g playwright");
 }
 
-const base = process.argv[2] ?? "http://localhost:4173";
-const outDir = join(dirname(fileURLToPath(import.meta.url)), "..", "docs", "screenshots");
-mkdirSync(outDir, { recursive: true });
-
-const { chromium } = loadPlaywright();
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH, args: ["--no-sandbox"] });
-const ctx = await browser.newContext({ viewport: { width: 420, height: 900 }, deviceScaleFactor: 2, locale: "en-GB" });
-const page = await ctx.newPage();
-// Each shot starts from the default (EN) language: forget the manual toggle persisted by a previous shot.
-await page.addInitScript(() => {
-  try {
-    localStorage.removeItem("oao.addin.language");
-  } catch {
-    /* ignore */
+function chromiumPath() {
+  for (const p of [process.env.PW_CHROMIUM_PATH, "/opt/pw-browsers/chromium", process.env.CHROMIUM_PATH]) {
+    if (p && existsSync(p)) return p;
   }
-});
-page.on("pageerror", (e) => console.error("pageerror", e.message));
-page.on("console", (m) => m.type() === "error" && console.error("console", m.text()));
-
-async function shot(name, url, { before, height } = {}) {
-  await page.goto(`${base}/${url}`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("[data-testid=header]", { timeout: 30_000 });
-  if (before) await before();
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.waitForTimeout(400);
-  if (height) await page.setViewportSize({ width: 420, height });
-  await page.screenshot({ path: join(outDir, `${name}.png`), fullPage: true });
-  console.log("saved", name);
+  return undefined;
 }
 
-await shot("summary", "taskpane.html?mock=1", { before: () => page.waitForSelector("[data-testid=summary-tab]", { timeout: 30_000 }) });
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const outDir = join(root, "docs", "screenshots");
+mkdirSync(outDir, { recursive: true });
+
+const PORT = Number(process.env.SHOT_PORT ?? 4174);
+const base = process.argv[2] ?? `http://localhost:${PORT}`;
+
+/** Start `vite preview` unless a base URL was supplied. */
+let server;
+if (!process.argv[2]) {
+  server = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"], { cwd: root, stdio: "ignore" });
+  for (let i = 0; i < 60; i++) {
+    try {
+      const res = await fetch(`${base}/taskpane.html`);
+      if (res.ok) break;
+    } catch {
+      /* not up yet */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+const { chromium } = loadPlaywright();
+const browser = await chromium.launch({ executablePath: chromiumPath(), args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+
+/**
+ * One shot = one fresh context (clean storage) + one page.
+ * `colorScheme` drives `prefers-color-scheme`, which is how the pane picks the
+ * dark palette when the user leaves the theme on "Follow Outlook".
+ */
+async function shot(name, url, { before, width = 420, height = 900, colorScheme = "light", fullPage = true } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, locale: "en-GB", colorScheme, timezoneId: "Europe/Zurich" });
+  const page = await ctx.newPage();
+  page.on("pageerror", (e) => console.error(`  ! pageerror in ${name}:`, e.message));
+  page.on("console", (m) => {
+    if (m.type() !== "error") return;
+    const text = m.text();
+    if (/ERR_CERT|Failed to load resource|favicon|net::ERR_/.test(text)) return;
+    console.error(`  ! console error in ${name}:`, text);
+  });
+  await page.goto(`${base}/${url}`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("[data-testid=header]", { timeout: 30_000 });
+  if (before) await before(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: join(outDir, `${name}.png`), fullPage });
+  console.log("saved", name);
+  await ctx.close();
+}
+
+const ready = (page, testId, timeout = 30_000) => page.waitForSelector(`[data-testid=${testId}]`, { timeout });
+
+await shot("summary", "taskpane.html?mock=1", { before: (p) => ready(p, "summary-tab") });
+
 await shot("summary-fr", "taskpane.html?mock=1", {
-  before: async () => {
-    await page.click("button:has-text('FR')");
-    await page.waitForSelector("[data-testid=summary-tab]", { timeout: 30_000 });
-    await page.waitForTimeout(1200);
+  before: async (p) => {
+    await ready(p, "summary-tab");
+    await p.getByTestId("header").getByRole("button", { name: "FR", exact: true }).click();
+    await p.waitForTimeout(1200);
+    await ready(p, "summary-tab");
   },
 });
-await shot("thread", "taskpane.html?mock=1&view=thread", { before: () => page.waitForSelector("[data-testid=thread-view]", { timeout: 30_000 }) });
+
+await shot("thread", "taskpane.html?mock=1&view=thread", { before: (p) => ready(p, "thread-view") });
+
 await shot("chat", "taskpane.html?mock=1&tab=chat", {
-  before: async () => {
-    await page.fill("input[placeholder]", "Find the email where the client approved the mandate.");
-    await page.keyboard.press("Enter");
-    await page.waitForSelector("[data-testid=assistant-card]", { timeout: 30_000 });
+  before: async (p) => {
+    await p.fill("input[placeholder]", "Find the email where the client approved the mandate.");
+    await p.keyboard.press("Enter");
+    await ready(p, "assistant-card");
   },
 });
+
+await shot("daily-brief", "taskpane.html?mock=1&view=brief", {
+  before: async (p) => {
+    await ready(p, "daily-brief");
+    await ready(p, "brief-stats");
+  },
+});
+
 await shot("insights-automation", "taskpane.html?mock=1&tab=insights", {
-  before: async () => {
-    await page.waitForSelector("[data-testid=automation-coach]", { timeout: 30_000 });
-    await page.waitForSelector("[data-testid^=automation-auto]", { timeout: 30_000 });
-    await page.click("button:has-text('Run simulation')");
-    await page.waitForSelector("[data-testid=simulation-results]", { timeout: 30_000 });
-    await page.waitForTimeout(4500); // let the "Simulation completed" toast disappear
+  before: async (p) => {
+    await ready(p, "sync-status");
+    await ready(p, "automation-coach");
+    await p.waitForSelector("[data-testid^=automation-auto]", { timeout: 30_000 });
+    await p.click("button:has-text('Run simulation')");
+    await ready(p, "simulation-results");
+    await p.waitForTimeout(4500); // let the "Simulation completed" toast disappear
   },
 });
-await shot("compliance", "taskpane.html?mock=1&mode=compose", { before: () => page.waitForSelector("[data-testid=compliance-headline]", { timeout: 30_000 }) });
+
+await shot("compliance", "taskpane.html?mock=1&mode=compose", { before: (p) => ready(p, "compliance-headline") });
+
+// Viewport-only: the drawer is position:fixed, so a full-page shot would crop it.
+await shot("settings", "taskpane.html?mock=1", {
+  fullPage: false,
+  height: 1260,
+  before: async (p) => {
+    await ready(p, "summary-tab");
+    await p.getByTestId("open-settings").click();
+    await ready(p, "settings-sheet");
+    await p.waitForTimeout(800); // let the health check resolve
+  },
+});
+
+await shot("dark-mode", "taskpane.html?mock=1", {
+  colorScheme: "dark",
+  before: async (p) => {
+    await ready(p, "summary-tab");
+    await p.waitForFunction(() => document.documentElement.getAttribute("data-oao-theme") === "dark", { timeout: 10_000 });
+  },
+});
+
 await shot("approval-dialog", "taskpane.html?mock=1", {
-  before: async () => {
-    await page.waitForSelector("[data-testid=review-actions]", { timeout: 30_000 });
-    await page.click("[data-testid=review-actions]");
-    await page.waitForSelector("[data-testid=approve-button]", { timeout: 30_000 });
+  before: async (p) => {
+    await ready(p, "review-actions");
+    await p.click("[data-testid=review-actions]");
+    await ready(p, "approve-button");
   },
 });
+
 await shot("approval-dialog-wide", "taskpane.html?mock=1", {
-  before: async () => {
-    await page.setViewportSize({ width: 640, height: 900 });
-    await page.waitForSelector("[data-testid=review-actions]", { timeout: 30_000 });
-    await page.click("[data-testid=review-actions]");
-    await page.waitForSelector("[data-testid=approve-button]", { timeout: 30_000 });
+  width: 640,
+  before: async (p) => {
+    await ready(p, "review-actions");
+    await p.click("[data-testid=review-actions]");
+    await ready(p, "approve-button");
   },
 });
+
+await shot("triage", "taskpane.html?mock=1&sample=newsletter", { height: 520, before: (p) => ready(p, "triage-card") });
+
 await browser.close();
+server?.kill();

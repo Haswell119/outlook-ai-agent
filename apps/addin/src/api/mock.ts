@@ -5,6 +5,9 @@
  */
 import {
   ActionProposalSchema,
+  DailyBriefSchema,
+  FeatureFlagsSchema,
+  MailboxSyncStatusSchema,
   ApproveActionsResponseSchema,
   AutomationSchema,
   ChatResponseSchema,
@@ -21,13 +24,17 @@ import {
   type ChatResponse,
   type ComplianceCheckResponse,
   type ComplianceIssue,
+  type DailyBrief,
   type EmailAnalysis,
+
+  type MailboxSyncStatus,
   type Language,
   type ProposedAction,
   type ThreadSynthesis,
 } from "@oao/shared";
 import type { z, ZodType } from "zod";
 import type { OaoApi } from "./types";
+import { mockDailyBrief, mockFeatures, mockSyncStatus } from "./mockBrief";
 
 const MODEL = "qwen3-30b-a3b";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -90,6 +97,35 @@ export function mockAnalysis(lang: Language, emailId: string, phishing = false):
     auditId: id("aud"),
     generatedAt: now(),
     model: MODEL,
+  };
+}
+
+/**
+ * A triaged email: the backend recognised a newsletter / notification and did
+ * not spend a model call. The pane renders the compact layout for it.
+ */
+export function mockTriagedAnalysis(lang: Language, emailId: string, kind: NonNullable<EmailAnalysis["triage"]>["kind"] = "newsletter"): EmailAnalysis {
+  return {
+    emailId,
+    language: lang,
+    summary: L(
+      lang,
+      "Weekly market commentary from a mailing list. No action expected from you.",
+      "Commentaire de marché hebdomadaire issu d'une liste de diffusion. Aucune action attendue de votre part.",
+    ),
+    decisions: [],
+    pendingTasks: [],
+    risks: [],
+    suggestedActions: [],
+    quickReplies: [],
+    confidence: 0.97,
+    auditId: id("aud"),
+    generatedAt: now(),
+    source: "heuristic",
+    triage: {
+      kind,
+      reason: L(lang, "List-Unsubscribe header and a bulk sender domain.", "En-tête List-Unsubscribe et domaine d'envoi en masse."),
+    },
   };
 }
 
@@ -260,9 +296,13 @@ function mockSimulation(lang: Language, a: Automation, sampleSize: number): Auto
 
 /* ------------------------------------------------------------------ client */
 
-export function createMockClient(getLanguage: () => import("@oao/shared").Language, latency = 500): OaoApi {
+export function createMockClient(getLanguage: () => Language, latency = 500): OaoApi {
   let automations: Automation[] = [mockAutomation(getLanguage()), { ...mockAutomation(getLanguage(), "active"), id: "auto-invoices", name: getLanguage() === "fr" ? "Factures fournisseurs" : "Vendor invoices", stats: { occurrences: 40, perWeek: 8, estimatedMinutesPerOccurrence: 2, estimatedMinutesSavedPerWeek: 16 } }];
   const lastProposals = new Map<string, ActionProposal>();
+  /** Ids the "sync worker" already precomputed (the sample email is one). */
+  const precomputedIds = new Set<string>(["msg-2025-05-25-001"]);
+  let briefStore: DailyBrief | null = mockDailyBrief(getLanguage());
+  let syncStore: MailboxSyncStatus = mockSyncStatus();
 
   const wait = (factor = 1) => sleep(latency * factor);
 
@@ -272,7 +312,9 @@ export function createMockClient(getLanguage: () => import("@oao/shared").Langua
     analyzeEmail: async (req) => {
       await wait(1.6);
       const phishing = /urgent|password|wire transfer/i.test(req.email.subject + req.email.body) && !/Project Horizon/i.test(req.email.subject);
-      return validate(EmailAnalysisSchema, mockAnalysis(req.language ?? getLanguage(), req.email.id, phishing), "analyzeEmail");
+      // Once analysed, the backend would serve it from its own content cache.
+      precomputedIds.add(req.email.id);
+      return validate(EmailAnalysisSchema, { ...mockAnalysis(req.language ?? getLanguage(), req.email.id, phishing), source: "llm" as const }, "analyzeEmail");
     },
     analyzeThread: async (req) => {
       await wait(2);
@@ -339,9 +381,51 @@ export function createMockClient(getLanguage: () => import("@oao/shared").Langua
     reportActionResult: async () => {
       await wait(0.3);
     },
+    features: async () => {
+      await wait(0.2);
+      return validate(FeatureFlagsSchema, mockFeatures(), "features");
+    },
+    /**
+     * The precomputed-analysis lookup. The sample email is "precomputed" (so the
+     * pane opens instantly with the badge), a newsletter id resolves to a
+     * triaged analysis, and anything else answers 404 → `null`, which sends the
+     * caller down the POST path exactly as the real backend would.
+     */
+    analysisByEmail: async (emailId) => {
+      await wait(0.4);
+      if (/newsletter|digest|noreply/i.test(emailId)) {
+        return validate(EmailAnalysisSchema, mockTriagedAnalysis(getLanguage(), emailId), "analysisByEmail");
+      }
+      if (!precomputedIds.has(emailId)) return null;
+      const analysis = { ...mockAnalysis(getLanguage(), emailId), source: "precomputed" as const };
+      return validate(EmailAnalysisSchema, analysis, "analysisByEmail");
+    },
+    dailyBrief: async (req) => {
+      await wait(0.5);
+      if (!briefStore) return null;
+      return validate(DailyBriefSchema, { ...briefStore, language: req?.language ?? getLanguage() }, "dailyBrief");
+    },
+    generateDailyBrief: async (req) => {
+      await wait(2.4);
+      briefStore = mockDailyBrief(req?.language ?? getLanguage(), req?.date ?? undefined, "llm");
+      return validate(DailyBriefSchema, briefStore, "generateDailyBrief");
+    },
+    mailboxSync: async () => {
+      await wait(0.3);
+      return validate(MailboxSyncStatusSchema, syncStore, "mailboxSync");
+    },
+    syncNow: async () => {
+      await wait(0.9);
+      syncStore = mockSyncStatus({ state: "syncing", pending: syncStore.pending + 2 });
+      setTimeout(() => {
+        syncStore = mockSyncStatus({ lastSyncAt: new Date().toISOString(), pending: 0, precomputedAnalyses: syncStore.precomputedAnalyses + 2 });
+      }, 2_000);
+      return validate(MailboxSyncStatusSchema, syncStore, "syncNow");
+    },
     complianceCheck: async (req) => {
       await wait(1.5);
-      const external = [...req.draft.to, ...req.draft.cc, ...req.draft.bcc].some((r) => !/@(northbridge\.ch|northbridgecapital\.com)$/i.test(r.address));
+      // Internal domain of the placeholder organisation used by the fixtures.
+      const external = [...req.draft.to, ...req.draft.cc, ...req.draft.bcc].some((r) => !/@northbridge\.example$/i.test(r.address));
       return validate(ComplianceCheckResponseSchema, mockCompliance(req.language ?? getLanguage(), external), "complianceCheck");
     },
     createEscalation: async (req) => {

@@ -1,0 +1,331 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "id": "7f2e9a4b-6c1d-4e8f-a3b5-9d0c1e2f3a4b",
+  "version": "1.0.0",
+  "name": {
+    "short": "Outlook AI Orchestrator (dev)",
+    "full": "Outlook AI Orchestrator (dev)"
+  },
+  "description": {
+    "short": "Human-in-the-loop AI assistant for Outlook: summaries, cited answers, approved a",
+    "full": "Secure, human-in-the-loop AI assistant for Outlook: summaries, chat with cited sources, thread synthesis, approved actions, Automation Coach and Compliance Guardian."
+  },
+  "developer": {
+    "name": "Northbridge Capital",
+    "websiteUrl": "https://localhost:3000/",
+    "privacyUrl": "https://localhost:3000/privacy",
+    "termsOfUseUrl": "https://localhost:3000/terms"
+  },
+  "localizationInfo": {
+    "defaultLanguageTag": "en-us",
+    "additionalLanguages": []
+  },
+  "icons": {
+    "outline": "assets/icon-32.png",
+    "color": "assets/icon-128.png"
+  },
+  "accentColor": "#0F6CBD",
+  "validDomains": [
+    "localhost:3000",
+    "localhost:8080"
+  ],
+  "webApplicationInfo": {
+    "id": "{{AAD_CLIENT_ID}}",
+    "resource": "api://localhost:3000/{{AAD_CLIENT_ID}}"
+  },
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": [
+        {
+          "name": "MailboxItem.ReadWrite.User",
+          "type": "Delegated"
+        },
+        {
+          "name": "Mailbox.ReadWrite.User",
+          "type": "Delegated"
+        }
+      ]
+    }
+  },
+  "extensions": [
+    {
+      "requirements": {
+        "scopes": [
+          "mail"
+        ],
+        "capabilities": [
+          {
+            "name": "Mailbox",
+            "minVersion": "1.10"
+          }
+        ]
+      },
+      "runtimes": [
+        {
+          "id": "TaskPaneRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://localhost:3000/taskpane.html"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "openPane",
+              "type": "openPage",
+              "view": "taskPaneView",
+              "pinnable": true
+            }
+          ]
+        },
+        {
+          "id": "ChatRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://localhost:3000/taskpane.html?tab=chat"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "openChat",
+              "type": "openPage",
+              "view": "chatView",
+              "pinnable": false
+            }
+          ]
+        },
+        {
+          "id": "BriefRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://localhost:3000/taskpane.html?view=brief"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "openBrief",
+              "type": "openPage",
+              "view": "briefView",
+              "pinnable": true
+            }
+          ]
+        },
+        {
+          "id": "ComplianceRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://localhost:3000/taskpane.html?mode=compose"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "openCompliance",
+              "type": "openPage",
+              "view": "complianceView",
+              "pinnable": false
+            }
+          ]
+        },
+        {
+          "id": "CommandsRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://localhost:3000/commands.html",
+            "script": "https://localhost:3000/commands.js"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "onMessageSendHandler",
+              "type": "executeFunction",
+              "displayName": "onMessageSendHandler"
+            }
+          ]
+        }
+      ],
+      "ribbons": [
+        {
+          "contexts": [
+            "mailRead"
+          ],
+          "tabs": [
+            {
+              "builtInTabId": "TabDefault",
+              "groups": [
+                {
+                  "id": "msgReadGroup",
+                  "label": "AI Orchestrator",
+                  "icons": [
+                    {
+                      "size": 16,
+                      "url": "https://localhost:3000/assets/icon-16.png"
+                    },
+                    {
+                      "size": 32,
+                      "url": "https://localhost:3000/assets/icon-32.png"
+                    },
+                    {
+                      "size": 80,
+                      "url": "https://localhost:3000/assets/icon-80.png"
+                    }
+                  ],
+                  "controls": [
+                    {
+                      "id": "msgReadOpenPane",
+                      "type": "button",
+                      "label": "Open AI panel",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://localhost:3000/assets/icon-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://localhost:3000/assets/icon-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://localhost:3000/assets/icon-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Open AI panel",
+                        "description": "Summary, decisions, tasks, risks and proposed actions for this email (human-in-the-loop)."
+                      },
+                      "actionId": "openPane"
+                    },
+                    {
+                      "id": "msgReadAsk",
+                      "type": "button",
+                      "label": "Ask about this email",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://localhost:3000/assets/icon-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://localhost:3000/assets/icon-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://localhost:3000/assets/icon-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Ask about this email",
+                        "description": "Chat with your mailbox: ask a question and get an answer with cited sources."
+                      },
+                      "actionId": "openChat"
+                    },
+                    {
+                      "id": "msgReadBrief",
+                      "type": "button",
+                      "label": "Daily brief",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://localhost:3000/assets/icon-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://localhost:3000/assets/icon-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://localhost:3000/assets/icon-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Daily brief",
+                        "description": "Your daily brief: what matters today, priority emails, open tasks, deadlines and alerts."
+                      },
+                      "actionId": "openBrief"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "contexts": [
+            "mailCompose"
+          ],
+          "tabs": [
+            {
+              "builtInTabId": "TabDefault",
+              "groups": [
+                {
+                  "id": "msgComposeGroup",
+                  "label": "AI Orchestrator",
+                  "icons": [
+                    {
+                      "size": 16,
+                      "url": "https://localhost:3000/assets/icon-16.png"
+                    },
+                    {
+                      "size": 32,
+                      "url": "https://localhost:3000/assets/icon-32.png"
+                    },
+                    {
+                      "size": 80,
+                      "url": "https://localhost:3000/assets/icon-80.png"
+                    }
+                  ],
+                  "controls": [
+                    {
+                      "id": "msgComposeCompliance",
+                      "type": "button",
+                      "label": "Compliance Guardian",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://localhost:3000/assets/icon-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://localhost:3000/assets/icon-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://localhost:3000/assets/icon-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Compliance Guardian",
+                        "description": "Check this draft for compliance risks before sending."
+                      },
+                      "actionId": "openCompliance"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "autoRunEvents": [
+        {
+          "requirements": {
+            "capabilities": [
+              {
+                "name": "Mailbox",
+                "minVersion": "1.10"
+              }
+            ]
+          },
+          "events": [
+            {
+              "type": "messageSending",
+              "actionId": "onMessageSendHandler",
+              "options": {
+                "sendMode": "promptUser"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -7,3 +7,4 @@ export * from "./thread";
 export * from "./actions";
 export * from "./observe";
 export * from "./sso";
+export * from "./notifications";

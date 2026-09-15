@@ -111,7 +111,7 @@ export function ChatTab({ email }: { email: EmailContext }) {
 
   return (
     <div className={s.root} data-testid="chat-tab">
-      <div className={s.transcript}>
+      <div className={s.transcript} role="log" aria-label={t("tabs.chat")}>
         {turns.length === 0 && !busy && <EmptyState title={t("tabs.chat")} description={t("chat.empty")} icon={<DatabaseSearch20Regular />} />}
         {turns.map((turn, i) =>
           turn.role === "user" ? (
@@ -175,6 +175,11 @@ export function ChatTab({ email }: { email: EmailContext }) {
           ),
         )}
         {busy && <Spinner size="tiny" label={t("chat.thinking")} labelPosition="after" />}
+        {/* Announce the answer (and the wait) to assistive technology: a Fluent
+            Spinner label alone is not reliably read out. */}
+        <div aria-live="polite" aria-atomic="true" className="oao-visually-hidden">
+          {busy ? t("chat.thinking") : (turns[turns.length - 1]?.role === "assistant" ? turns[turns.length - 1]!.text : "")}
+        </div>
         <div ref={endRef} />
       </div>
 
