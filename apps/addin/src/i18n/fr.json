@@ -53,7 +53,15 @@
     "phishingLikely": "Cet email est probablement une tentative d'hameçonnage (score {score} %). Ne répondez pas, ne cliquez sur aucun lien et n'ouvrez aucune pièce jointe. Signalez-le à l'équipe Compliance.",
     "addAction": "Ajouter l'action",
     "draftOpened": "Brouillon de réponse ouvert — relisez-le avant d'envoyer.",
-    "analyzing": "Analyse de l'email…"
+    "analyzing": "Analyse de cet e-mail…",
+    "emptyTitle": "Aucune analyse pour l'instant",
+    "emptyBody": "Cet e-mail n'a pas encore été analysé. L'analyser consomme un appel IA.",
+    "analyseNow": "Analyser cet e-mail",
+    "emptyResultTitle": "L'IA a renvoyé une analyse vide",
+    "emptyResultBody": "Rien n'a pu être extrait de ce message — il s'agit peut-être d'un transfert sans texte lisible. Réessayez pour interroger à nouveau le modèle.",
+    "noSummary": "Aucun résumé n'a été produit pour cet e-mail.",
+    "degradedTitle": "IA indisponible — règles uniquement",
+    "degradedBody": "Le modèle n'a pas pu être joint : cette analyse provient uniquement de règles et reste moins complète que d'habitude. Réessayez pour interroger le modèle."
   },
   "thread": {
     "executiveSummary": "Synthèse exécutive",
@@ -261,7 +269,8 @@
     "backendTitle": "Orchestrateur inaccessible",
     "backendBody": "Le complément ne peut pas joindre l'AI Orchestrator : il n'a donc rien à afficher. Il ne basculera pas sur des données d'exemple — l'analyse d'un e-mail d'exemple n'est pas une réponse sur votre boîte.",
     "backendHint": "Vérifiez que le backend tourne (pnpm dev) et que VITE_API_BASE_URL pointe dessus, puis réessayez.",
-    "backendDetail": "Contrôle de santé : {message}"
+    "backendDetail": "Contrôle de santé : {message}",
+    "cancelled": "La requête a été annulée : vous avez ouvert un autre e-mail."
   },
   "source": {
     "precomputed": "Précalculé",
@@ -292,7 +301,8 @@
       "automatic": "Email automatique",
       "calendar": "Message de calendrier",
       "trivial": "Rien à traiter"
-    }
+    },
+    "stillTriaged": "L'orchestrateur a réappliqué ses règles de tri et classe toujours cet e-mail comme ne justifiant pas d'appel au modèle : aucun appel IA n'a été effectué. La règle est dans la politique du serveur, pas dans le volet."
   },
   "brief": {
     "title": "Résumé journalier",
@@ -410,5 +420,9 @@
     "scope": "Cette sélection ({count})",
     "chatEmpty": "Posez une question sur les {count} e-mails sélectionnés ; la recherche reste dans la sélection.",
     "indexing": "Indexation des e-mails sélectionnés…"
+  },
+  "read": {
+    "noItemTitle": "Aucun message ouvert",
+    "noItemBody": "Outlook a fermé le message pendant son chargement. Ouvrez un e-mail pour l'analyser."
   }
 }

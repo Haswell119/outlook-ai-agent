@@ -97,7 +97,7 @@ export class ActionsService {
       };
     }
     if (req.email) {
-      const a = await this.analyzer.analyze(ctx, { email: req.email, language: req.language, includeThread: false });
+      const a = await this.analyzer.analyze(ctx, { email: req.email, language: req.language, includeThread: false, force: false });
       return { suggestedActions: a.suggestedActions, risks: a.risks, sourceKind: "email", sourceLabel: sourceLabelOf(req.email), emailId: req.email.id, conversationId: req.email.conversationId, phishingVerdict: a.phishing?.verdict, auditId: a.auditId };
     }
     if (req.thread) {

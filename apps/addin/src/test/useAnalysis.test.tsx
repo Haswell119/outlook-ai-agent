@@ -36,7 +36,7 @@ describe("analysis resolution tiers", () => {
     await waitFor(() => expect(result.current.data).not.toBeNull());
 
     expect(result.current.source).toBe("precomputed");
-    expect(api.analysisByEmail).toHaveBeenCalledWith(`rest-${sampleEmail.id}`);
+    expect(api.analysisByEmail).toHaveBeenCalledWith(`rest-${sampleEmail.id}`, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(api.analyzeEmail).not.toHaveBeenCalled();
   });
 

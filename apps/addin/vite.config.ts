@@ -87,6 +87,46 @@ function cspPlugin(options: { apiOrigin?: string; dev: boolean; extraConnect: st
 }
 
 /**
+ * Serves and ships the Office.js **host simulator** (`e2e/office-sim/*.js`).
+ *
+ * Those three files are plain, import-free scripts on purpose: `sim.html` loads
+ * them with classic `<script src>` tags and Playwright injects the same files
+ * with `page.addInitScript({ path })`. Vite does not bundle a classic script, so
+ * this plugin (a) serves them from disk in `vite dev` **and** `vite preview` and
+ * (b) copies them next to `sim.html` in `dist/`, which is what `pnpm e2e` runs
+ * against. They are never referenced by `taskpane.html`, so nothing of the
+ * simulator can reach a real Outlook.
+ */
+function officeSimPlugin(): Plugin {
+  const dir = "e2e/office-sim";
+  const files = ["fixtures.js", "office-sim.js", "sim-page.js"];
+  const serve = (server: { middlewares: { use: (fn: (req: { url?: string }, res: { setHeader: (k: string, v: string) => void; end: (body?: string) => void }, next: () => void) => void) => void } }) => {
+    server.middlewares.use((req, res, next) => {
+      const url = (req.url ?? "").split("?")[0] ?? "";
+      const name = files.find((f) => url === `/${dir}/${f}` || url === `/${f}`);
+      if (!name) return next();
+      const full = resolve(__dirname, dir, name);
+      if (!existsSync(full)) return next();
+      res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      res.end(readFileSync(full, "utf8"));
+    });
+  };
+  return {
+    name: "oao-office-sim",
+    configureServer: serve,
+    configurePreviewServer: serve,
+    generateBundle() {
+      for (const name of files) {
+        const full = resolve(__dirname, dir, name);
+        if (!existsSync(full)) continue;
+        this.emitFile({ type: "asset", fileName: `${dir}/${name}`, source: readFileSync(full, "utf8") });
+      }
+    },
+  };
+}
+
+/**
  * Prints the gzipped size of every emitted asset and fails the build when the
  * main entry chunk exceeds the budget. Keeps the "instant pane" promise
  * enforceable in CI instead of aspirational.
@@ -142,6 +182,9 @@ export default defineConfig(async ({ command, isPreview }): Promise<UserConfig> 
   const apiOrigin = process.env.VITE_API_BASE_URL?.trim() || (dev ? "http://localhost:8080" : "https://localhost:8443");
   const extraConnect = [process.env.VITE_TELEMETRY_URL, process.env.VITE_APPINSIGHTS_INGESTION_ORIGIN].filter((v): v is string => !!v);
 
+  // `pnpm dev` always has it; a build needs ADDIN_SIM=1.
+  const withSim = dev || process.env.ADDIN_SIM === "1";
+
   const visualizer: PluginOption[] = [];
   if (process.env.ANALYZE === "1") {
     try {
@@ -157,6 +200,7 @@ export default defineConfig(async ({ command, isPreview }): Promise<UserConfig> 
     plugins: [
       react(),
       cspPlugin({ apiOrigin, dev, extraConnect }),
+      ...(withSim ? [officeSimPlugin()] : []),
       ...https.plugins,
       ...visualizer,
       budgetPlugin({ mainBudgetGz: 250 * 1024, totalBudgetGz: 700 * 1024 }),
@@ -191,6 +235,12 @@ export default defineConfig(async ({ command, isPreview }): Promise<UserConfig> 
         input: {
           taskpane: resolve(__dirname, "taskpane.html"),
           commands: resolve(__dirname, "commands.html"),
+          // The Office.js host simulator page (see e2e/office-sim/): a dev and
+          // test surface, never part of a manifest. It is **opt-in** so a
+          // production build cannot ship it by accident; `pnpm e2e` and
+          // `pnpm screenshots:states` set ADDIN_SIM=1, and `vite dev` always
+          // serves it (dev serves every HTML file in the project root).
+          ...(withSim ? { sim: resolve(__dirname, "sim.html") } : {}),
         },
         output: {
           // Content-hashed, lower-case, extension-correct names so a static

@@ -8,6 +8,8 @@ export type ApiErrorKind =
   | "llm"
   | "graph"
   | "sso"
+  /** Aborted by the caller (the pane moved to another email) — never shown. */
+  | "cancelled"
   | "generic";
 
 /** Error thrown by the API client; `i18nKey` maps to `errors.*` in the resources. */
@@ -55,6 +57,8 @@ export class ApiClientError extends Error {
         return "errors.llm";
       case "graph":
         return "errors.graph";
+      case "cancelled":
+        return "errors.cancelled";
       default:
         return "errors.generic";
     }
@@ -69,6 +73,11 @@ export function kindFromStatus(status: number, code?: string): ApiErrorKind {
   if (status === 502 || code === "llm_unavailable") return "llm";
   if (status === 503 || code === "graph_unavailable") return "graph";
   return "generic";
+}
+
+/** True when the error is a caller-side cancellation, which no UI must report. */
+export function isCancelled(err: unknown): boolean {
+  return err instanceof ApiClientError && err.kind === "cancelled";
 }
 
 /** Correlation id of any error, for the "Report" button of the error boundary. */

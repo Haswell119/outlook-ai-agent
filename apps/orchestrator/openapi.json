@@ -447,6 +447,10 @@
           "includeThread": {
             "type": "boolean",
             "default": false
+          },
+          "force": {
+            "type": "boolean",
+            "default": false
           }
         },
         "required": [

@@ -4,9 +4,19 @@
  * Stored in localStorage (falls back to memory when storage is unavailable).
  */
 import type { EmailContext } from "@oao/shared";
+import { mailboxScope } from "./env";
 
-const KEY = "oao.addin.conversationCache.v1";
+const KEY_PREFIX = "oao.addin.conversationCache.v1";
 const MAX_ITEMS = 200;
+
+/**
+ * Scoped to the mailbox: these are message bodies, and they are what the thread
+ * synthesis and "Index recent emails" send to the orchestrator. After an account
+ * switch in the same browser profile they must not be visible at all.
+ */
+function storageKey(): string {
+  return `${KEY_PREFIX}.${mailboxScope()}`;
+}
 
 export interface CachedItem {
   id: string;
@@ -19,23 +29,28 @@ export interface CachedItem {
   attachments: EmailContext["attachments"];
 }
 
-let memory: CachedItem[] | null = null;
+/** In-memory mirror, keyed by mailbox so a switch cannot serve the wrong one. */
+let memory: { scope: string; items: CachedItem[] } | null = null;
 
 function load(): CachedItem[] {
-  if (memory) return memory;
+  const scope = storageKey();
+  if (memory && memory.scope === scope) return memory.items;
+  let items: CachedItem[] = [];
   try {
-    const raw = localStorage.getItem(KEY);
-    memory = raw ? (JSON.parse(raw) as CachedItem[]) : [];
+    const raw = localStorage.getItem(scope);
+    items = raw ? (JSON.parse(raw) as CachedItem[]) : [];
   } catch {
-    memory = [];
+    items = [];
   }
-  return memory;
+  memory = { scope, items };
+  return items;
 }
 
 function persist(items: CachedItem[]): void {
-  memory = items;
+  const scope = storageKey();
+  memory = { scope, items };
   try {
-    localStorage.setItem(KEY, JSON.stringify(items));
+    localStorage.setItem(scope, JSON.stringify(items));
   } catch {
     /* storage unavailable: memory only */
   }

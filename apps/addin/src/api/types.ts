@@ -33,6 +33,16 @@ export type SimulateAutomationRequest = z.input<typeof SimulateAutomationRequest
 export type AutomationDecisionRequest = z.input<typeof AutomationDecisionRequestSchema>;
 export type DailyBriefRequest = z.input<typeof DailyBriefRequestSchema>;
 
+/** Per-call options every cancellable route accepts. */
+export interface CallOptions {
+  /**
+   * Abort the request. The pane passes one signal per (item, language) key, so
+   * leaving an email cancels its analysis instead of letting a 30-second model
+   * call land on top of the next email's result.
+   */
+  signal?: AbortSignal;
+}
+
 /** The orchestrator API as used by the add-in (one method per route we call). */
 export interface OaoApi {
   readonly mode: "live" | "mock";
@@ -44,9 +54,9 @@ export interface OaoApi {
    * Resolves to `null` when the backend answers 404 (not precomputed yet), so
    * the caller can decide to spend a model call. Never throws on 404.
    */
-  analysisByEmail(emailId: string): Promise<EmailAnalysis | null>;
-  analyzeEmail(req: AnalyzeEmailRequest): Promise<EmailAnalysis>;
-  analyzeThread(req: AnalyzeThreadRequest): Promise<ThreadSynthesis>;
+  analysisByEmail(emailId: string, opts?: CallOptions): Promise<EmailAnalysis | null>;
+  analyzeEmail(req: AnalyzeEmailRequest, opts?: CallOptions): Promise<EmailAnalysis>;
+  analyzeThread(req: AnalyzeThreadRequest, opts?: CallOptions): Promise<ThreadSynthesis>;
   draftReply(req: DraftReplyRequest): Promise<DraftReply>;
   chat(req: ChatRequest): Promise<ChatResponse>;
   indexEmails(req: IndexEmailsRequest): Promise<IndexEmailsResponse>;

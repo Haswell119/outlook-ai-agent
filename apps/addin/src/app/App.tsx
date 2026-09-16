@@ -4,6 +4,7 @@ import type { FeatureFlags } from "@oao/shared";
 import { initApi, getApi, setLanguageGetter, type OaoApi } from "@/api";
 import { I18nProvider, useI18n } from "@/i18n";
 import { isPreviewMode, queryParam } from "@/office/env";
+import { currentItemId } from "@/office/readItem";
 import { detectSurfaceSync, resolveSurface, type AppSurface } from "@/office/host";
 import { addMailboxListener } from "@/office/events";
 import { startObservationFlusher } from "@/office/observe";
@@ -73,7 +74,16 @@ export function App({ mode }: AppProps) {
    */
   const [surface, setSurface] = useState<AppMode>(() => mode ?? detectSurfaceSync());
   const [itemVersion, setItemVersion] = useState(0);
+  /**
+   * Id of the message the host has selected *right now*. Everything item-bound
+   * is keyed by it, so a value that belongs to another message can never be
+   * rendered, however the host swapped the item.
+   */
+  const [itemId, setItemId] = useState<string>(() => (mode ? "" : currentItemId()));
   const resolvedMode = mode ?? surface;
+  // Mirrored in a ref so the safety net can compare without re-subscribing.
+  const itemIdRef = useRef(itemId);
+  itemIdRef.current = itemId;
 
   useEffect(() => {
     if (mode) return; // forced by a test / screenshot
@@ -84,20 +94,47 @@ export function App({ mode }: AppProps) {
       });
     };
     refresh();
-    const onChange = (event: "item" | "selection") => () => {
+    const onChange = (event: "item" | "selection" | "visibility" | "focus") => () => {
       if (!alive) return;
+      const next = currentItemId();
+      setItemId(next);
       setItemVersion((v) => v + 1);
       track("pane.itemChanged", { kind: event });
       refresh();
     };
     // One Office handler per event for the whole pane, removed on unmount
     // (see office/events.ts) — a pinned pane must not leak a handler per item.
+    // Registered unconditionally: the pane does not know whether the user
+    // pinned it, and on a host without Mailbox 1.5 the subscription is a no-op.
     const offItem = addMailboxListener("ItemChanged", onChange("item"));
     const offSelection = addMailboxListener("SelectedItemsChanged", onChange("selection"));
+
+    /**
+     * Safety net. `ItemChanged` is the supported way to learn that the
+     * selection moved, but it does not always arrive: the host may not have the
+     * 1.5 requirement set, the pane may have registered its handler after
+     * Outlook had already swapped the item, or the pane may have been hidden
+     * and re-shown on another message. Whenever the pane becomes visible or
+     * regains focus we therefore *ask* the host what it holds, and only do
+     * something when the answer differs from what we are rendering.
+     */
+    const recheck = (kind: "visibility" | "focus") => () => {
+      if (!alive) return;
+      if (kind === "visibility" && document.visibilityState !== "visible") return;
+      if (currentItemId() === itemIdRef.current) return;
+      onChange(kind)();
+    };
+    const onVisibility = recheck("visibility");
+    const onFocus = recheck("focus");
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+
     return () => {
       alive = false;
       offItem();
       offSelection();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
     };
   }, [mode]);
 
@@ -171,7 +208,7 @@ export function App({ mode }: AppProps) {
                 <ErrorBoundary feature="app">
                   {resolvedMode === "compose" ? (
                     <Suspense fallback={<Skeleton cards={2} />}>
-                      <LazyComplianceGuardian />
+                      <LazyComplianceGuardian itemVersion={itemVersion} />
                     </Suspense>
                   ) : resolvedMode === "home" ? (
                     <HomeMode initialTab={queryParam("tab")} />
@@ -180,7 +217,7 @@ export function App({ mode }: AppProps) {
                   ) : resolvedMode === "brief" ? (
                     <BriefMode />
                   ) : (
-                    <ReadMode initialTab={queryParam("tab")} initialView={queryParam("view")} itemVersion={itemVersion} />
+                    <ReadMode initialTab={queryParam("tab")} initialView={queryParam("view")} itemVersion={itemVersion} itemId={itemId} />
                   )}
                 </ErrorBoundary>
               )}

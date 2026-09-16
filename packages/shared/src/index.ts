@@ -197,6 +197,11 @@ export const AnalyzeEmailRequestSchema = z.object({
   language: LanguageSchema.optional(),
   /** When true the orchestrator may fetch the whole thread via Graph. */
   includeThread: z.boolean().default(false),
+  /**
+   * Explicit user request ("Analyse anyway" / refresh): bypass the rule-based
+   * triage and the content-hash cache and call the model. Costs a model call.
+   */
+  force: z.boolean().default(false),
 });
 export type AnalyzeEmailRequest = z.infer<typeof AnalyzeEmailRequestSchema>;
 

@@ -20,7 +20,7 @@ const api = createMockClient(() => "en", 0);
 
 describe("mock API responses validate against the shared schemas", () => {
   it("analyzeEmail", async () => {
-    const r = await api.analyzeEmail({ email: sampleEmail, includeThread: false });
+    const r = await api.analyzeEmail({ email: sampleEmail, includeThread: false, force: false });
     expect(EmailAnalysisSchema.safeParse(r).success).toBe(true);
     expect(Math.round(r.confidence * 100)).toBe(92);
     expect(r.suggestedActions).toHaveLength(4);
@@ -80,7 +80,7 @@ describe("new endpoints (precomputation, brief, sync, features)", () => {
   it("an analysed email becomes available through the id lookup", async () => {
     const fresh = createMockClient(() => "en", 0);
     expect(await fresh.analysisByEmail("msg-brand-new")).toBeNull();
-    await fresh.analyzeEmail({ email: { ...sampleEmail, id: "msg-brand-new" }, includeThread: false });
+    await fresh.analyzeEmail({ email: { ...sampleEmail, id: "msg-brand-new" }, includeThread: false, force: false });
     expect(await fresh.analysisByEmail("msg-brand-new")).not.toBeNull();
   });
 

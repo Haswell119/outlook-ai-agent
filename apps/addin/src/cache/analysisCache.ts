@@ -16,6 +16,7 @@
  *   - stale entries    → deleted on read, never served
  */
 import { hashParts } from "@/util/hash";
+import { mailboxScope } from "@/office/env";
 import { createStore, type KvStore } from "./idb";
 
 export type CacheKind = "analysis" | "thread" | "brief";
@@ -58,7 +59,7 @@ export function cacheBackend(): "idb" | "memory" {
 
 export function cacheKey(kind: CacheKind, id: string, hash: string): string {
   // `id` can contain ':' (REST ids are base64url, EWS ids are long) → hash it.
-  return `${kind}:${hashParts([id])}:${hash}`;
+  return `${kind}:${mailboxScope()}:${hashParts([id])}:${hash}`;
 }
 
 /**

@@ -3,7 +3,7 @@ import { Open16Regular, ShieldError20Regular, Tag20Regular, Translate20Regular }
 import type { EmailAnalysis, EmailContext } from "@oao/shared";
 import { useApp } from "@/app/AppContext";
 import { formatDate, useI18n } from "@/i18n";
-import { BulletList, ConfidenceBar, RiskBadge, SectionCard, Skeleton, SourceBadge, colors, type DisplaySource } from "@/ui";
+import { BulletList, ConfidenceBar, EmptyState, ErrorState, RiskBadge, SectionCard, Skeleton, SourceBadge, colors, type DisplaySource } from "@/ui";
 import { AutomationCoach } from "@/features/automation/AutomationCoach";
 import { SyncStatusPill } from "./SyncStatusPill";
 
@@ -14,15 +14,26 @@ const useStyles = makeStyles({
   mono: { fontFamily: "Consolas, monospace", fontSize: "11px", wordBreak: "break-all" },
 });
 
+/**
+ * This tab shows *about* the analysis (classification, phishing screening,
+ * model, audit id) rather than the analysis itself, so it has to carry the same
+ * three states as the Summary tab: it is analysing, it failed, or there is
+ * nothing yet. Without them the tab quietly rendered only the sync pill and the
+ * Automation Coach, which reads as "there are no insights for this email".
+ */
 export function InsightsTab({
   analysis,
   loading,
+  error,
   source,
+  onRetry,
 }: {
   email: EmailContext;
   analysis: EmailAnalysis | null;
   loading: boolean;
+  error?: unknown;
   source?: DisplaySource;
+  onRetry?: () => void;
 }) {
   const s = useStyles();
   const { t, lang } = useI18n();
@@ -36,7 +47,9 @@ export function InsightsTab({
       {/* Precomputation status first: it explains why the pane was instant. */}
       <SyncStatusPill />
 
-      {loading && !analysis && <Skeleton cards={2} />}
+      {loading && !analysis && <Skeleton cards={2} label={t("summary.analyzing")} />}
+      {!loading && !analysis && !!error && <ErrorState error={error} onRetry={onRetry} />}
+      {!loading && !analysis && !error && <EmptyState title={t("summary.emptyTitle")} description={t("summary.emptyBody")} />}
       {analysis && (
         <>
           <SectionCard icon={<Tag20Regular />} title={t("insights.classification")}>

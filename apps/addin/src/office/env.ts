@@ -2,6 +2,7 @@
  * Office.js environment helpers. Everything here is defensive: the task pane
  * can be opened directly in a browser ("preview mode") to review the UI.
  */
+import { hashString } from "@/util/hash";
 
 type OfficeGlobal = typeof Office | undefined;
 
@@ -164,6 +165,23 @@ export function currentUser(): { email: string; name: string } {
     /* ignore */
   }
   return { email: "jane.smith@northbridge.example", name: "Jane Smith" };
+}
+
+/**
+ * Stable, non-reversible identifier of the **mailbox** the pane is open on.
+ *
+ * Every local store is per-origin, not per-mailbox, and Outlook on the web lets
+ * one browser profile switch accounts. Without this in the key, the daily brief
+ * (cached as `brief:<date>:<lang>`) and the per-session conversation cache were
+ * served to whoever opened the pane next on that machine. The address is
+ * hashed, so nothing readable about the user is written to disk.
+ */
+export function mailboxScope(): string {
+  try {
+    return hashString(currentUser().email.trim().toLowerCase());
+  } catch {
+    return "anonymous";
+  }
 }
 
 /**

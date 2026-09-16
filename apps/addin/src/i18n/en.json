@@ -53,7 +53,15 @@
     "phishingLikely": "This email is likely a phishing attempt (score {score}%). Do not reply, click links or open attachments. Report it to the Compliance Team.",
     "addAction": "Add action",
     "draftOpened": "Reply draft opened — review it before sending.",
-    "analyzing": "Analyzing this email…"
+    "analyzing": "Analysing this email…",
+    "emptyTitle": "Nothing analysed yet",
+    "emptyBody": "This email has not been analysed. Analysing it uses one AI call.",
+    "analyseNow": "Analyse this email",
+    "emptyResultTitle": "The AI returned an empty analysis",
+    "emptyResultBody": "Nothing could be extracted from this message — it may be a forward with no readable text. Retry to ask the model again.",
+    "noSummary": "No summary was produced for this email.",
+    "degradedTitle": "AI unavailable — rules only",
+    "degradedBody": "The model could not be reached, so this analysis comes from rules alone and is less complete than usual. Retry to ask the model again."
   },
   "thread": {
     "executiveSummary": "Executive summary",
@@ -261,7 +269,8 @@
     "backendTitle": "Orchestrator unreachable",
     "backendBody": "The add-in cannot reach the AI Orchestrator, so it has nothing to show. It will not fall back to sample data: an analysis of a sample email is not an answer about your mailbox.",
     "backendHint": "Check that the backend is running (pnpm dev) and that VITE_API_BASE_URL points at it, then retry.",
-    "backendDetail": "Health check: {message}"
+    "backendDetail": "Health check: {message}",
+    "cancelled": "The request was cancelled because you opened another email."
   },
   "source": {
     "precomputed": "Precomputed",
@@ -292,7 +301,8 @@
       "automatic": "Automated email",
       "calendar": "Calendar message",
       "trivial": "Nothing to act on"
-    }
+    },
+    "stillTriaged": "The orchestrator applied its triage rules again and still classified this email as not worth a model call, so no AI call was made. The rule lives in the server policy, not in the panel."
   },
   "brief": {
     "title": "Daily brief",
@@ -410,5 +420,9 @@
     "scope": "This selection ({count})",
     "chatEmpty": "Ask a question about the {count} selected emails; retrieval stays inside the selection.",
     "indexing": "Indexing the selected emails…"
+  },
+  "read": {
+    "noItemTitle": "No message is open",
+    "noItemBody": "Outlook closed the message while the panel was loading it. Open an email to analyse it."
   }
 }

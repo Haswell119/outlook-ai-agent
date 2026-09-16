@@ -105,8 +105,8 @@ pnpm --filter @oao/addin dev              # https://localhost:3000 (builds comma
 pnpm --filter @oao/addin build            # typecheck + dist/ (taskpane.html, commands.html, commands.js, assets/)
 pnpm --filter @oao/addin preview          # serves dist/ on http://localhost:4173
 pnpm --filter @oao/addin typecheck        # tsc --noEmit (also used by `lint`)
-pnpm --filter @oao/addin test             # vitest (jsdom + Testing Library) — 134 tests
-pnpm --filter @oao/addin e2e              # Playwright against `vite preview` — 16 specs
+pnpm --filter @oao/addin test             # vitest (jsdom + Testing Library) — 151 tests
+pnpm --filter @oao/addin e2e              # Playwright: 16 mock specs + 17 host-simulator specs against a real orchestrator
 pnpm --filter @oao/addin analyze          # build + dist/stats.html bundle treemap
 pnpm --filter @oao/addin manifest:render  # regenerate every manifest from the one template
 pnpm --filter @oao/addin manifest:package # zip manifest.json + color.png/outline.png → Teams app package
@@ -116,10 +116,14 @@ pnpm --filter @oao/addin validate-manifest:dev
 pnpm --filter @oao/addin certs            # office-addin-dev-certs install (trusted localhost cert)
 pnpm --filter @oao/addin icons            # regenerate public/assets/icon-*.png (pure Node)
 pnpm --filter @oao/addin screenshots      # Playwright screenshots of the preview build → docs/screenshots/
+pnpm --filter @oao/addin screenshots:states  # every pane state through the host simulator → docs/screenshots/states/
+ADDIN_SIM=1 pnpm --filter @oao/addin build   # …also emits sim.html (the simulator page) into dist/
 ```
 
-`pnpm --filter @oao/addin typecheck && pnpm --filter @oao/addin test && pnpm --filter @oao/addin build && pnpm --filter @oao/addin e2e`
-is the full gate and is what CI runs.
+`pnpm --filter @oao/addin typecheck && pnpm --filter @oao/addin test && pnpm --filter @oao/addin build && pnpm --filter @oao/addin e2e && pnpm --filter @oao/addin validate-manifest && pnpm --filter @oao/addin validate-manifest:dev`
+is the full gate and is what CI runs. Build it with `VITE_API_BASE_URL` pointing at the orchestrator: the value is baked into the
+bundle **and** into the CSP `connect-src`. `e2e` starts what it needs itself (the orchestrator with the mock model provider and an
+in-memory database, then `vite preview`), so the gate needs neither PostgreSQL nor an API key.
 
 ---
 
@@ -262,6 +266,81 @@ personal tab carries `scopes: ["personal"]`, `context: ["personalTab"]` and `hos
   **home** surface: real backend, no sample email, no "Preview mode" pill (`?mock=1` still forces the mock API, which is how the e2e
   spec for `?view=home&host=tab` runs offline). `isPreviewMode()` in `src/office/env.ts` is the single decision:
   `?preview=1` → always preview · a mailbox → never preview · `host=tab` / `view=home` → never preview · otherwise a browser → preview.
+
+---
+
+### Test without Outlook: the host simulator
+
+Outlook is where the pane is used and the hardest place to debug it. `e2e/office-sim/` is therefore a **fake Office.js host**, built
+to reproduce OWA's *behaviour* rather than its API surface, because that is where the bugs are: `Office.context.mailbox.item` is
+swapped **in place** when the selection moves, `ItemChanged` only arrives if a handler was registered in time (and only on a host
+with Mailbox 1.5), closing a message leaves `item === null` for a moment, and every `getAsync` answers asynchronously — `body.getAsync`
+slowest of all. A mock that merely returns data cannot show you "I opened an email, closed it, opened another one and the pane is
+stuck on the previous one"; this one does.
+
+`sim.html` is only emitted when `ADDIN_SIM=1` is set at build time, so a production build can never ship it; `vite dev` always serves
+it.
+
+```bash
+pnpm --filter @oao/orchestrator build && \
+  ROLE=all LLM_PROVIDER=mock DATABASE_URL=memory AUTH_MODE=dev \
+  CORS_ORIGINS=https://localhost:3000,http://localhost:4173 node apps/orchestrator/dist/server.js   # or: pnpm dev
+pnpm --filter @oao/addin dev
+# → https://localhost:3000/sim.html
+```
+
+The page is the **real task pane** with a control bar on top — one button per `window.__oaoSim` control:
+
+| Control | Button | What the host does |
+|---|---|---|
+| `openItem("A".."G")` | `A` … `G` | selects that message and raises `ItemChanged` (as a pinned pane gets it) |
+| `openItem(id, { silent: true })` | `open B silently` | swaps the item **without** the event — the case the `visibilitychange` / `focus` safety net catches |
+| `closeItem()` | `close` | `item = null` + `ItemChanged` (message closed) |
+| `reloadPane()` | `reload pane` | Outlook re-creating the pane iframe (`location.reload()`, same item kept in `sessionStorage`) |
+| `select([...])` | `select 3` / `select 2` | a multi-selection: `getSelectedItemsAsync` + `SelectedItemsChanged` |
+| `compose(draft)` | `draft with issues` / `clean draft` | the compose surface (the clean draft carries a sensitivity label) |
+| `composeAddRecipient(a)` | `add recipient` | changes the draft and raises `RecipientsChanged` |
+| `setLatency(ms)` | `0 / 300 / 1500 ms` | latency of every async Office call — 1500 ms is where a stale pane used to be visible |
+| `failNext(api)` | `body.getAsync`, `getSelectedItems` | the next call to that API fails like a real `AsyncResult` |
+| `failNextRequest(opts)` | `HTTP 500`, `backend down` / `backend up` | breaks the orchestrator for the pane (5xx, or unreachable) |
+| `setEventSupport(map)` | — | pretend the host has no Mailbox 1.5 / 1.13 / 1.15 |
+| `state()` / `calls()` | shown in the bar | what the host holds, and every Office call the pane made |
+
+Add `?bar=0` to hide the bar (the state screenshots use it) and `?user=<address>` to pretend another mailbox, which is how you force
+a **cold** path: the orchestrator caches per user, so re-analysing the same email as the same person answers `source: "cache"`.
+
+![The host simulator driving the real task pane](docs/screenshots/simulator.png)
+
+The seven fixtures (`e2e/office-sim/fixtures.js`, French and English, invented organisations only) are chosen for the paths they
+exercise: **A** a long English follow-up with numbered open points (model), **B** a French forward whose body *starts* with a
+`De :/Envoyé :/À :/Objet :` quote header (model), **C** a newsletter with an unsubscribe footer (rules only), **D** a French
+out-of-office (rules only), **E** "Merci !" (rules only), **F** an IBAN plus an external recipient (model, risks), **G** a short
+internal note with genuinely nothing to act on (model, empty sections).
+
+The same two files are injected into `taskpane.html` by `e2e/sim.spec.ts` with `page.addInitScript({ path })` — exactly how Outlook
+injects office.js — so the e2e suite drives the production bundle against a real orchestrator. They are plain, import-free scripts
+for that reason, they are never referenced by `taskpane.html`, and nothing of the simulator can reach a real Outlook.
+
+### States
+
+Every state below is a real state of the pane, captured through the simulator against a running orchestrator
+(`pnpm --filter @oao/addin screenshots:states` → `docs/screenshots/states/`).
+
+| State | Screenshot | How to get there | What must be true |
+|---|---|---|---|
+| Loading | `loading.png` | `setLatency(1500)` then open another email | the **subject** of the email being analysed, "Analysing this email…" with a spinner, actions disabled, and **no** trace of the previous email |
+| Analysed by the model | `success-llm.png` | open **A** (or **B**, **F**, **G**) on a mailbox with a cold cache | `AI-generated` badge (`source: "llm"`), summary, decisions, tasks, risks, suggested actions |
+| Served from this device | `success-cache.png` | open **A**, leave, come back | `From cache` badge, zero requests |
+| Rules only (triaged) | `rules-only.png` | open **C**, **D** or **E** | compact card, `Rules only` badge, the triage reason and a single "Analyse anyway" |
+| AI degraded | `degraded.png` | point the pane at an orchestrator whose model is down | yellow "AI unavailable — rules only" banner + Retry, `Rules only` badge, confidence collapses |
+| Orchestrator unreachable | `unreachable.png` | `backend down`, then reload | blocking card with the base URL, the health error and a Retry that works once it is back — never sample data |
+| Endpoint error (4xx/5xx) | `http-error.png` | `HTTP 500` | inline error inside the tab, the **correlation id**, a Retry, and the subject still visible |
+| Nothing to report | `empty-sections.png` | open **G** | "No decision identified." / "No pending task." / "No risk detected." — explicit lines, never blank cards |
+| No item | `home-no-item.png` | `close` | the mailbox-wide home surface (brief + chat + sync), with one line saying where the item-bound features are |
+| Multi-selection | `selection.png` | `select 3` | the selected messages with sender and date, and three explicit next steps; nothing is synthesised until asked |
+| Compose, checking | `compose-loading.png` | `setLatency(1500)` then `draft with issues` | "Checking this draft…" skeleton, Re-check disabled |
+| Compose, issues | `compose-issues.png` | `draft with issues` | headline count, one row per issue with its severity, recommended actions |
+| Compose, clean | `compose-clean.png` | `clean draft` | green "No issues detected" — reachable only because the pane now reads the draft's classification label |
 
 ---
 
@@ -458,7 +537,9 @@ After executing one the add-in POSTs `Routes.reportActionResult(id)` with `{acti
 manifest/            manifest.xml · manifest.json (unified, incl. staticTabs) · manifest.dev.xml · manifest.dev.json
                      + oao-addin-teams-app*.zip (generated by manifest:package, git-ignored)
 public/assets/       icon-16/32/64/80/128.png + icon.svg (generated)
-e2e/                 Playwright specs (run against `vite preview`)
+e2e/                 taskpane.spec.ts (mock mode) · sim.spec.ts (host simulator + real orchestrator)
+e2e/office-sim/      the fake Office.js host: fixtures.js · office-sim.js · sim-page.js (see "Test without Outlook")
+sim.html             the simulator page: the real pane + a control bar (dev/preview only, never in a manifest)
 src/taskpane/        main.tsx (Office.onReady → React)
 src/commands/        commands.ts (onMessageSendHandler, send-mode semantics)
 src/app/             App · AppContext · Header · ReadMode · BriefMode · HomeMode · BackendUnreachable · ErrorBoundary · settings ·
@@ -477,6 +558,7 @@ src/ui/              theme (tokens + palettes) · ThemeProvider · SourceBadge �
 src/i18n/            en.json · fr.json · hook (auto-detect + FR/EN toggle)
 src/telemetry.ts     pluggable sink, scrubbing allow-list
 docs/screenshots/    generated by scripts/screenshots.mjs
+docs/screenshots/states/  every pane state, generated by scripts/state-screenshots.mjs through the host simulator
 ```
 
 ---

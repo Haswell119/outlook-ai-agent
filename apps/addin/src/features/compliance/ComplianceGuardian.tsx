@@ -47,7 +47,17 @@ export function ComplianceIssueRow({ issue, first }: { issue: ComplianceIssue; f
   );
 }
 
-export function ComplianceGuardian() {
+export interface ComplianceGuardianProps {
+  /**
+   * Bumped by the app shell on `ItemChanged`. A compose pane is normally bound
+   * to one draft, but a pinned pane in Outlook on the web follows the user into
+   * the next draft — and without re-reading the item on that event the Guardian
+   * kept showing (and re-checking) the *previous* draft.
+   */
+  itemVersion?: number;
+}
+
+export function ComplianceGuardian({ itemVersion = 0 }: ComplianceGuardianProps) {
   const s = useStyles();
   const { t, lang } = useI18n();
   const { api, complianceEmail, preview } = useApp();
@@ -104,9 +114,15 @@ export function ComplianceGuardian() {
     [api, lang],
   );
 
-  // Auto-run on load; re-run (1.5 s debounce) when recipients or attachments
-  // change — and skip the call entirely when the content hash is unchanged.
+  // Auto-run on load and whenever Outlook hands us another draft; re-run
+  // (1.5 s debounce) when recipients or attachments change — and skip the call
+  // entirely when the content hash is unchanged.
   useEffect(() => {
+    // Another item means another draft: the previous verdict and its content
+    // hash describe a message that is no longer on screen.
+    lastHash.current = null;
+    setResult(null);
+    setLoading(true);
     void check();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const off = onComposeChanged(() => {
@@ -118,7 +134,8 @@ export function ComplianceGuardian() {
       off();
       void clearComplianceBanner();
     };
-  }, [check]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [check, itemVersion]);
 
   const onAction = async (action: SuggestedAction) => {
     setBusy(action.type);

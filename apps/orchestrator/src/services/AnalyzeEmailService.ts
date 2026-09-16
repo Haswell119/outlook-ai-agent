@@ -49,7 +49,10 @@ export class AnalyzeEmailService {
     const priority = opts.priority ?? "interactive";
 
     /* ---------------------------- 1. triage ---------------------------- */
-    const triage = this.deps.cfg.TRIAGE_ENABLED ? triageEmail(email, { internalDomains: policy.internalDomains }) : ({ kind: "conversation", reason: "triage_disabled", confidence: 0.5, skipModel: false } satisfies TriageResult);
+    const triaged = this.deps.cfg.TRIAGE_ENABLED ? triageEmail(email, { internalDomains: policy.internalDomains }) : ({ kind: "conversation", reason: "triage_disabled", confidence: 0.5, skipModel: false } satisfies TriageResult);
+    // `force` = the user explicitly asked for the model: the triage verdict is
+    // kept for information, but it no longer short-circuits the analysis.
+    const triage: TriageResult = req.force && triaged.skipModel ? { ...triaged, skipModel: false, reason: `${triaged.reason};forced` } : triaged;
     this.metrics?.triage.inc({ kind: triage.kind, skipped: String(triage.skipModel) });
 
     if (triage.skipModel) {
@@ -79,7 +82,7 @@ export class AnalyzeEmailService {
     // No `emailId` on purpose: this entry holds the raw model payload, not a
     // finished `EmailAnalysis`, so it must never be picked up by
     // `getByEmail` (which feeds `GET /analyze/email/:id` and the daily brief).
-    const cached = await this.cache.through<AnalysisPayload>(user.id, "analysis", key, { conversationId: email.conversationId }, async () => {
+    const cached = await this.cache.through<AnalysisPayload>(user.id, "analysis", key, { conversationId: email.conversationId, bypass: req.force }, async () => {
       const prompt = buildEmailAnalysisPrompt(email, language, thread, this.budget);
       const result = await completeStructured(this.deps.llm, EmailAnalysisLlmSchema, { ...prompt.request, userId: user.id, priority }, () => toLlmShape(analyzeHeuristically(email, language, DEGRADED_CONFIDENCE)), this.deps.logger);
       return {

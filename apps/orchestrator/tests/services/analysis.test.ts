@@ -25,6 +25,23 @@ describe("AnalyzeEmailService", () => {
     expect((audit[0]!.details.analysis as { summary: string }).summary).toBe(r.summary);
   });
 
+  it("force bypasses the rule-based triage and the cache (explicit user request)", async () => {
+    const newsletter = sampleEmail({ id: "nl-1", subject: "Weekly market newsletter", from: { name: "Market News", address: "noreply@news.example" }, body: "This week in markets… Unsubscribe here: https://news.example/unsub" });
+    const triaged = await c.services.analyzeEmail.analyze(ctx(), { email: newsletter, includeThread: false, force: false });
+    expect(triaged.source).toBe("heuristic");
+    expect(triaged.triage?.kind).toBe("newsletter");
+    const forced = await c.services.analyzeEmail.analyze(ctx(), { email: newsletter, includeThread: false, force: true });
+    expect(forced.source).toBe("llm");
+    // A second forced call must not be served from the cache either.
+    const forcedAgain = await c.services.analyzeEmail.analyze(ctx(), { email: newsletter, includeThread: false, force: true });
+    expect(forcedAgain.source).toBe("llm");
+    // …but a normal call after that benefits from the entry the forced call wrote.
+    const normal = await c.services.analyzeEmail.analyze(ctx(), { email: sampleEmail(), includeThread: false, force: false });
+    const cachedNormal = await c.services.analyzeEmail.analyze(ctx(), { email: sampleEmail(), includeThread: false, force: false });
+    expect(normal.source).toBe("llm");
+    expect(cachedNormal.source).toBe("cache");
+  });
+
   it("answers in French when asked", async () => {
     const r = await c.services.analyzeEmail.analyze(ctx(undefined, "fr"), { email: sampleEmail(), includeThread: false });
     expect(r.language).toBe("fr");

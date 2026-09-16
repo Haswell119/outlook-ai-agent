@@ -35,7 +35,7 @@ import {
 } from "@oao/shared";
 import { z, type ZodType } from "zod";
 import { ApiClientError, kindFromStatus } from "./errors";
-import type { OaoApi } from "./types";
+import type { CallOptions, OaoApi } from "./types";
 import { getAuthHeaders, invalidateToken } from "@/office/sso";
 import { browserOnline, reportNetworkFailure, reportReachable } from "@/net/connectivity";
 import { track } from "@/telemetry";
@@ -121,6 +121,8 @@ export function createLiveClient(options: LiveClientOptions): OaoApi {
     nullOn404?: boolean;
     /** Override the retry policy (GETs retry by default). */
     attempts?: number;
+    /** Caller-owned cancellation (item switch, unmount). */
+    signal?: AbortSignal;
   }
 
   async function once<T>(
@@ -133,6 +135,17 @@ export function createLiveClient(options: LiveClientOptions): OaoApi {
   ): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? timeoutMs);
+    // The caller's signal (the pane leaving this email) aborts the same request
+    // as the timeout does; already-aborted signals abort it immediately.
+    const onCallerAbort = () => controller.abort();
+    if (opts.signal) {
+      if (opts.signal.aborted) controller.abort();
+      else opts.signal.addEventListener("abort", onCallerAbort, { once: true });
+    }
+    const cleanup = () => {
+      clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", onCallerAbort);
+    };
     const headers: Record<string, string> = {
       Accept: "application/json",
       "Accept-Language": options.getLanguage(),
@@ -143,7 +156,7 @@ export function createLiveClient(options: LiveClientOptions): OaoApi {
       try {
         Object.assign(headers, await getAuthHeaders());
       } catch (err) {
-        clearTimeout(timer);
+        cleanup();
         throw ApiClientError.fromAuthFailure(err, correlationId);
       }
     }
@@ -159,14 +172,18 @@ export function createLiveClient(options: LiveClientOptions): OaoApi {
         cache: "no-store",
       });
     } catch (err) {
-      clearTimeout(timer);
+      cleanup();
+      if (opts.signal?.aborted) {
+        // Cancelled by the caller: not a network problem, and not worth a banner.
+        throw new ApiClientError("cancelled", "Request cancelled", undefined, "cancelled", correlationId);
+      }
       reportNetworkFailure();
       if (err instanceof DOMException && err.name === "AbortError") {
         throw new ApiClientError("timeout", "Request timed out", undefined, undefined, correlationId);
       }
       throw new ApiClientError("network", err instanceof Error ? err.message : "Network error", undefined, undefined, correlationId);
     }
-    clearTimeout(timer);
+    cleanup();
     reportReachable();
 
     const text = await res.text().catch(() => "");
@@ -229,17 +246,17 @@ export function createLiveClient(options: LiveClientOptions): OaoApi {
   }
 
   /** Nullable GET (used for 404-as-absent routes). */
-  function getOrNull<T>(path: string, schema: ZodType<T, z.ZodTypeDef, unknown>, timeout = FAST_TIMEOUT_MS): Promise<T | null> {
-    return request<T | null>("GET", path, undefined, schema.nullable(), { timeoutMs: timeout, nullOn404: true });
+  function getOrNull<T>(path: string, schema: ZodType<T, z.ZodTypeDef, unknown>, timeout = FAST_TIMEOUT_MS, opts: CallOptions = {}): Promise<T | null> {
+    return request<T | null>("GET", path, undefined, schema.nullable(), { timeoutMs: timeout, nullOn404: true, signal: opts.signal });
   }
 
   return {
     mode: "live",
     health: () => request("GET", Routes.health, undefined, HealthSchema, { timeoutMs: HEALTH_TIMEOUT_MS, auth: false, attempts: 1 }),
     features: () => request("GET", Routes.features, undefined, FeatureFlagsSchema, { timeoutMs: FAST_TIMEOUT_MS }),
-    analysisByEmail: (emailId) => getOrNull(Routes.analysisByEmail(emailId), EmailAnalysisSchema),
-    analyzeEmail: (req) => request("POST", Routes.analyzeEmail, req, EmailAnalysisSchema),
-    analyzeThread: (req) => request("POST", Routes.analyzeThread, req, ThreadSynthesisSchema),
+    analysisByEmail: (emailId, opts) => getOrNull(Routes.analysisByEmail(emailId), EmailAnalysisSchema, FAST_TIMEOUT_MS, opts ?? {}),
+    analyzeEmail: (req, opts) => request("POST", Routes.analyzeEmail, req, EmailAnalysisSchema, { signal: opts?.signal }),
+    analyzeThread: (req, opts) => request("POST", Routes.analyzeThread, req, ThreadSynthesisSchema, { signal: opts?.signal }),
     draftReply: (req) => request("POST", Routes.draftReply, req, DraftReplySchema),
     chat: (req) => request("POST", Routes.chat, req, ChatResponseSchema),
     indexEmails: (req) => request("POST", Routes.indexEmails, req, IndexEmailsResponseSchema),

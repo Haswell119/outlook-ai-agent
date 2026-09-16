@@ -277,7 +277,7 @@ export class MailboxSyncService {
    * an open circuit makes this fail fast instead of piling up.
    */
   private async analyzeInBackground(ctx: RequestContext, email: EmailContext): Promise<EmailAnalysis> {
-    return this.analyzer.analyze(ctx, { email, includeThread: false, language: ctx.language }, { priority: "background" });
+    return this.analyzer.analyze(ctx, { email, includeThread: false, force: false, language: ctx.language }, { priority: "background" });
   }
 
   /** One scheduler tick: sync every mailbox whose `nextSyncAt` is due. */

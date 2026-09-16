@@ -39,10 +39,17 @@ export interface TriageCardProps {
   source: DisplaySource | undefined;
   ageMs?: number;
   busy?: boolean;
+  /**
+   * The user pressed "Analyse anyway" and the orchestrator *still* answered with
+   * its triage rules. Saying so is the difference between an honest answer and a
+   * button that looks broken: the triage decision is taken server-side from the
+   * policy, so pressing it again will not change anything.
+   */
+  stillTriaged?: boolean;
   onAnalyseAnyway: () => void;
 }
 
-export function TriageCard({ analysis, source, ageMs, busy, onAnalyseAnyway }: TriageCardProps) {
+export function TriageCard({ analysis, source, ageMs, busy, stillTriaged, onAnalyseAnyway }: TriageCardProps) {
   const s = useStyles();
   const { t } = useI18n();
   const kind = analysis.triage?.kind ?? "trivial";
@@ -72,12 +79,17 @@ export function TriageCard({ analysis, source, ageMs, busy, onAnalyseAnyway }: T
             size="small"
             icon={busy ? <Spinner size="extra-tiny" /> : <Sparkle16Regular />}
             onClick={onAnalyseAnyway}
-            disabled={busy}
+            disabled={busy || stillTriaged}
             data-testid="analyse-anyway"
           >
             {t("triage.analyseAnyway")}
           </Button>
         </div>
+        {stillTriaged && !busy && (
+          <Text className={s.reason} block style={{ marginTop: "6px" }} data-testid="triage-still-triaged">
+            {t("triage.stillTriaged")}
+          </Text>
+        )}
         <Text className={s.reason} block style={{ marginTop: "6px" }}>
           {t("triage.savesModel")}
         </Text>

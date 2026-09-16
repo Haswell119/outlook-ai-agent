@@ -171,7 +171,9 @@ test.describe("localisation, theme and accessibility", () => {
     await expect(page.locator("html")).toHaveAttribute("data-oao-theme", "dark");
 
     await sheet.getByTestId("settings-clear-cache").click();
-    await expect(page.getByText("Local cache cleared.")).toBeVisible();
+    // The confirmation lands in the toast *and* in the assertive aria-live
+    // region, so match the first of the two rather than racing them.
+    await expect(page.getByText("Local cache cleared.").first()).toBeVisible();
   });
 
   test("the pane is usable at 320 px and never scrolls horizontally", async ({ page }) => {
@@ -266,10 +268,24 @@ test.describe("selection (multi-select)", () => {
   });
 });
 
+/**
+ * These two describe the pane's behaviour when the orchestrator is **not**
+ * there. The suite now starts a real orchestrator for `sim.spec.ts`, so "not
+ * there" has to be stated rather than assumed: the backend origin is blocked at
+ * the network layer, which is also what makes these tests deterministic on a
+ * developer machine that happens to be running `pnpm dev`.
+ */
+const API_ORIGIN = process.env.E2E_API_URL ?? "http://localhost:8080";
+
+async function blockBackend(page: Page): Promise<void> {
+  await page.route(`${API_ORIGIN}/**`, (route) => route.abort("connectionrefused"));
+}
+
 test.describe("backend unreachable", () => {
   test("blocks with the base URL and a retry instead of silently showing sample data", async ({ page }) => {
     // No `?mock=1` and not preview mode (host=tab) → the live client is kept and
     // the failed health check must be shown, never replaced by the sample email.
+    await blockBackend(page);
     await freshPane(page, "/taskpane.html?view=home&host=tab");
 
     const card = page.getByTestId("backend-unreachable");
@@ -287,6 +303,7 @@ test.describe("backend unreachable", () => {
   });
 
   test("preview mode still falls back to the mock, and says so with both pills", async ({ page }) => {
+    await blockBackend(page);
     await freshPane(page, "/taskpane.html");
     await expect(page.getByTestId("preview-pill")).toBeVisible();
     await expect(page.getByTestId("mock-pill")).toBeVisible({ timeout: 30_000 });

@@ -42,6 +42,8 @@ export async function readCompose(): Promise<ComposeContext> {
     if (profile?.emailAddress) from = { name: profile.displayName, address: profile.emailAddress };
   }
 
+  const sensitivityLabel = await readSensitivityLabel(item);
+
   let draftId: string | undefined;
   try {
     draftId = (item as unknown as { itemId?: string }).itemId || undefined;
@@ -49,7 +51,34 @@ export async function readCompose(): Promise<ComposeContext> {
     draftId = undefined;
   }
 
-  return { draftId, from, to: toAddresses(to), cc: toAddresses(cc), bcc: toAddresses(bcc), subject: subject ?? "", body: body ?? "", attachments };
+  return { draftId, from, to: toAddresses(to), cc: toAddresses(cc), bcc: toAddresses(bcc), subject: subject ?? "", body: body ?? "", attachments, sensitivityLabel };
+}
+
+/**
+ * The draft's sensitivity (classification) label, as a **display name**.
+ *
+ * Without this the Compliance Guardian reported "Missing classification label"
+ * on every draft, including the ones the user had just labelled — and its own
+ * "Apply Confidential label" action appeared to do nothing, because the
+ * re-check still sent `sensitivityLabel: undefined`. The policy compares
+ * display names ("Internal", "Confidential"), while the item exposes the
+ * catalogue **id**, so the id is resolved through the labels catalogue when the
+ * host offers it (Mailbox 1.13 + IRM) and passed through otherwise.
+ */
+async function readSensitivityLabel(item: Office.MessageCompose): Promise<string | undefined> {
+  if (!isSetSupported("Mailbox", "1.13")) return undefined;
+  const accessor = (item as unknown as { sensitivityLabel?: { getAsync?: (cb: (r: Office.AsyncResult<unknown>) => void) => void } }).sensitivityLabel;
+  if (typeof accessor?.getAsync !== "function") return undefined;
+  const raw = await tryAsync<unknown>((cb) => accessor.getAsync!(cb), undefined);
+  const id = typeof raw === "string" ? raw : typeof (raw as { id?: unknown })?.id === "string" ? (raw as { id: string }).id : undefined;
+  if (!id) return undefined;
+  const catalog = (officeGlobal()?.context as unknown as { sensitivityLabelsCatalog?: { getAsync?: (cb: (r: Office.AsyncResult<Array<{ id?: string; name?: string }>>) => void) => void } } | undefined)?.sensitivityLabelsCatalog;
+  if (typeof catalog?.getAsync === "function") {
+    const labels = await tryAsync<Array<{ id?: string; name?: string }>>((cb) => catalog.getAsync!(cb), []);
+    const match = (labels ?? []).find((l) => l?.id === id);
+    if (match?.name) return match.name;
+  }
+  return id;
 }
 
 /**

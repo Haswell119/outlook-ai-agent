@@ -1,14 +1,14 @@
-import { Button, makeStyles, Spinner, Switch, Tab, TabList, Tooltip, type SelectTabData } from "@fluentui/react-components";
+import { Button, makeStyles, Spinner, Switch, Tab, TabList, Text, Tooltip, type SelectTabData } from "@fluentui/react-components";
 import { ArrowSync20Regular } from "@fluentui/react-icons";
 import type { EmailContext, ThreadContext, ThreadSynthesis } from "@oao/shared";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/i18n";
-import { readCurrentItem, readThread } from "@/office";
+import { currentItemSubject, NoItemError, readCurrentItem, readThread } from "@/office";
 import { eventFromEmail, observeUserAction } from "@/office/observe";
 import { readCached, writeCached } from "@/cache/analysisCache";
 import { hashParts, threadContentHash } from "@/util/hash";
 import { track } from "@/telemetry";
-import { ErrorState, Skeleton, colors } from "@/ui";
+import { EmptyState, ErrorState, Skeleton, colors } from "@/ui";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
 import { SummaryTab } from "@/features/summary/SummaryTab";
 import { useAnalysis } from "@/features/summary/useAnalysis";
@@ -31,6 +31,9 @@ const useStyles = makeStyles({
   },
   tabList: { flexGrow: 1, minWidth: 0 },
   content: { padding: "12px", display: "flex", flexDirection: "column", gap: "10px" },
+  item: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 },
+  itemSubject: { fontSize: "13px", fontWeight: 600, color: colors.text, lineHeight: "18px", overflowWrap: "anywhere" },
+  itemFrom: { fontSize: "12px", color: colors.textSecondary, lineHeight: "16px", overflowWrap: "anywhere" },
   switchRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" },
 });
 
@@ -52,9 +55,16 @@ export interface ReadModeProps {
    * stays free.
    */
   itemVersion?: number;
+  /**
+   * Id of the message the host currently has selected, resolved by the app
+   * shell. It is the **key** of everything on this screen: the item read, the
+   * analysis, the thread synthesis and the chat transcript. Anything that does
+   * not carry this id belongs to another email and is never rendered.
+   */
+  itemId?: string;
 }
 
-export function ReadMode({ initialTab, initialView, itemVersion = 0 }: ReadModeProps) {
+export function ReadMode({ initialTab, initialView, itemVersion = 0, itemId = "" }: ReadModeProps) {
   const s = useStyles();
   const { t, lang } = useI18n();
   const { api, features } = useApp();
@@ -62,9 +72,18 @@ export function ReadMode({ initialTab, initialView, itemVersion = 0 }: ReadModeP
   const [wholeThread, setWholeThread] = useState(initialView === "thread");
   const liveRef = useRef<HTMLDivElement>(null);
 
-  // 1. current item (re-read whenever the pinned pane follows the selection)
-  const emailState = useAsync<EmailContext>(() => readCurrentItem(), [itemVersion]);
-  const email = emailState.data;
+  // 1. current item (re-read whenever the pinned pane follows the selection).
+  //    `itemId` is part of the key, so a value read for the previous message is
+  //    dropped before it can be painted (see useAsync).
+  const emailState = useAsync<EmailContext>(() => readCurrentItem(), [itemId, itemVersion]);
+  /**
+   * Belt and braces: even a value that arrived for this key is ignored when the
+   * host has moved on in the meantime (a read that was already in flight when
+   * the user clicked the next message).
+   */
+  const loaded = emailState.data;
+  const email = loaded && (!itemId || !loaded.id || loaded.id === itemId) ? loaded : null;
+  const switching = !!loaded && !email;
 
   useEffect(() => {
     if (email) observeUserAction(eventFromEmail("open_email", email));
@@ -111,7 +130,14 @@ export function ReadMode({ initialTab, initialView, itemVersion = 0 }: ReadModeP
   const briefEnabled = features?.dailyBriefEnabled !== false;
   const visibleTabs = useMemo(() => TAB_KEYS.filter((k) => k !== "brief" || briefEnabled), [briefEnabled]);
 
-  const busy = analysis.loading || analysis.revalidating || (wholeThread && synthesis.loading);
+  const busy = emailState.loading || switching || analysis.loading || analysis.revalidating || (wholeThread && synthesis.loading);
+  /**
+   * Subject of the item being analysed. Read straight from the host (it is
+   * available synchronously, long before the body) so the loading state names
+   * the email the pane is working on instead of being anonymous.
+   */
+  const hostSubject = useMemo(() => currentItemSubject(), [itemId, itemVersion]);
+  const pendingSubject = (hostSubject || email?.subject || "").trim();
 
   return (
     <>
@@ -150,8 +176,33 @@ export function ReadMode({ initialTab, initialView, itemVersion = 0 }: ReadModeP
           {busy ? t("summary.analyzing") : analysis.data && analysis.source ? t(`source.${analysis.source}`) : ""}
         </div>
 
-        {emailState.loading && <Skeleton cards={3} />}
-        {!!emailState.error && <ErrorState error={emailState.error} onRetry={emailState.reload} hint={t("errors.officeUnavailable")} />}
+        {/* Which email this screen is about. Without it, a pane that is slow —
+            or that the host moved to another message — is indistinguishable
+            from a pane stuck on the previous email. */}
+        {/* …except on the Brief tab, which is mailbox-wide and not about this email. */}
+        {tab !== "brief" && (pendingSubject || email) && (
+          <div className={s.item}>
+            <Text className={s.itemSubject} data-testid="item-subject" block>
+              {pendingSubject || t("selection.noSubject")}
+            </Text>
+            {email?.from && (
+              <Text className={s.itemFrom} data-testid="item-from" block>
+                {email.from.name ? `${email.from.name} · ${email.from.address}` : email.from.address}
+              </Text>
+            )}
+          </div>
+        )}
+
+        {(emailState.loading || switching) && !email && (
+          <Skeleton cards={3} label={t("summary.analyzing")} />
+        )}
+        {!!emailState.error && !email && (
+          emailState.error instanceof NoItemError ? (
+            <EmptyState title={t("read.noItemTitle")} description={t("read.noItemBody")} />
+          ) : (
+            <ErrorState error={emailState.error} onRetry={emailState.reload} hint={t("errors.officeUnavailable")} />
+          )
+        )}
 
         {email && tab === "summary" && (
           <ErrorBoundary feature="summary">
@@ -185,7 +236,14 @@ export function ReadMode({ initialTab, initialView, itemVersion = 0 }: ReadModeP
         {email && tab === "insights" && (
           <ErrorBoundary feature="insights">
             <Suspense fallback={<Skeleton cards={3} />}>
-              <LazyInsightsTab email={email} analysis={analysis.data} loading={analysis.loading} source={analysis.source} />
+              <LazyInsightsTab
+                email={email}
+                analysis={analysis.data}
+                loading={analysis.loading}
+                error={analysis.error}
+                source={analysis.source}
+                onRetry={analysis.refresh}
+              />
             </Suspense>
           </ErrorBoundary>
         )}

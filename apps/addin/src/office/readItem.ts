@@ -23,18 +23,82 @@ function toAttachment(a: Office.AttachmentDetails): AttachmentMeta {
 }
 
 /**
+ * Identity of the message the **host** currently has selected, read
+ * synchronously and with no side effects.
+ *
+ * This is the pane's single answer to "which email am I supposed to be showing
+ * right now?", and everything item-bound is keyed by it. It matters because
+ * `Office.context.mailbox.item` is swapped in place by Outlook: an id read once
+ * at mount, or a value cached in a module, goes stale the moment the user clicks
+ * another message — which is how a pane ends up displaying the previous email.
+ *
+ * Returns `""` when nothing is open (message closed, multi-selection, the
+ * Apps-rail personal tab), which is exactly the "no item" surface.
+ */
+export function currentItemId(): string {
+  if (!isOfficeAvailable()) {
+    // Browser preview has a fixed sample item, so its id is stable too.
+    return previewItem().id;
+  }
+  try {
+    const item = officeGlobal()?.context?.mailbox?.item as unknown as { itemId?: unknown } | null | undefined;
+    const id = item?.itemId;
+    return typeof id === "string" ? id : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Subject of the message the host currently has selected, read synchronously.
+ *
+ * Outlook exposes `item.subject` as a plain string on a read item (only compose
+ * items make it an accessor), so the pane can name the email it is working on
+ * *before* the slow `body.getAsync` comes back — which is what makes a loading
+ * state honest instead of anonymous.
+ */
+export function currentItemSubject(): string {
+  if (!isOfficeAvailable()) return previewItem().subject;
+  try {
+    const item = officeGlobal()?.context?.mailbox?.item as unknown as { subject?: unknown } | null | undefined;
+    return typeof item?.subject === "string" ? item.subject : "";
+  } catch {
+    return "";
+  }
+}
+
+/** The sample item shown in browser preview (`?sample=newsletter` for triage). */
+function previewItem(): EmailContext {
+  return queryParam("sample") === "newsletter" ? sampleNewsletter : sampleEmail;
+}
+
+/**
  * Read the currently opened message (read mode) into the shared EmailContext.
  * Every optional Office.js API is guarded by a requirement-set check.
  * In preview mode (no Outlook) the sample email is returned.
+ *
+ * Nothing is memoised on purpose: the caller re-reads on every `ItemChanged`
+ * and the returned context is always the item the host holds *now*.
  */
 export async function readCurrentItem(): Promise<EmailContext> {
   if (!isOfficeAvailable()) {
-    // Browser preview: `?sample=newsletter` shows the compact triage layout.
-    const sample = queryParam("sample") === "newsletter" ? sampleNewsletter : sampleEmail;
+    const sample = previewItem();
     cacheItem(sample);
     return sample;
   }
-  return readMessageItem(officeGlobal()!.context.mailbox.item as unknown as Office.MessageRead);
+  const item = officeGlobal()!.context.mailbox.item as unknown as Office.MessageRead | null;
+  // The message was closed (or the selection became a multi-selection) while we
+  // were being called: say so instead of throwing a TypeError on `item.body`.
+  if (!item) throw new NoItemError();
+  return readMessageItem(item);
+}
+
+/** Thrown by `readCurrentItem()` when the host has no message open any more. */
+export class NoItemError extends Error {
+  constructor() {
+    super("No message is open in Outlook");
+    this.name = "NoItemError";
+  }
 }
 
 /**

@@ -17,6 +17,7 @@
     "certs": "office-addin-dev-certs install --days 365",
     "icons": "node scripts/generate-icons.mjs",
     "screenshots": "node scripts/screenshots.mjs",
+    "screenshots:states": "node scripts/state-screenshots.mjs",
     "sideload": "echo \"See README.md: sideload manifest/manifest.dev.xml in Outlook (Get Add-ins > My add-ins > Add a custom add-in > Add from file)\"",
     "build:commands": "vite build -c vite.commands.config.ts",
     "analyze": "ANALYZE=1 pnpm build",
