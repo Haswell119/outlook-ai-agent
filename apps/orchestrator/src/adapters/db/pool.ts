@@ -31,15 +31,12 @@ export function createPool(connectionString: string, opts: PoolOptions = {}): Pg
     idleTimeoutMillis: opts.idleTimeoutMs ?? 30_000,
     connectionTimeoutMillis: opts.connectionTimeoutMs ?? 5_000,
     application_name: opts.applicationName ?? "oao-orchestrator",
-    // Belt and braces: the server-side settings below are the authority, this
-    // one only bounds the client's own wait.
+    // Sent as connection startup parameters by node-postgres, so every session
+    // has them before its first query. (A fire-and-forget `SET` in the
+    // `connect` hook would race the caller's first query and trigger pg's
+    // "client.query() when the client is already executing" deprecation.)
     statement_timeout: statementTimeout,
-  });
-
-  pool.on("connect", (client) => {
-    void client
-      .query(`SET statement_timeout = ${statementTimeout}; SET idle_in_transaction_session_timeout = ${statementTimeout * 2}; SELECT 1`)
-      .catch((e: Error) => opts.logger?.warn({ err: e.message }, "failed to initialise pg connection"));
+    idle_in_transaction_session_timeout: statementTimeout * 2,
   });
   // A pool-level error (server restart, network blip) must not crash the process.
   pool.on("error", (err) => opts.logger?.warn({ err: err.message }, "idle postgres client error"));

@@ -1,8 +1,9 @@
 name: CI
 
+# Manual / on-demand only: the team runs the same gates locally
+# (pnpm typecheck && pnpm test && pnpm build && pnpm e2e) and starts this
+# workflow by hand (Actions → CI → Run workflow) or on a pull request.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:

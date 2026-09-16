@@ -9,7 +9,7 @@ updates:
       day: monday
       time: "05:00"
       timezone: Europe/Zurich
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 0  # 0 = no automatic PR (raise to re-enable)
     versioning-strategy: increase
     commit-message:
       prefix: "chore(deps)"
@@ -34,9 +34,9 @@ updates:
       typescript-toolchain:
         patterns: ["typescript", "tsx", "vite", "@vitejs/*"]
     ignore:
-      # Node 20 is the supported runtime (see engines + Dockerfiles).
+      # Node 22 is the supported runtime (see engines + Dockerfiles).
       - dependency-name: "@types/node"
-        versions: [">=21"]
+        versions: [">=23"]
 
   # --- GitHub Actions -------------------------------------------------------
   - package-ecosystem: github-actions
@@ -46,7 +46,7 @@ updates:
       day: monday
       time: "05:15"
       timezone: Europe/Zurich
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0  # 0 = no automatic PR (raise to re-enable)
     commit-message:
       prefix: "ci(deps)"
     labels: [dependencies, github-actions]
@@ -63,7 +63,7 @@ updates:
       day: monday
       time: "05:30"
       timezone: Europe/Zurich
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0  # 0 = no automatic PR (raise to re-enable)
     commit-message:
       prefix: "chore(docker)"
     labels: [dependencies, docker]
