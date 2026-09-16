@@ -1,3 +1,5 @@
+// Must run before anything reads process.env (side-effect import).
+import { LOADED_ENV_FILES } from "./env-file.js";
 import pino from "pino";
 import { buildApp } from "./app.js";
 import { APP_VERSION, ConfigError, effectiveConfig, isMemoryDatabase, loadConfigDetailed, runsWorkers, servesApi, type Config } from "./config.js";
@@ -64,7 +66,7 @@ const logger = pino({
   ...(cfg.LOG_FORMAT === "pretty" ? { transport: { target: "pino-pretty", options: { colorize: true, translateTime: "HH:MM:ss" } } } : {}),
 });
 
-logger.info({ config: effectiveConfig(cfg), secretsFromFiles }, "effective configuration (secrets redacted)");
+logger.info({ config: effectiveConfig(cfg), secretsFromFiles, envFiles: LOADED_ENV_FILES }, "effective configuration (secrets redacted)");
 
 /* -------------------------------- container ------------------------------ */
 

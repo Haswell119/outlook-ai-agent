@@ -10,6 +10,28 @@
  * owns everything that is static and the middleware owns the CSP.
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/**
+ * Single root `.env`: Next.js only loads `apps/admin/.env*` (already done by
+ * the time this file runs), so keys from the repository-root `.env` are merged
+ * here for anything still unset. Shell/container variables always win.
+ */
+(() => {
+  const file = resolve(dirname(fileURLToPath(import.meta.url)), "../../.env");
+  if (!existsSync(file) || process.env.NODE_ENV === "test") return;
+  for (const raw of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(raw.trim());
+    if (!m || raw.trim().startsWith("#")) continue;
+    let v = m[2] ?? "";
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    else v = v.replace(/\s#.*$/, "").trim();
+    if (process.env[m[1]] === undefined || process.env[m[1]] === "") process.env[m[1]] = v;
+  }
+})();
+
 /** Headers applied to every response. */
 export const STATIC_SECURITY_HEADERS = [
   // HSTS: 2 years, subdomains included, preload-ready.

@@ -8,6 +8,34 @@ import { resolve, join, relative } from "node:path";
 import { buildCsp } from "./src/security/csp";
 
 /**
+ * Single root `.env`: Vite only reads `apps/addin/.env*`, so VITE_* keys from the
+ * repository-root `.env` are merged into process.env here (never overriding a
+ * value already present in the shell or in the local file — Vite gives
+ * process.env precedence, so the local file is loaded first).
+ */
+function mergeRootEnv(): void {
+  const parse = (file: string): Record<string, string> => {
+    if (!existsSync(file)) return {};
+    const out: Record<string, string> = {};
+    for (const raw of readFileSync(file, "utf8").split(/\r?\n/)) {
+      const m = /^(?:export\s+)?(VITE_[A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(raw.trim());
+      if (!m) continue;
+      let v = m[2] ?? "";
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+      else v = v.replace(/\s#.*$/, "").trim();
+      out[m[1]!] = v;
+    }
+    return out;
+  };
+  const local = parse(resolve(__dirname, ".env"));
+  const root = parse(resolve(__dirname, "../../.env"));
+  for (const [k, v] of Object.entries({ ...root, ...local })) {
+    if (process.env[k] === undefined || process.env[k] === "") process.env[k] = v;
+  }
+}
+mergeRootEnv();
+
+/**
  * HTTPS for the dev server (Outlook only loads add-ins over https).
  *  1. If `office-addin-dev-certs install` was run, its localhost cert is used
  *     (~/.office-addin-dev-certs/localhost.{crt,key}) — trusted by the OS.

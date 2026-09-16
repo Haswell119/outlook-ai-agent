@@ -478,6 +478,15 @@ pnpm smoke            # vérifie que tout répond
 Le mode démo tourne avec `LLM_PROVIDER=mock`, `DATABASE_URL=memory`,
 `AUTH_MODE=dev` (refusé si `NODE_ENV=production`).
 
+**Un seul fichier `.env`, à la racine.** Les trois apps le lisent au démarrage
+(orchestrator, `next.config.mjs` du dashboard, `vite.config.ts` de l'add-in) et
+`pnpm check:llm` / `pnpm smoke` aussi. Priorité, de la plus forte à la plus
+faible : variable déjà présente dans le shell ou le conteneur → `apps/<app>/.env`
+(optionnel, pour surcharger localement) → `.env` racine. Après une modification
+du `.env`, relancer `pnpm dev` : les valeurs sont lues une fois au démarrage.
+L'orchestrator journalise les fichiers chargés (`envFiles`) et sa configuration
+effective (secrets masqués) dans sa première ligne de log.
+
 ### Stack locale complète (PostgreSQL réel + modèle interne)
 
 ```bash

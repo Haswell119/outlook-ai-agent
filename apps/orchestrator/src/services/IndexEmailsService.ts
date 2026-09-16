@@ -24,19 +24,23 @@ export class IndexEmailsService {
     let mode: "hybrid" | "lexical" = "lexical";
     const vectorsPossible = this.embeddingsAvailable && (await this.deps.repos.emailIndex.supportsVectors());
 
+    let embeddingsDown = false;
     for (const email of emails) {
       const chunks = buildChunks(user.id, email);
       if (!chunks.length) {
         skipped++;
         continue;
       }
-      if (vectorsPossible && this.deps.embeddings) {
+      if (vectorsPossible && this.deps.embeddings && !embeddingsDown) {
         try {
           const vectors = await this.deps.embeddings.embed(chunks.map((c) => `${c.subject}\n${c.bodyText}`));
           chunks.forEach((c, i) => (c.embedding = vectors[i]));
           mode = "hybrid";
         } catch (e) {
-          this.deps.logger.warn({ err: (e as Error).message }, "embedding failed, indexing lexically only");
+          // One failure per batch is enough: the endpoint is down or has no
+          // /embeddings route — do not retry for every remaining email.
+          embeddingsDown = true;
+          this.deps.logger.warn({ err: (e as Error).message, remaining: emails.length }, "embedding failed, indexing the rest of this batch lexically only (set EMBEDDINGS_ENABLED=false if the endpoint has no /embeddings)");
           this.embeddingsHealthy = false;
           setTimeout(() => (this.embeddingsHealthy = true), 60_000).unref?.();
         }
