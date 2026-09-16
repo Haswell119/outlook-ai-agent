@@ -1,5 +1,6 @@
 import type { EmailIndexRepository, IndexHit, IndexSearchFilter, IndexedChunk } from "../../ports/repositories.js";
 import { toTsQuery } from "../../util/text.js";
+import { isVectorWriteError } from "./errors.js";
 import type { PgPool } from "./pool.js";
 
 interface Row {
@@ -40,15 +41,59 @@ const toChunk = (r: Row): IndexedChunk => ({
 const toVectorLiteral = (v: number[]) => `[${v.map((x) => (Number.isFinite(x) ? x : 0)).join(",")}]`;
 
 export class PgEmailIndexRepository implements EmailIndexRepository {
-  private vectorSupport: boolean | undefined;
-  constructor(private readonly pool: PgPool) {}
+  /** Declared dimension of `email_index.embedding`; `null` = unconstrained `vector`. */
+  private columnDimensions: number | null = null;
+  /** False until the column type has been read from the catalog. */
+  private probed = false;
+  /**
+   * Set when a vector write failed (typically a dimension mismatch introduced
+   * while the process was running). Vectors are skipped until it expires, so
+   * one bad configuration does not turn every indexing request into an error.
+   */
+  private vectorsDisabledUntil = 0;
+  /** Whether `email_index.embedding` exists at all (pgvector installed). */
+  private columnPresent = false;
 
+  constructor(
+    private readonly pool: PgPool,
+    /** `EMBEDDING_DIMENSIONS`: vectors are only written when the column agrees. */
+    private readonly expectedDimensions?: number,
+  ) {}
+
+  /**
+   * Whether an embedding can actually be **stored**: the column must exist and,
+   * when the configuration says so, carry the configured dimension. A
+   * `vector(1024)` column with `EMBEDDING_DIMENSIONS=1536` answers `false`
+   * instead of letting every insert fail with SQLSTATE 22000.
+   */
   async supportsVectors(): Promise<boolean> {
-    if (this.vectorSupport === undefined) {
-      const { rows } = await this.pool.query(`SELECT 1 FROM information_schema.columns WHERE table_name = 'email_index' AND column_name = 'embedding'`);
-      this.vectorSupport = rows.length > 0;
+    if (Date.now() < this.vectorsDisabledUntil) return false;
+    const dims = await this.vectorDimensions();
+    if (dims === undefined) return false;
+    return this.expectedDimensions === undefined || dims === null || dims === this.expectedDimensions;
+  }
+
+  /** Declared dimension of `email_index.embedding` (`undefined` = column absent, `null` = unconstrained). */
+  async vectorDimensions(): Promise<number | null | undefined> {
+    if (!this.probed) {
+      const { rows } = await this.pool.query<{ type_name: string }>(
+        `SELECT format_type(a.atttypid, a.atttypmod) AS type_name
+           FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+          WHERE c.relname = 'email_index' AND a.attname = 'embedding' AND a.attnum > 0 AND NOT a.attisdropped`,
+      );
+      const type = rows[0]?.type_name;
+      this.probed = true;
+      this.columnPresent = Boolean(type);
+      const m = type ? /^vector\((\d+)\)$/.exec(type) : null;
+      this.columnDimensions = m ? Number(m[1]) : null;
     }
-    return this.vectorSupport;
+    return this.columnPresent ? this.columnDimensions : undefined;
+  }
+
+  /** Forget the cached column type (after a re-dimensioning) and re-enable vectors. */
+  resetVectorSupport(): void {
+    this.probed = false;
+    this.vectorsDisabledUntil = 0;
   }
 
   async upsertEmail(userId: string, chunks: IndexedChunk[]): Promise<void> {
@@ -72,6 +117,13 @@ export class PgEmailIndexRepository implements EmailIndexRepository {
       await client.query("COMMIT");
     } catch (e) {
       await client.query("ROLLBACK").catch(() => undefined);
+      // A failed write on the vector column (dimension mismatch, extension
+      // dropped under our feet) must not be retried for every email of the
+      // batch: skip vectors for a minute, the caller falls back to lexical.
+      if (chunks.some((c) => c.embedding) && isVectorWriteError(e)) {
+        this.probed = false;
+        this.vectorsDisabledUntil = Date.now() + 60_000;
+      }
       throw e;
     } finally {
       client.release();

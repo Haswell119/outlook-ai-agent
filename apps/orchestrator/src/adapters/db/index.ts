@@ -9,10 +9,15 @@ import { PgAnalysisCacheRepository, PgDailyBriefRepository, PgEmbeddingCacheRepo
 import { PgFeedbackRepository, PgPolicyRepository } from "./PolicyRepository.js";
 import type { PgPool } from "./pool.js";
 
-export function createPgRepositories(pool: PgPool): Repositories {
+export interface PgRepositoryOptions {
+  /** `EMBEDDING_DIMENSIONS`: lets the index repository refuse to write vectors of the wrong size. */
+  embeddingDimensions?: number;
+}
+
+export function createPgRepositories(pool: PgPool, opts: PgRepositoryOptions = {}): Repositories {
   return {
     audit: new PgAuditRepository(pool),
-    emailIndex: new PgEmailIndexRepository(pool),
+    emailIndex: new PgEmailIndexRepository(pool, opts.embeddingDimensions),
     chat: new PgChatRepository(pool),
     actions: new PgActionRepository(pool),
     escalations: new PgEscalationRepository(pool),

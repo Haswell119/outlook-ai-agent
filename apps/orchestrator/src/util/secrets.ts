@@ -16,14 +16,26 @@ export interface ResolveSecretsResult {
   errors: string[];
 }
 
-export function resolveSecretFiles(env: NodeJS.ProcessEnv, read: (p: string) => string = (p) => readFileSync(p, "utf8")): ResolveSecretsResult {
+/**
+ * Variables whose name happens to end in `_FILE` but are switches, not secret
+ * pointers (never treated as `<TARGET>_FILE`).
+ */
+const NOT_SECRET_POINTERS = new Set(["OAO_ENV_FILE", "OAO_SKIP_ENV_FILE"]);
+
+export function resolveSecretFiles(
+  env: NodeJS.ProcessEnv,
+  read: (p: string) => string = (p) => readFileSync(p, "utf8"),
+  /** When given, only `<key>_FILE` for these keys is honoured (the config schema keys). */
+  knownKeys?: ReadonlySet<string>,
+): ResolveSecretsResult {
   const out: NodeJS.ProcessEnv = { ...env };
   const fromFiles: string[] = [];
   const errors: string[] = [];
   for (const [key, value] of Object.entries(env)) {
-    if (!key.endsWith("_FILE") || key === "_FILE") continue;
+    if (!key.endsWith("_FILE") || key === "_FILE" || NOT_SECRET_POINTERS.has(key)) continue;
     const target = key.slice(0, -"_FILE".length);
     if (!target) continue;
+    if (knownKeys && !knownKeys.has(target)) continue;
     const path = (value ?? "").trim();
     if (path === "") continue;
     const existing = (env[target] ?? "").trim();

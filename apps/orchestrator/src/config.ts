@@ -32,7 +32,7 @@ const csv = (def: string[]) =>
 const int = (def: number) => z.coerce.number().int().default(def);
 const optStr = z.string().optional().transform((v) => (v && v.trim() !== "" ? v.trim() : undefined));
 
-export const ConfigSchema = z
+const ConfigObjectSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     /** Process role: API only, worker only, or both in a single process. */
@@ -149,7 +149,9 @@ export const ConfigSchema = z
     DEFAULT_LANGUAGE: z.enum(["fr", "en"]).default("fr"),
     /** Overrides DEFAULT_POLICY.internalDomains when no policy row exists. */
     INTERNAL_DOMAINS: csv(["northbridge.example"]),
-  })
+  });
+
+export const ConfigSchema = ConfigObjectSchema
   .superRefine((cfg, ctx) => {
     const fail = (path: string, message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
     const prod = cfg.NODE_ENV === "production";
@@ -168,6 +170,9 @@ export const ConfigSchema = z
     if (cfg.LLM_INPUT_MAX_CHARS < 500) fail("LLM_INPUT_MAX_CHARS", "LLM_INPUT_MAX_CHARS must be >= 500");
     if (cfg.THREAD_MAX_MESSAGES < 1) fail("THREAD_MAX_MESSAGES", "THREAD_MAX_MESSAGES must be >= 1");
   });
+
+/** Names of every configuration variable (drives the `<NAME>_FILE` secret resolution). */
+export const CONFIG_KEYS: ReadonlySet<string> = new Set(Object.keys(ConfigObjectSchema.shape));
 
 export type Config = z.infer<typeof ConfigSchema>;
 
@@ -188,7 +193,7 @@ export interface LoadedConfig {
 
 /** Validate the environment, reporting every problem at once (fail fast, readable). */
 export function loadConfigDetailed(env: NodeJS.ProcessEnv = process.env): LoadedConfig {
-  const resolved = resolveSecretFiles(env);
+  const resolved = resolveSecretFiles(env, undefined, CONFIG_KEYS);
   const parsed = ConfigSchema.safeParse(resolved.env);
   const problems = [...resolved.errors];
   if (!parsed.success) problems.push(...parsed.error.issues.map((i) => `${i.path.join(".") || "$"}: ${i.message}`));

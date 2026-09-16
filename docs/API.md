@@ -95,7 +95,7 @@
 
 Toute erreur suit `ApiErrorSchema` avec un code parmi : `validation_error`
 (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict`
-(409), `llm_unavailable` (502), `graph_unavailable` (503).
+(409), `llm_unavailable` (502), `graph_unavailable` (503), `database_error` (500).
 
 ## Cloisonnement par utilisateur
 

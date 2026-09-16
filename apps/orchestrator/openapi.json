@@ -1397,6 +1397,9 @@
               "hybrid",
               "lexical"
             ]
+          },
+          "warning": {
+            "type": "string"
           }
         },
         "required": [

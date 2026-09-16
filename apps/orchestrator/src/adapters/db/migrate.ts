@@ -3,6 +3,10 @@ import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { ADVISORY_LOCKS, type PgPool } from "./pool.js";
+import { ensureVectorIndex } from "./vector-index.js";
+
+// Re-exported for callers that historically imported it from here.
+export { ensureVectorIndex };
 
 /**
  * Plain-SQL migration runner: applies `migrations/*.sql` in lexical order,
@@ -89,45 +93,6 @@ export async function migrationsUpToDate(pool: PgPool, migrationsDir = defaultMi
   return { ok: missing.length === 0, missing };
 }
 
-/**
- * Build the HNSW index on `email_index.embedding` without locking writes.
- *
- * `CREATE INDEX CONCURRENTLY` must run outside a transaction, so it lives here
- * rather than in a migration file. It is idempotent (`IF NOT EXISTS`) and never
- * fatal: without the index, vector search degrades to a sequential scan, which
- * is perfectly fine for ~50 mailboxes. A concurrent build that is interrupted
- * leaves an INVALID index, which we detect and drop before retrying.
- */
-export async function ensureVectorIndex(pool: PgPool, logger?: { info: (obj: unknown, msg?: string) => void; warn?: (obj: unknown, msg?: string) => void }): Promise<"created" | "present" | "skipped"> {
-  const log = logger ?? { info: () => undefined };
-  try {
-    const hasVector = await pool.query(`SELECT 1 FROM pg_extension WHERE extname = 'vector'`);
-    if (!hasVector.rowCount) return "skipped";
-    const hasColumn = await pool.query(`SELECT 1 FROM information_schema.columns WHERE table_name = 'email_index' AND column_name = 'embedding'`);
-    if (!hasColumn.rowCount) return "skipped";
-
-    const invalid = await pool.query(
-      `SELECT c.relname FROM pg_class c
-         JOIN pg_index i ON i.indexrelid = c.oid
-        WHERE c.relname = 'email_index_embedding_idx' AND NOT i.indisvalid`,
-    );
-    if (invalid.rowCount) {
-      log.warn?.({}, "dropping an invalid email_index_embedding_idx left by an interrupted concurrent build");
-      await pool.query(`DROP INDEX IF EXISTS email_index_embedding_idx`);
-    }
-
-    const exists = await pool.query(`SELECT 1 FROM pg_class WHERE relname = 'email_index_embedding_idx'`);
-    if (exists.rowCount) return "present";
-
-    await pool.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS email_index_embedding_idx ON email_index USING hnsw (embedding vector_cosine_ops)`);
-    log.info({}, "pgvector HNSW index created concurrently");
-    return "created";
-  } catch (e) {
-    log.warn?.({ err: (e as Error).message }, "vector index not created — vector search will use a sequential scan");
-    return "skipped";
-  }
-}
-
 /** CLI entry: `pnpm db:migrate` */
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isMain) {
@@ -138,10 +103,28 @@ if (isMain) {
     console.log("DATABASE_URL=memory: nothing to migrate.");
     process.exit(0);
   }
+  const { ensureVectorDimensions } = await import("./vector-dimensions.js");
   const pool = createPool(cfg.DATABASE_URL, { max: 2, statementTimeoutMs: 600_000 });
+  const logger = { info: (o: unknown, m?: string) => console.log(m, o), warn: (o: unknown, m?: string) => console.warn(m, o), error: (o: unknown, m?: string) => console.error(m, o) };
   try {
-    const done = await runMigrations(pool, { embeddingDimensions: cfg.EMBEDDING_DIMENSIONS, logger: { info: (o, m) => console.log(m, o), warn: (o, m) => console.warn(m, o) } });
+    const done = await runMigrations(pool, { embeddingDimensions: cfg.EMBEDDING_DIMENSIONS, logger });
     console.log(done.length ? `Applied: ${done.join(", ")}` : "Database is up to date.");
+    /*
+     * The migration job is also the place where a *changed* EMBEDDING_DIMENSIONS
+     * is applied: `0001_init.sql` only creates the column, it never resizes it.
+     * Running `pnpm db:migrate` is therefore the documented remediation for the
+     * `vector dimension mismatch` that `/ready` reports when DB_AUTO_MIGRATE is
+     * off, so the guard here always re-dimensions (autoMigrate: true).
+     */
+    const vectors = await ensureVectorDimensions(pool, {
+      configuredDimensions: cfg.EMBEDDING_DIMENSIONS,
+      autoMigrate: true,
+      embeddingModel: cfg.LLM_PROVIDER === "mock" ? undefined : cfg.EMBEDDING_MODEL,
+      logger,
+    });
+    console.log(`Vector store: ${vectors.detail}`);
+    if (vectors.redimensioned) console.warn("WARNING: stored embeddings were discarded — re-index the mailboxes (the add-in re-indexes on use, or run `pnpm smoke --full --reindex`).");
+    if (vectors.mismatch) process.exitCode = 1;
   } finally {
     await pool.end();
   }

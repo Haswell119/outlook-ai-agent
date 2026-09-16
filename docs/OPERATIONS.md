@@ -23,6 +23,7 @@
 12. [Worker de synchronisation](#12-worker-de-synchronisation)
 13. [Rétention et purge de l'audit](#13-rétention-et-purge-de-laudit)
 14. [Incidents fréquents](#14-incidents-fréquents)
+15. [Dimension des embeddings (pgvector)](#15-dimension-des-embeddings-pgvector)
 
 ---
 
@@ -521,3 +522,147 @@ COMMIT;
 | Pods `Pending` | PVC non provisionné, ressources insuffisantes | `kubectl -n oao describe pod`, `kubectl get sc`, `kubectl describe node` |
 | Trafic bloqué après un changement réseau | NetworkPolicy default-deny + flux non déclaré | `kubectl -n oao get networkpolicy`, ajouter le CIDR/namespace nécessaire |
 | **`oao_db_up == 0`** | PostgreSQL injoignable | **incident compliance** : plus aucune action n'est auditée. Suspendre le service (`scale --replicas=0`) plutôt que de servir sans audit, restaurer, documenter |
+| `/ready` → 503 `vector dimension mismatch: column N, config M` | la colonne `email_index.embedding` est en `vector(N)` mais `EMBEDDING_DIMENSIONS=M` (typiquement une base migrée avant l'existence du `.env`, donc en 1024, puis un modèle en 1536) | §15 |
+| `POST /index/emails` → `mode: "lexical"` + `warning` | embeddings impossibles (dimension incohérente, pgvector absent, endpoint d'embedding HS) | la recherche par mots-clés fonctionne ; §15, puis réindexer |
+| `500 database_error` | erreur PostgreSQL (le message réel est dans le log, avec le `correlationId` de la réponse) | `kubectl -n oao logs deploy/oao-api \| grep <correlationId>` |
+| `/health` → `checks.vectors.status = "degraded"` | pgvector n'est pas installé : recherche lexicale seule, `embeddingsEnabled=false` | mode **supporté** ; installer l'extension puis relancer le Job de migration si la recherche sémantique est voulue |
+
+---
+
+## 15. Dimension des embeddings (pgvector)
+
+### Le problème
+
+`email_index.embedding` est une colonne **`vector(N)`** créée par la migration
+`0001_init.sql`, où `N` est la valeur de `EMBEDDING_DIMENSIONS` **au moment de
+cette migration** (1024 par défaut). Aucune migration ne la redimensionne
+ensuite. Si la configuration change de modèle d'embedding — par exemple
+`text-embedding-3-small` (1536) alors que la base a été migrée sans `.env`,
+donc en 1024 — PostgreSQL refuse chaque écriture :
+
+```
+DatabaseError: expected 1024 dimensions, not 1536      -- SQLSTATE 22000
+```
+
+Le service **ne renvoie plus 500** pour autant (voir « Comportement en
+dégradé »), mais la recherche sémantique est perdue tant que la colonne et la
+configuration ne sont pas d'accord.
+
+### Détection
+
+Le garde-fou tourne à chaque démarrage (après les migrations) et dans le Job de
+migration. Il lit la dimension réelle dans le catalogue
+(`pg_attribute` + `format_type`), pour **toutes** les colonnes `vector(N)` du
+schéma, et la compare à `EMBEDDING_DIMENSIONS`.
+
+```bash
+# Ce que la base contient réellement
+psql "$DATABASE_URL" -c "SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod)
+                           FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+                                               JOIN pg_type t ON t.oid = a.atttypid
+                          WHERE t.typname = 'vector' AND a.attnum > 0 AND NOT a.attisdropped;"
+
+# Ce que le service en pense
+curl -s https://api.oao.northbridge.example/api/v1/ready | jq .
+curl -s https://api.oao.northbridge.example/api/v1/health | jq .checks.vectors
+curl -s https://api.oao.northbridge.example/api/v1/config/features | jq .embeddingsEnabled
+```
+
+### Dev / démo — `DB_AUTO_MIGRATE=true`
+
+Le démarrage **redimensionne tout seul** et le dit dans les logs :
+
+```
+WARN  vector dimension mismatch: re-dimensioning email_index.embedding vector(1024) to vector(1536) …
+WARN  email_index.embedding re-dimensioned from vector(1024) to vector(1536): the stored embeddings
+      were DISCARDED and will be recomputed at the next indexing
+```
+
+Ce que fait l'opération, sous le verrou d'avis des migrations (donc sans
+collision entre répliques), et en une transaction :
+
+1. `DROP INDEX IF EXISTS email_index_embedding_idx` (l'index HNSW est lié au type) ;
+2. `ALTER TABLE email_index ALTER COLUMN embedding TYPE vector(N) USING NULL` —
+   les vecteurs stockés ont été produits par un autre modèle, aucune conversion
+   ne les rendrait corrects : ils sont **jetés**. Les lignes, elles, restent, donc
+   la recherche par mots-clés continue de fonctionner sans interruption ;
+3. purge des entrées de `embedding_cache` qui ne correspondent plus au modèle ou
+   à la dimension courants (la table stocke des `real[]`, donc sans contrainte de
+   taille : elle ne *échoue* jamais, c'est précisément pourquoi elle doit être
+   invalidée explicitement) ;
+4. reconstruction de l'index HNSW en `CREATE INDEX CONCURRENTLY`.
+
+L'opération est idempotente : un second démarrage ne trouve plus rien à faire.
+
+### Production — `DB_AUTO_MIGRATE=false`
+
+Rien n'est modifié derrière le dos de l'exploitant. À la place :
+
+- un log `ERROR` au démarrage ;
+- `GET /api/v1/ready` → **503** avec le message exact et les deux issues
+  possibles :
+
+```json
+{ "status": "unready",
+  "detail": "vector dimension mismatch: column 1024, config 1536 — run the migration job or set EMBEDDING_DIMENSIONS=1024" }
+```
+
+- `GET /api/v1/health` → `checks.vectors.status = "down"` avec le même détail ;
+- `GET /api/v1/config/features` → `embeddingsEnabled: false`.
+
+Deux remèdes, à choisir explicitement :
+
+```bash
+# A. Garder le modèle d'embedding voulu et redimensionner la base (les vecteurs
+#    stockés sont perdus, il faudra réindexer) :
+kubectl -n oao run oao-migrate-manual --rm -it --restart=Never \
+  --image=ghcr.io/northbridge-capital/oao-orchestrator:1.2.3 \
+  --env=DATABASE_URL="$DATABASE_URL" --env=EMBEDDING_DIMENSIONS=1536 \
+  -- node apps/orchestrator/dist/adapters/db/migrate.js
+# → "email_index.embedding re-dimensioned …" puis
+#   "WARNING: stored embeddings were discarded — re-index the mailboxes"
+
+# B. Garder la base telle quelle et revenir au modèle qui produit 1024 valeurs :
+#    infra/gitops/envs/prod/values.yaml → EMBEDDING_DIMENSIONS: "1024"
+#    (+ EMBEDDING_MODEL cohérent), puis rollout.
+```
+
+> Prévoir la fenêtre : `ALTER COLUMN … TYPE` prend un `ACCESS EXCLUSIVE` sur
+> `email_index` le temps de réécrire la table. Sur 50 boîtes c'est quelques
+> secondes ; pendant ce temps l'indexation attend. La reconstruction de l'index
+> HNSW, elle, est `CONCURRENTLY` et ne bloque pas les écritures.
+
+### Réindexer (recalculer les embeddings)
+
+Les vecteurs sont recalculés au fur et à mesure, sans intervention :
+l'add-in réindexe les e-mails qu'il ouvre et le worker de synchronisation
+(`PRECOMPUTE_ENABLED=true`, §12) repasse sur la boîte. Pour forcer :
+
+```bash
+# Un utilisateur, tout de suite (nécessite Graph) :
+curl -s -X POST -H "Authorization: Bearer $JWT" \
+  https://api.oao.northbridge.example/api/v1/mailbox/sync | jq .
+
+# Vérifier de bout en bout que les embeddings sont revenus (mode = hybrid) :
+pnpm smoke --full --reindex --url https://api.oao.northbridge.example --token "$JWT"
+
+# Ce qui reste sans vecteur :
+psql "$DATABASE_URL" -c "SELECT count(*) AS rows, count(embedding) AS with_vector FROM email_index;"
+```
+
+### Comportement en dégradé (ce que voit l'utilisateur)
+
+| Situation | `/index/emails` | Recherche & chat | `/ready` |
+|---|---|---|---|
+| Tout concorde | `mode: "hybrid"` | lexical + vectoriel (RRF) | 200 |
+| Dimension incohérente, `DB_AUTO_MIGRATE=false` | `mode: "lexical"` + `warning` | lexical seul | **503** |
+| pgvector absent | `mode: "lexical"` + `warning` | lexical seul | 200 (mode supporté) |
+| Endpoint d'embedding HS | `mode: "lexical"` + `warning` | lexical seul | 200 |
+
+Dans les quatre cas l'indexation **réussit** : les chunks sont stockés sans leur
+vecteur, la réponse porte `warning` (champ du contrat, affiché par l'add-in) et
+la recherche par mots-clés continue de répondre. Une erreur PostgreSQL qui n'est
+pas rattrapable est renvoyée comme `500 database_error` avec un
+`correlationId` — le message du driver reste dans les logs, jamais dans la
+réponse.
+

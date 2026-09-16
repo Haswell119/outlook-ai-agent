@@ -100,8 +100,14 @@ export interface EmailIndexRepository {
   upsertEmail(userId: string, chunks: IndexedChunk[]): Promise<void>;
   searchLexical(userId: string, query: string, filter: IndexSearchFilter, limit: number): Promise<IndexHit[]>;
   searchVector(userId: string, embedding: number[], filter: IndexSearchFilter, limit: number): Promise<IndexHit[]>;
-  /** Whether vector search is possible (pgvector column present). */
+  /** Whether vector search is possible (pgvector column present **and** its dimension matches the configuration). */
   supportsVectors(): Promise<boolean>;
+  /**
+   * Declared dimension of the embedding column: a number, `null` when the
+   * column accepts any size, `undefined` when there is no vector column.
+   * Optional — only the Postgres adapter can answer it.
+   */
+  vectorDimensions?(): Promise<number | null | undefined>;
   /** Most recent indexed emails (first chunk only) matching a simple filter. */
   listRecent(userId: string, filter: { fromAddress?: string; fromDomain?: string; subjectContains?: string; hasAttachments?: boolean }, limit: number): Promise<IndexedChunk[]>;
   count(userId: string): Promise<number>;

@@ -1,5 +1,6 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
+import { isDatabaseError } from "../adapters/db/errors.js";
 import { AppError, GraphDisabledError, LlmError } from "../errors.js";
 
 /** Maps every error to the `ApiError` contract. */
@@ -20,6 +21,15 @@ export function errorHandler(error: FastifyError | Error, req: FastifyRequest, r
   }
   if (error instanceof GraphDisabledError) {
     return reply.status(503).send({ error: { code: "graph_unavailable", message: error.message, correlationId } });
+  }
+  if (isDatabaseError(error)) {
+    // The driver message can quote SQL, column names and row values (pgvector's
+    // "expected 1024 dimensions, not 1536" is the mild case) — it belongs in the
+    // log next to the correlation id, not in the response body. The client gets
+    // a stable `database_error` code it can act on instead of a generic
+    // "unhandled error".
+    req.log.error({ err: error, code: (error as { code?: string }).code, detail: (error as { detail?: string }).detail, table: (error as { table?: string }).table, constraint: (error as { constraint?: string }).constraint }, "database error");
+    return reply.status(500).send({ error: { code: "database_error", message: "A database error occurred while processing the request", details: { sqlState: (error as { code?: string }).code }, correlationId } });
   }
   const fe = error as FastifyError;
   if (fe.statusCode === 429) return reply.status(429).send({ error: { code: "rate_limited", message: "Too many requests", correlationId } });

@@ -1,7 +1,8 @@
 /**
  * Application error mapped to the `ApiError` contract by the HTTP error handler.
  * Codes: validation_error (400) · unauthorized (401) · forbidden (403) · not_found (404)
- *        conflict (409) · llm_unavailable (502) · graph_unavailable (503) · internal_error (500)
+ *        conflict (409) · rate_limited (429) · llm_unavailable (502) · graph_unavailable (503)
+ *        database_error (500) · internal_error (500)
  */
 export type ApiErrorCode =
   | "validation_error"
@@ -12,6 +13,7 @@ export type ApiErrorCode =
   | "rate_limited"
   | "llm_unavailable"
   | "graph_unavailable"
+  | "database_error"
   | "internal_error";
 
 const STATUS: Record<ApiErrorCode, number> = {
@@ -23,6 +25,7 @@ const STATUS: Record<ApiErrorCode, number> = {
   rate_limited: 429,
   llm_unavailable: 502,
   graph_unavailable: 503,
+  database_error: 500,
   internal_error: 500,
 };
 
@@ -59,6 +62,14 @@ export class AppError extends Error {
   }
   static graphUnavailable(message = "Microsoft Graph is unavailable") {
     return new AppError("graph_unavailable", message);
+  }
+  /**
+   * A Postgres failure. The message stays generic on purpose: a driver message
+   * can quote column names, SQL fragments and row values. The real error is
+   * logged with the correlation id.
+   */
+  static database(message = "A database error occurred", details?: unknown) {
+    return new AppError("database_error", message, details);
   }
 }
 

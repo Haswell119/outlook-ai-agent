@@ -13,19 +13,35 @@ export type SearchMode = "hybrid" | "lexical" | "vector";
  * fused with reciprocal-rank fusion, one result per email (best chunk).
  */
 export class SearchService {
+  /**
+   * Set when the vector half of the retrieval failed (embedding endpoint down,
+   * dimension mismatch between the query vector and the column…). Retrieval
+   * stays lexical-only until it expires instead of paying for — and logging —
+   * the same failure on every keystroke.
+   */
+  private vectorDisabledUntil = 0;
+
   constructor(
     private readonly deps: ServiceDeps,
     private readonly audit: AuditService,
     private readonly indexer: IndexEmailsService,
   ) {}
 
+  /**
+   * Hybrid retrieval that always answers. The lexical half runs first and
+   * unconditionally; the vector half is best effort, so a broken vector store
+   * (the classic `vector(1024)` column with `EMBEDDING_DIMENSIONS=1536`)
+   * degrades search to `mode: "lexical"` instead of returning a 500. Chat
+   * retrieval goes through here too, so it degrades identically.
+   */
   async retrieve(userId: string, query: string, filter: IndexSearchFilter, limit: number): Promise<{ results: SearchSource[]; mode: SearchMode }> {
     const repo = this.deps.repos.emailIndex;
     const fetchN = Math.max(limit * 3, 20);
     const lexical = await repo.searchLexical(userId, query, filter, fetchN);
     let vector: IndexHit[] = [];
     let vectorTried = false;
-    if (this.indexer.embeddingsAvailable && this.deps.embeddings && (await repo.supportsVectors())) {
+    const vectorAllowed = Date.now() >= this.vectorDisabledUntil;
+    if (vectorAllowed && this.indexer.embeddingsAvailable && this.deps.embeddings && (await repo.supportsVectors().catch(() => false))) {
       try {
         const [embedding] = await this.deps.embeddings.embed([query]);
         if (embedding) {
@@ -33,7 +49,9 @@ export class SearchService {
           vectorTried = true;
         }
       } catch (e) {
-        this.deps.logger.warn({ err: (e as Error).message }, "vector search failed, lexical only");
+        // Never rethrow: lexical results are already in hand.
+        this.vectorDisabledUntil = Date.now() + 60_000;
+        this.deps.logger.warn({ err: (e as Error).message, code: (e as { code?: string }).code, lexicalHits: lexical.length }, "vector search failed, falling back to lexical only for the next minute");
       }
     }
     const mode: SearchMode = vectorTried && vector.length ? (lexical.length ? "hybrid" : "vector") : "lexical";

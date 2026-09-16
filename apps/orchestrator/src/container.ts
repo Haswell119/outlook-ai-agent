@@ -3,6 +3,7 @@ import { APP_VERSION, isMemoryDatabase } from "./config.js";
 import { createPgRepositories } from "./adapters/db/index.js";
 import { migrationsUpToDate, runMigrations } from "./adapters/db/migrate.js";
 import { createPool, type PgPool } from "./adapters/db/pool.js";
+import { ensureVectorDimensions, unknownVectorStore, type VectorStoreState } from "./adapters/db/vector-dimensions.js";
 import { CachedEmbeddingProvider } from "./adapters/llm/cached-embeddings.js";
 import { DisabledGraphClient, MsalGraphClient } from "./adapters/graph/client.js";
 import { MockEmbeddingProvider, MockLlmProvider } from "./adapters/llm/mock.js";
@@ -29,6 +30,12 @@ export interface Container {
   embeddingCache?: CachedEmbeddingProvider;
   /** Postgres pool, when not in memory mode (readiness probe, leader election). */
   pool?: PgPool;
+  /**
+   * Result of the boot-time vector dimension guard. `undefined` in memory mode
+   * (nothing to check) — `usable: false` with a `mismatch` makes the instance
+   * unready in production.
+   */
+  vectorStore?: VectorStoreState;
   /** Process start, for `SystemStatus.uptimeSeconds`. */
   startedAt: number;
   /** True when DB reachable + migrations applied (readiness). */
@@ -56,6 +63,7 @@ export async function createContainer(cfg: Config, overrides: ContainerOverrides
   /* ------------------------------ database ------------------------------ */
   let repos = overrides.repos;
   let pool: PgPool | undefined;
+  let vectorStore: VectorStoreState | undefined;
   if (!repos) {
     if (isMemoryDatabase(cfg)) {
       repos = createMemoryRepositories();
@@ -74,7 +82,22 @@ export async function createContainer(cfg: Config, overrides: ContainerOverrides
         const applied = await runMigrations(pool, { embeddingDimensions: cfg.EMBEDDING_DIMENSIONS, logger });
         logger.info({ applied }, "database migrations checked");
       }
-      repos = createPgRepositories(pool);
+      /*
+       * Vector dimension guard — runs on every boot, migrations or not.
+       *
+       * With DB_AUTO_MIGRATE the column is re-dimensioned in place (stored
+       * embeddings discarded, WARN logged). Without it, nothing is touched and
+       * `ready()` below reports the mismatch so /ready answers 503 with the
+       * exact remediation instead of every indexing request failing with a
+       * pgvector "expected N dimensions" error.
+       */
+      vectorStore = await ensureVectorDimensions(pool, {
+        configuredDimensions: cfg.EMBEDDING_DIMENSIONS,
+        autoMigrate: cfg.DB_AUTO_MIGRATE,
+        embeddingModel: cfg.LLM_PROVIDER === "mock" ? undefined : cfg.EMBEDDING_MODEL,
+        logger,
+      });
+      repos = createPgRepositories(pool, { embeddingDimensions: cfg.EMBEDDING_DIMENSIONS });
     }
   }
 
@@ -84,7 +107,9 @@ export async function createContainer(cfg: Config, overrides: ContainerOverrides
   if (!baseLlm) {
     if (cfg.LLM_PROVIDER === "mock") {
       baseLlm = new MockLlmProvider();
-      embeddings ??= cfg.EMBEDDINGS_ENABLED ? new MockEmbeddingProvider(Math.min(cfg.EMBEDDING_DIMENSIONS, 256)) : undefined;
+      // The dimension must match `EMBEDDING_DIMENSIONS`: the pgvector column is
+      // declared `vector(EMBEDDING_DIMENSIONS)` and rejects anything else.
+      embeddings ??= cfg.EMBEDDINGS_ENABLED ? new MockEmbeddingProvider(cfg.EMBEDDING_DIMENSIONS) : undefined;
     } else {
       const provider = new OpenAiCompatibleProvider({
         baseUrl: cfg.LLM_BASE_URL,
@@ -143,6 +168,7 @@ export async function createContainer(cfg: Config, overrides: ContainerOverrides
   const services = createServices(deps, metrics);
 
   const capturedPool = pool;
+  const capturedVectorStore = vectorStore;
   return {
     cfg,
     deps,
@@ -151,6 +177,7 @@ export async function createContainer(cfg: Config, overrides: ContainerOverrides
     llmQueue,
     embeddingCache,
     pool: capturedPool,
+    vectorStore: capturedVectorStore,
     startedAt: Date.now(),
     /**
      * Readiness: the database must be reachable **and** migrated. An LLM or
@@ -164,10 +191,16 @@ export async function createContainer(cfg: Config, overrides: ContainerOverrides
       if (!capturedPool) return { ok: true, detail: "in-memory repositories" };
       try {
         const m = await migrationsUpToDate(capturedPool);
-        return m.ok ? { ok: true, detail: "database reachable, migrations applied" } : { ok: false, detail: `migrations pending: ${m.missing.join(", ")}` };
+        if (!m.ok) return { ok: false, detail: `migrations pending: ${m.missing.join(", ")}` };
       } catch (e) {
         return { ok: false, detail: `migrations: ${(e as Error).message}` };
       }
+      // A vector column that disagrees with EMBEDDING_DIMENSIONS is a
+      // configuration error an operator must resolve: every embedding write
+      // would fail. Lexical-only (no pgvector at all) is a *supported* mode and
+      // stays ready.
+      if (capturedVectorStore?.mismatch) return { ok: false, detail: capturedVectorStore.mismatch };
+      return { ok: true, detail: `database reachable, migrations applied${capturedVectorStore ? `, ${capturedVectorStore.detail}` : ""}` };
     },
     close: async () => {
       await repos!.close();

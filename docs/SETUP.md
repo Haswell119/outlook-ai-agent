@@ -473,6 +473,7 @@ pnpm setup:dev        # .env, vérifications, install, build @oao/shared
 pnpm certs            # certificat HTTPS local pour le volet
 pnpm dev              # orchestrator :8080 · addin :3000 · admin :3001
 pnpm smoke            # vérifie que tout répond
+pnpm smoke --full     # vérifie que TOUT fonctionne, fonctionnalité par fonctionnalité
 ```
 
 Le mode démo tourne avec `LLM_PROVIDER=mock`, `DATABASE_URL=memory`,
@@ -493,6 +494,61 @@ found` liste les chemins examinés. Vérifier que le fichier s'appelle exactemen
 l'affichage des extensions) et qu'il est à la racine du dépôt, ou indiquer un
 chemin explicite avec `OAO_ENV_FILE=C:\chemin\vers\.env`.
 
+### « Est-ce que tout fonctionne ? » — `pnpm smoke --full`
+
+`pnpm smoke` répond à « le service est-il debout et bien câblé ? » en quelques
+secondes. `pnpm smoke --full` répond à la question qui compte vraiment : **est-ce
+que chaque fonctionnalité marche de bout en bout, avec votre modèle et votre
+base ?** C'est la commande à lancer après une installation, après un changement
+de `.env` et avant de déclarer que la machine est prête.
+
+```bash
+pnpm smoke --full                       # stack locale (http://localhost:8080)
+pnpm smoke --full --lang fr             # réponses IA en français
+pnpm smoke --full --reindex             # force la recréation des embeddings
+pnpm smoke --full --json > smoke.json   # rapport exploitable par un script
+pnpm smoke --full --url https://api.oao.northbridge.example --token "$JWT"
+pnpm smoke --help                       # toutes les options
+```
+
+Le test indexe 5 e-mails réalistes FR/EN dans la boîte de l'appelant (un fil
+projet de 3 messages, une newsletter, une facture externe contenant un IBAN)
+puis enchaîne, dans l'ordre où un utilisateur s'en sert :
+
+| Étape | Ce qui est vérifié |
+|---|---|
+| `POST /index/emails` | 5 e-mails indexés, `mode` (`hybrid` = embeddings, `lexical` = mots-clés seuls) et `warning` éventuel |
+| `POST /search` | la recherche retrouve bien l'e-mail qui vient d'être indexé |
+| `POST /chat` | la réponse cite **au moins une source** du fil indexé |
+| `POST /analyze/email` | `source` ∈ `llm\|cache\|precomputed`, résumé non vide, ≥ 1 tâche en attente |
+| idem, 2ᵉ appel | `source = cache` (le cache de contenu fonctionne : zéro GPU) |
+| idem, newsletter | `source = heuristic` + `triage.kind = newsletter` (aucun appel modèle) |
+| idem, `force: true` | `source = llm` (l'utilisateur peut toujours forcer l'analyse) |
+| `POST /analyze/thread` | synthèse du fil, documents manquants, tâches, sources |
+| `POST /draft/reply` | brouillons `accept` **et** `decline`, dans la bonne langue |
+| `POST /actions/propose` → `approve` → `:id/result` | human-in-the-loop complet (`pending_client` ou `executed`) |
+| `POST /compliance/check` | ≥ 2 alertes sur un brouillon externe contenant un IBAN |
+| `POST /compliance/phishing` | verdict non `clean` sur un expéditeur sosie |
+| `POST /compliance/escalations` | escalade créée, `pending`, visible dans la liste |
+| `observe` → `detect` → `simulate` → `approve` | Automation Coach : 3 séquences identiques ⇒ 1 proposition, simulation qui s'applique, activation |
+| `POST` puis `GET /brief/daily` | brief du jour généré puis relu |
+| `GET /audit`, `/audit/stats`, `/audit/export` | piste d'audit alimentée, KPI, export CSV (nécessite `--admin-token`) |
+| `GET /admin/system`, `/metrics` | état runtime, exposition Prometheus (`--metrics-token`) |
+| `GET /ready`, `/live` | le service est toujours sain après le parcours |
+
+Chaque étape imprime `OK`/`FAIL` avec les faits utiles (`source`, nombres,
+durée) et un tableau récapitulatif est affiché à la fin ; le code de sortie est
+`1` dès qu'une étape échoue. **Toutes les réponses sont validées avec les schémas
+zod de `@oao/shared`** : une dérive de contrat fait échouer le test même quand le
+HTTP est 200. Les jetons sont lus dans le `.env` (`ADMIN_API_TOKEN`,
+`METRICS_TOKEN`) ; sans eux, les étapes admin sont marquées `SKIP`.
+
+Si `mode = lexical` et qu'un `warning` apparaît, la recherche par mots-clés
+fonctionne mais pas la recherche sémantique : voir le runbook
+[`OPERATIONS.md` §15](OPERATIONS.md#15-dimension-des-embeddings-pgvector) (le
+cas le plus fréquent est une base migrée avant l'existence du `.env`, donc avec
+`EMBEDDING_DIMENSIONS=1024` par défaut, puis un `.env` en 1536).
+
 ### Stack locale complète (PostgreSQL réel + modèle interne)
 
 ```bash
@@ -504,7 +560,19 @@ pnpm dev:db                      # PostgreSQL/pgvector, attend le healthcheck
 pnpm check:llm
 pnpm db:migrate && pnpm db:seed
 pnpm dev
+pnpm smoke --full --reindex      # vérifie l'ensemble, embeddings inclus
 ```
+
+> **`EMBEDDING_DIMENSIONS` et pgvector.** La colonne `email_index.embedding` est
+> créée en `vector(EMBEDDING_DIMENSIONS)` par la première migration. Si la base
+> a été migrée avant que le `.env` n'existe, elle est en `vector(1024)` (valeur
+> par défaut) : un `.env` qui sélectionne ensuite `text-embedding-3-small`
+> (1536) ne correspond plus. En développement (`DB_AUTO_MIGRATE=true`) le
+> démarrage redimensionne la colonne tout seul et écrit un `WARN` — les vecteurs
+> stockés sont perdus, il suffit de réindexer (`pnpm smoke --full --reindex`, ou
+> simplement se servir de l'add-in). En production (`DB_AUTO_MIGRATE=false`),
+> rien n'est modifié : `/ready` répond 503 avec le message exact à suivre. Voir
+> [`OPERATIONS.md` §15](OPERATIONS.md#15-dimension-des-embeddings-pgvector).
 
 ### Toutes les commandes de l'outillage
 
@@ -515,6 +583,7 @@ pnpm dev
 | `pnpm certs` | certificat HTTPS du volet (`--force`, `--mkcert`, `--openssl`) |
 | `pnpm check:llm` | valide l'endpoint LLM interne |
 | `pnpm smoke` | test de bout en bout (`--url`, `--token`, `--wait`) |
+| `pnpm smoke --full` | **vérification fonctionnelle complète** : indexation → recherche → chat → analyse/cache/triage → synthèse → brouillons → actions → conformité → automatisations → brief → audit (`--lang`, `--reindex`, `--json`, `--admin-token`, `--metrics-token`) |
 | `pnpm manifest:render` | rend les manifests Office depuis `ADDIN_HOST`/`API_HOST`/`AAD_CLIENT_ID` |
 | `pnpm manifest:sideload` | charge le manifest dans Outlook (`--prod`, `--remove`, `--print`) |
 | `pnpm --filter @oao/addin manifest:package[:dev]` | package d'app Teams (zip `manifest.json` + `color.png`/`outline.png`) pour l'entrée « Apps » du nouvel Outlook (§10.2) |

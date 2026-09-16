@@ -112,7 +112,7 @@ apps/orchestrator/src/
 Rules:
 - Controllers validate **every** request body with the shared zod schemas and return
   `ApiError` on failure (`400 validation_error`, `401 unauthorized`, `403 forbidden`,
-  `404 not_found`, `409 conflict`, `502 llm_unavailable`, `503 graph_unavailable`).
+  `404 not_found`, `409 conflict`, `500 database_error`, `502 llm_unavailable`, `503 graph_unavailable`).
 - **Every** AI suggestion / action writes an `AuditEvent` (non-negotiable). The audit
   row stores structured details + SHA-256 hashes of prompt/response; raw email body is
   **not** stored unless `AUDIT_STORE_CONTENT=true`.

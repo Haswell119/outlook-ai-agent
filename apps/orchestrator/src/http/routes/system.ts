@@ -36,8 +36,10 @@ export async function systemRoutes(app: FastifyInstance, c: Container) {
         status: c.cfg.WORKERS_ENABLED && c.cfg.ROLE !== "api" ? "ok" : "degraded",
         detail: c.cfg.ROLE === "api" ? "API-only role (ROLE=api)" : c.cfg.WORKERS_ENABLED ? `scheduler enabled (precompute=${c.cfg.PRECOMPUTE_ENABLED})` : "WORKERS_ENABLED=false",
       },
+      vectors: vectorCheck(c),
     } as const;
-    const status = !db.ok ? "down" : !llm.ok || queue?.circuitOpen ? "degraded" : "ok";
+    const vectors = checks.vectors;
+    const status = !db.ok ? "down" : !llm.ok || queue?.circuitOpen || vectors.status === "down" ? "degraded" : "ok";
     return HealthSchema.parse({ status, checks, version: APP_VERSION, timestamp: new Date().toISOString() });
   });
 
@@ -70,11 +72,31 @@ export async function systemRoutes(app: FastifyInstance, c: Container) {
   });
 }
 
+/**
+ * Vector-store check for `/health`.
+ *
+ * `down`     — the column disagrees with `EMBEDDING_DIMENSIONS` (a configuration
+ *              error: every embedding write would fail). `/ready` is 503 too
+ *              unless `DB_AUTO_MIGRATE` already fixed it.
+ * `degraded` — no pgvector: lexical search only, which is a supported mode.
+ * `ok`       — vectors are stored and queried.
+ */
+export function vectorCheck(c: Container): { status: "ok" | "degraded" | "down"; detail: string } {
+  const v = c.vectorStore;
+  if (!v) return { status: c.cfg.EMBEDDINGS_ENABLED ? "ok" : "degraded", detail: c.cfg.EMBEDDINGS_ENABLED ? "in-memory / external repositories (no vector column to check)" : "EMBEDDINGS_ENABLED=false — lexical search only" };
+  if (v.mismatch) return { status: "down", detail: v.mismatch };
+  if (!v.pgvector) return { status: "degraded", detail: v.detail };
+  return { status: "ok", detail: `${v.detail}${v.redimensioned ? " (re-dimensioned at boot: stored embeddings were discarded, re-index to recompute them)" : ""}` };
+}
+
+/** True when embeddings are configured **and** effectively storable/queryable. */
+export const embeddingsEffective = (c: Container): boolean => c.services.indexEmails.embeddingsAvailable && (c.vectorStore ? c.vectorStore.usable : true);
+
 /** Feature flags shared by `/config/features` and `/admin/system`. */
 export function features(c: Container) {
   return {
     graphEnabled: c.cfg.GRAPH_ENABLED,
-    embeddingsEnabled: c.services.indexEmails.embeddingsAvailable,
+    embeddingsEnabled: embeddingsEffective(c),
     llmProvider: c.deps.llm.name,
     llmModel: c.deps.llm.model,
     llmFastModel: c.cfg.LLM_FAST_MODEL,
@@ -100,6 +122,7 @@ export async function systemStatus(c: Container, userId?: string) {
       checks: {
         database: { status: db.ok ? "ok" : "down", detail: db.detail },
         llm: { status: llm.ok && !queue?.circuitOpen ? "ok" : "degraded", detail: queue?.circuitOpen ? "circuit open" : llm.detail },
+        vectors: vectorCheck(c),
       },
       version: APP_VERSION,
       timestamp: new Date().toISOString(),
