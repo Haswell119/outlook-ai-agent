@@ -30,10 +30,6 @@
     "localhost:3000",
     "localhost:8080"
   ],
-  "webApplicationInfo": {
-    "id": "{{AAD_CLIENT_ID}}",
-    "resource": "api://localhost:3000/{{AAD_CLIENT_ID}}"
-  },
   "authorization": {
     "permissions": {
       "resourceSpecific": [

@@ -32,6 +32,12 @@ const env = (name, fallback) => (process.env[name]?.trim() ? process.env[name].t
 const ADDIN_HOST = env("ADDIN_HOST", "https://addin.northbridge.example").replace(/\/+$/, "");
 const API_HOST = env("API_HOST", "https://api.northbridge.example").replace(/\/+$/, "");
 const AAD_CLIENT_ID = env("AAD_CLIENT_ID", "{{AAD_CLIENT_ID}}");
+/**
+ * The SSO block is only emitted when a real app registration id is configured.
+ * Outlook rejects a manifest whose WebApplicationInfo/Id is not a GUID, which
+ * would block sideloading the dev manifest (VITE_AUTH_MODE=dev needs no SSO).
+ */
+const SSO_ENABLED = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(AAD_CLIENT_ID);
 const ORGANIZATION_NAME = env("ORGANIZATION_NAME", "Northbridge Capital");
 const VERSION_4 = env("ADDIN_VERSION", "1.0.0.0");
 const VERSION_3 = VERSION_4.split(".").slice(0, 3).join(".");
@@ -365,7 +371,9 @@ ${appDomains}
           <bt:String id="Compliance.Tooltip" DefaultValue="Check this draft for compliance risks before sending." />
         </bt:LongStrings>
       </Resources>
-      <!-- Office SSO (AUTH_MODE=aad). Replace {{AAD_CLIENT_ID}} with the app registration id. -->
+${
+  SSO_ENABLED
+    ? `      <!-- Office SSO (AUTH_MODE=aad), app registration ${AAD_CLIENT_ID}. -->
       <WebApplicationInfo>
         <Id>${AAD_CLIENT_ID}</Id>
         <Resource>${ssoResource}</Resource>
@@ -374,7 +382,9 @@ ${appDomains}
           <Scope>profile</Scope>
           <Scope>openid</Scope>
         </Scopes>
-      </WebApplicationInfo>
+      </WebApplicationInfo>`
+    : `      <!-- Office SSO disabled: set AAD_CLIENT_ID (app registration GUID) and re-run manifest:render to enable it. -->`
+}
     </VersionOverrides>
   </VersionOverrides>
 </OfficeApp>
@@ -412,7 +422,7 @@ function jsonManifest({ baseUrl, apiUrl, id, displayName, ssoResource, version }
     icons: { outline: "assets/icon-32.png", color: "assets/icon-128.png" },
     accentColor: "#0F6CBD",
     validDomains: [...new Set([host, apiHost])],
-    webApplicationInfo: { id: AAD_CLIENT_ID, resource: ssoResource },
+    ...(SSO_ENABLED ? { webApplicationInfo: { id: AAD_CLIENT_ID, resource: ssoResource } } : {}),
     authorization: {
       permissions: {
         resourceSpecific: [

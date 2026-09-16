@@ -304,16 +304,7 @@
           <bt:String id="Compliance.Tooltip" DefaultValue="Check this draft for compliance risks before sending." />
         </bt:LongStrings>
       </Resources>
-      <!-- Office SSO (AUTH_MODE=aad). Replace {{AAD_CLIENT_ID}} with the app registration id. -->
-      <WebApplicationInfo>
-        <Id>{{AAD_CLIENT_ID}}</Id>
-        <Resource>api://localhost:3000/{{AAD_CLIENT_ID}}</Resource>
-        <Scopes>
-          <Scope>access_as_user</Scope>
-          <Scope>profile</Scope>
-          <Scope>openid</Scope>
-        </Scopes>
-      </WebApplicationInfo>
+      <!-- Office SSO disabled: set AAD_CLIENT_ID (app registration GUID) and re-run manifest:render to enable it. -->
     </VersionOverrides>
   </VersionOverrides>
 </OfficeApp>

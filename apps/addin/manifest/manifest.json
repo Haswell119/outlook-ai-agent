@@ -30,10 +30,6 @@
     "addin.northbridge.example",
     "api.northbridge.example"
   ],
-  "webApplicationInfo": {
-    "id": "{{AAD_CLIENT_ID}}",
-    "resource": "api://addin.northbridge.example/{{AAD_CLIENT_ID}}"
-  },
   "authorization": {
     "permissions": {
       "resourceSpecific": [
