@@ -1,0 +1,56 @@
+{{- if and .Values.metrics.serviceMonitor.enabled .Values.config.metricsEnabled }}
+# Prometheus Operator (kube-prometheus-stack ships with NKP/Kommander).
+# /metrics is protected by METRICS_TOKEN: the scrape presents it as a bearer
+# token read from the release Secret. The Prometheus instance must be allowed
+# to read Secrets in this namespace (Prometheus Operator resolves the
+# reference server-side).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "oao.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator") | indent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [{{ include "oao.name" . }}]
+      - key: app.kubernetes.io/instance
+        operator: In
+        values: [{{ .Release.Name }}]
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [orchestrator-api, orchestrator-worker]
+  endpoints:
+    - port: http
+      path: /metrics
+      scheme: http
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+      {{- if not (or .Values.secrets.existingSecret .Values.externalSecrets.enabled) }}
+      bearerTokenSecret:
+        name: {{ include "oao.secretName" . }}
+        key: METRICS_TOKEN
+        optional: true
+      {{- else }}
+      bearerTokenSecret:
+        name: {{ include "oao.secretName" . }}
+        key: METRICS_TOKEN
+      {{- end }}
+      {{- with .Values.metrics.serviceMonitor.relabelings }}
+      relabelings:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.metrics.serviceMonitor.metricRelabelings }}
+      metricRelabelings:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+{{- end }}

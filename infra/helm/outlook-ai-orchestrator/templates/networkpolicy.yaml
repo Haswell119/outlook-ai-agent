@@ -1,0 +1,244 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $fullname := include "oao.fullname" . -}}
+{{- if .Values.networkPolicy.defaultDeny }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-default-deny
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.labels" . | indent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-api") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "orchestrator-api") | indent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Ingress controller (Traefik on NKP)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+{{ toYaml .Values.networkPolicy.ingressController.namespaceSelector | indent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Admin dashboard -> orchestrator API
+    {{- if .Values.admin.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+{{ include "oao.selectorLabels" (list . "admin") | indent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.networkPolicy.monitoring.enabled }}
+    # Prometheus scraping /metrics
+    - from:
+        - namespaceSelector:
+            matchLabels:
+{{ toYaml .Values.networkPolicy.monitoring.namespaceSelector | indent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
+  egress:
+{{ include "oao.netpol.dns" . | indent 4 }}
+{{ include "oao.netpol.database" . | indent 4 }}
+{{ include "oao.netpol.llm" . | indent 4 }}
+{{ include "oao.netpol.microsoft" . | indent 4 }}
+    {{- with .Values.networkPolicy.extraEgress }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+{{- if .Values.orchestrator.worker.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-worker") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "orchestrator-worker") | indent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    {{- if .Values.networkPolicy.monitoring.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+{{ toYaml .Values.networkPolicy.monitoring.namespaceSelector | indent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- else }}
+    []
+    {{- end }}
+  egress:
+{{ include "oao.netpol.dns" . | indent 4 }}
+{{ include "oao.netpol.database" . | indent 4 }}
+{{ include "oao.netpol.llm" . | indent 4 }}
+{{ include "oao.netpol.microsoft" . | indent 4 }}
+    {{- with .Values.networkPolicy.extraEgress }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+{{- end }}
+{{- if .Values.admin.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-admin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "admin") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "admin") | indent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+{{ toYaml .Values.networkPolicy.ingressController.namespaceSelector | indent 14 }}
+      ports:
+        - port: 3001
+          protocol: TCP
+  egress:
+{{ include "oao.netpol.dns" . | indent 4 }}
+    # Admin -> orchestrator API (server-side rendering / route handlers)
+    - to:
+        - podSelector:
+            matchLabels:
+{{ include "oao.selectorLabels" (list . "orchestrator-api") | indent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- if eq .Values.admin.authMode "aad" }}
+    # Entra ID sign-in (login.microsoftonline.com)
+{{ include "oao.netpol.microsoft" . | indent 4 }}
+    {{- end }}
+{{- end }}
+{{- if .Values.addin.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-addin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "addin") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "addin") | indent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+{{ toYaml .Values.networkPolicy.ingressController.namespaceSelector | indent 14 }}
+      ports:
+        - port: 3000
+          protocol: TCP
+  # Static files only: nothing but DNS is needed outbound.
+  egress:
+{{ include "oao.netpol.dns" . | indent 4 }}
+{{- end }}
+{{- if .Values.postgres.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "postgres") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "postgres") | indent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [{{ include "oao.name" . }}]
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [orchestrator-api, orchestrator-worker, migrate, backup]
+      ports:
+        - port: 5432
+          protocol: TCP
+  egress:
+{{ include "oao.netpol.dns" . | indent 4 }}
+{{- end }}
+{{- if .Values.migration.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-migrate
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "migrate") | indent 4 }}
+  annotations:
+    # Must exist before the pre-install migration hook runs.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+spec:
+  podSelector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "migrate") | indent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+{{ include "oao.netpol.dns" . | indent 4 }}
+{{ include "oao.netpol.database" . | indent 4 }}
+{{- end }}
+{{- if .Values.postgres.backup.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "backup") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "backup") | indent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+{{ include "oao.netpol.dns" . | indent 4 }}
+{{ include "oao.netpol.database" . | indent 4 }}
+    {{- if eq .Values.postgres.backup.destination "s3" }}
+    # S3-compatible object store (Nutanix Objects / MinIO)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+{{- end }}
+{{- end }}

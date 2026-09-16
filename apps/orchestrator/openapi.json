@@ -1,0 +1,4886 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Outlook AI Orchestrator — API",
+    "version": "0.1.0",
+    "description": "AI Orchestrator backend for the Outlook AI Orchestrator.\n\n**AI-load minimisation.** `EmailAnalysis.source` tells the caller how an answer was produced:\n`llm` (model called now), `cache` (identical content already analysed), `precomputed`\n(analysed ahead of time by the mailbox-sync worker) or `heuristic` (rules only — a triaged\nnewsletter/notification, or the model was unavailable). `EmailAnalysis.triage.kind` says why.\n\n**Human-in-the-loop.** The AI never sends or deletes anything; every action goes through\n`/actions/propose` → human approval → `/actions/approve`."
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "API v1"
+    }
+  ],
+  "tags": [
+    {
+      "name": "system",
+      "description": "Probes, features, metrics"
+    },
+    {
+      "name": "analysis",
+      "description": "Email analysis, thread synthesis, drafts, daily brief"
+    },
+    {
+      "name": "search",
+      "description": "Retrieval and chat"
+    },
+    {
+      "name": "actions",
+      "description": "Human-in-the-loop actions"
+    },
+    {
+      "name": "compliance",
+      "description": "Compliance Guardian and escalations"
+    },
+    {
+      "name": "automations",
+      "description": "Automation Coach"
+    },
+    {
+      "name": "audit",
+      "description": "Audit trail and analytics"
+    },
+    {
+      "name": "admin",
+      "description": "Policy, users, runtime status"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Azure AD access token (`AUTH_MODE=aad`) or `ADMIN_API_TOKEN`."
+      },
+      "devHeaders": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-user-email",
+        "description": "Dev identity (`AUTH_MODE=dev` only, refused in production)."
+      }
+    },
+    "schemas": {
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {},
+              "correlationId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded",
+              "down"
+            ]
+          },
+          "checks": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ok",
+                    "degraded",
+                    "down"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "version": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "checks",
+          "version",
+          "timestamp"
+        ],
+        "additionalProperties": false
+      },
+      "FeatureFlags": {
+        "type": "object",
+        "properties": {
+          "graphEnabled": {
+            "type": "boolean"
+          },
+          "embeddingsEnabled": {
+            "type": "boolean"
+          },
+          "llmProvider": {
+            "type": "string"
+          },
+          "llmModel": {
+            "type": "string"
+          },
+          "llmFastModel": {
+            "type": "string"
+          },
+          "embeddingModel": {
+            "type": "string"
+          },
+          "authMode": {
+            "type": "string",
+            "enum": [
+              "dev",
+              "aad"
+            ]
+          },
+          "precomputeEnabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "dailyBriefEnabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "organizationName": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "graphEnabled",
+          "embeddingsEnabled",
+          "llmProvider",
+          "llmModel",
+          "authMode",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "SystemStatus": {
+        "type": "object",
+        "properties": {
+          "health": {
+            "$ref": "#/components/schemas/Health"
+          },
+          "features": {
+            "$ref": "#/components/schemas/FeatureFlags"
+          },
+          "llmQueue": {
+            "type": "object",
+            "properties": {
+              "pending": {
+                "type": "integer"
+              },
+              "running": {
+                "type": "integer"
+              },
+              "concurrency": {
+                "type": "integer"
+              },
+              "avgLatencyMs": {
+                "type": "number"
+              },
+              "circuitOpen": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "pending",
+              "running",
+              "concurrency",
+              "circuitOpen"
+            ],
+            "additionalProperties": false
+          },
+          "cache": {
+            "type": "object",
+            "properties": {
+              "analysisHits": {
+                "type": "integer"
+              },
+              "analysisMisses": {
+                "type": "integer"
+              },
+              "embeddingHits": {
+                "type": "integer"
+              },
+              "embeddingMisses": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "analysisHits",
+              "analysisMisses",
+              "embeddingHits",
+              "embeddingMisses"
+            ],
+            "additionalProperties": false
+          },
+          "sync": {
+            "$ref": "#/components/schemas/MailboxSyncStatus"
+          },
+          "uptimeSeconds": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "health",
+          "features",
+          "llmQueue",
+          "cache",
+          "uptimeSeconds"
+        ],
+        "additionalProperties": false
+      },
+      "UserIdentity": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "user",
+                "compliance",
+                "admin"
+              ]
+            },
+            "default": [
+              "user"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "AnalyzeEmailRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "conversationId": {
+                "type": "string"
+              },
+              "internetMessageId": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string",
+                "default": ""
+              },
+              "from": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "address"
+                ],
+                "additionalProperties": false
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email/properties/from"
+                },
+                "default": []
+              },
+              "cc": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email/properties/from"
+                },
+                "default": []
+              },
+              "bcc": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email/properties/from"
+                },
+                "default": []
+              },
+              "receivedAt": {
+                "type": "string"
+              },
+              "sentAt": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string",
+                "default": ""
+              },
+              "bodyPreview": {
+                "type": "string"
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "contentType": {
+                      "type": "string"
+                    },
+                    "isInline": {
+                      "type": "boolean"
+                    },
+                    "textContent": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "default": []
+              },
+              "categories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "importance": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "normal",
+                  "high"
+                ]
+              },
+              "isRead": {
+                "type": "boolean"
+              },
+              "folder": {
+                "type": "string"
+              },
+              "webLink": {
+                "type": "string"
+              },
+              "sensitivityLabel": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "fr",
+              "en"
+            ]
+          },
+          "includeThread": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "EmailAnalysis": {
+        "type": "object",
+        "properties": {
+          "emailId": {
+            "type": "string"
+          },
+          "language": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/language"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pendingTasks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "risks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high"
+                  ]
+                }
+              },
+              "required": [
+                "code",
+                "title",
+                "severity"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "suggestedActions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "draft_reply",
+                    "create_reminder",
+                    "create_task",
+                    "categorize",
+                    "archive",
+                    "move_to_folder",
+                    "flag",
+                    "apply_label",
+                    "notify",
+                    "request_document",
+                    "escalate_compliance",
+                    "classify_email",
+                    "remove_attachment",
+                    "request_approval"
+                  ]
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "default": {}
+                }
+              },
+              "required": [
+                "type",
+                "title",
+                "description"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "quickReplies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 4,
+            "default": []
+          },
+          "classification": {
+            "type": "object",
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "category",
+              "confidence"
+            ],
+            "additionalProperties": false
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+          },
+          "phishing": {
+            "type": "object",
+            "properties": {
+              "score": {
+                "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+              },
+              "verdict": {
+                "type": "string",
+                "enum": [
+                  "clean",
+                  "suspicious",
+                  "likely_phishing"
+                ]
+              },
+              "indicators": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "score",
+              "verdict",
+              "indicators"
+            ],
+            "additionalProperties": false
+          },
+          "auditId": {
+            "type": "string"
+          },
+          "generatedAt": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "llm",
+              "cache",
+              "precomputed",
+              "heuristic"
+            ]
+          },
+          "triage": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "conversation",
+                  "notification",
+                  "newsletter",
+                  "out_of_office",
+                  "automatic",
+                  "calendar",
+                  "trivial"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "emailId",
+          "language",
+          "summary",
+          "decisions",
+          "pendingTasks",
+          "risks",
+          "suggestedActions",
+          "confidence",
+          "auditId",
+          "generatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "AnalyzeThreadRequest": {
+        "type": "object",
+        "properties": {
+          "thread": {
+            "type": "object",
+            "properties": {
+              "conversationId": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string",
+                "default": ""
+              },
+              "messages": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email"
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "conversationId",
+              "messages"
+            ],
+            "additionalProperties": false
+          },
+          "language": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/language"
+          }
+        },
+        "required": [
+          "thread"
+        ],
+        "additionalProperties": false
+      },
+      "ThreadSynthesis": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string"
+          },
+          "language": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/language"
+          },
+          "executiveSummary": {
+            "type": "string"
+          },
+          "missingDocuments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "requestedOn": {
+                  "type": "string"
+                },
+                "requestedFrom": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "openTasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high"
+                  ],
+                  "default": "medium"
+                },
+                "dueDate": {
+                  "type": "string"
+                },
+                "done": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "critical": {
+                  "type": "boolean",
+                  "default": false
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "deadlines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "date": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "atRisk": {
+                  "type": "boolean",
+                  "default": false
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "risks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailAnalysis/properties/risks/items"
+            }
+          },
+          "recommendedActions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailAnalysis/properties/suggestedActions/items"
+            }
+          },
+          "recommendedNextStep": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "action": {
+                "$ref": "#/components/schemas/EmailAnalysis/properties/suggestedActions/items"
+              }
+            },
+            "required": [
+              "title",
+              "description"
+            ],
+            "additionalProperties": false
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "emailId": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "date": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "emailId",
+                "subject"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+          },
+          "auditId": {
+            "type": "string"
+          },
+          "generatedAt": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversationId",
+          "language",
+          "executiveSummary",
+          "missingDocuments",
+          "decisions",
+          "openTasks",
+          "deadlines",
+          "risks",
+          "recommendedActions",
+          "sources",
+          "confidence",
+          "auditId",
+          "generatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "DraftReplyRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/AnalyzeThreadRequest/properties/thread"
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "decline",
+              "acknowledge",
+              "follow_up",
+              "request_info",
+              "custom"
+            ],
+            "default": "custom"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "tone": {
+            "type": "string",
+            "enum": [
+              "formal",
+              "neutral",
+              "friendly"
+            ],
+            "default": "formal"
+          },
+          "language": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/language"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "DraftReply": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "language": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/language"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+          },
+          "auditId": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "body",
+          "language",
+          "confidence",
+          "auditId"
+        ],
+        "additionalProperties": false
+      },
+      "DailyBriefRequest": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "language": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/language"
+          },
+          "refresh": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "DailyBrief": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "language": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/language"
+          },
+          "headline": {
+            "type": "string"
+          },
+          "highlights": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "priorityEmails": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "emailId": {
+                  "type": "string"
+                },
+                "conversationId": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "receivedAt": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "priority": {
+                  "$ref": "#/components/schemas/ThreadSynthesis/properties/openTasks/items/properties/priority"
+                },
+                "riskLevel": {
+                  "$ref": "#/components/schemas/EmailAnalysis/properties/risks/items/properties/severity"
+                },
+                "webLink": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "emailId",
+                "subject",
+                "reason",
+                "priority"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "openTasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadSynthesis/properties/openTasks/items"
+            }
+          },
+          "deadlines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadSynthesis/properties/deadlines/items"
+            }
+          },
+          "alerts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailAnalysis/properties/risks/items"
+            }
+          },
+          "stats": {
+            "type": "object",
+            "properties": {
+              "newEmails": {
+                "type": "integer"
+              },
+              "analysed": {
+                "type": "integer"
+              },
+              "awaitingReply": {
+                "type": "integer"
+              },
+              "phishingSuspected": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "newEmails",
+              "analysed",
+              "awaitingReply",
+              "phishingSuspected"
+            ],
+            "additionalProperties": false
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "llm",
+              "precomputed",
+              "heuristic"
+            ]
+          },
+          "generatedAt": {
+            "type": "string"
+          },
+          "auditId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "language",
+          "headline",
+          "highlights",
+          "priorityEmails",
+          "openTasks",
+          "deadlines",
+          "alerts",
+          "stats",
+          "confidence",
+          "source",
+          "generatedAt",
+          "auditId"
+        ],
+        "additionalProperties": false
+      },
+      "MailboxSyncStatus": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "syncing",
+              "error",
+              "disabled"
+            ]
+          },
+          "lastSyncAt": {
+            "type": "string"
+          },
+          "nextSyncAt": {
+            "type": "string"
+          },
+          "indexedEmails": {
+            "type": "integer"
+          },
+          "precomputedAnalyses": {
+            "type": "integer"
+          },
+          "pending": {
+            "type": "integer"
+          },
+          "lastError": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "state",
+          "indexedEmails",
+          "precomputedAnalyses",
+          "pending"
+        ],
+        "additionalProperties": false
+      },
+      "SearchRequest": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10
+          },
+          "conversationId": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "SearchResponse": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "emailId": {
+                  "type": "string"
+                },
+                "conversationId": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "date": {
+                  "type": "string"
+                },
+                "relevance": {
+                  "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+                },
+                "excerpt": {
+                  "type": "string"
+                },
+                "webLink": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "emailId",
+                "subject",
+                "relevance",
+                "excerpt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "hybrid",
+              "lexical",
+              "vector"
+            ]
+          },
+          "auditId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "results",
+          "mode",
+          "auditId"
+        ],
+        "additionalProperties": false
+      },
+      "ChatRequest": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "currentEmail": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email"
+          },
+          "scope": {
+            "type": "object",
+            "properties": {
+              "conversationId": {
+                "type": "string"
+              },
+              "folder": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "default": {}
+          },
+          "language": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/language"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "ChatResponse": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "answer": {
+            "type": "string"
+          },
+          "headline": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchResponse/properties/results/items"
+            }
+          },
+          "evidence": {
+            "type": "object",
+            "properties": {
+              "emailId": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              },
+              "quote": {
+                "type": "string"
+              },
+              "author": {
+                "type": "string"
+              },
+              "date": {
+                "type": "string"
+              },
+              "webLink": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "emailId",
+              "subject",
+              "quote"
+            ],
+            "additionalProperties": false
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+          },
+          "auditId": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "answer",
+          "sources",
+          "confidence",
+          "auditId"
+        ],
+        "additionalProperties": false
+      },
+      "IndexEmailsRequest": {
+        "type": "object",
+        "properties": {
+          "emails": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email"
+            },
+            "minItems": 1,
+            "maxItems": 200
+          }
+        },
+        "required": [
+          "emails"
+        ],
+        "additionalProperties": false
+      },
+      "IndexEmailsResponse": {
+        "type": "object",
+        "properties": {
+          "indexed": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "integer"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "hybrid",
+              "lexical"
+            ]
+          }
+        },
+        "required": [
+          "indexed",
+          "skipped",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "ProposeActionsRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/AnalyzeThreadRequest/properties/thread"
+          },
+          "analysisAuditId": {
+            "type": "string"
+          },
+          "language": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/language"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ActionProposal": {
+        "type": "object",
+        "properties": {
+          "proposalId": {
+            "type": "string"
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "$ref": "#/components/schemas/EmailAnalysis/properties/suggestedActions/items/properties/type"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "explanation": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "email",
+                        "attachment",
+                        "rule",
+                        "thread"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "emailId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "label"
+                  ],
+                  "additionalProperties": false
+                },
+                "riskLevel": {
+                  "$ref": "#/components/schemas/EmailAnalysis/properties/risks/items/properties/severity"
+                },
+                "requiresApproval": {
+                  "type": "boolean"
+                },
+                "requiresComplianceApproval": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "executionTarget": {
+                  "type": "string",
+                  "enum": [
+                    "client",
+                    "server",
+                    "none"
+                  ]
+                },
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "default": {}
+                },
+                "selectedByDefault": {
+                  "type": "boolean",
+                  "default": true
+                }
+              },
+              "required": [
+                "id",
+                "type",
+                "title",
+                "explanation",
+                "source",
+                "riskLevel",
+                "requiresApproval",
+                "executionTarget"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "humanValidationRequired": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "auditId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposalId",
+          "actions",
+          "humanValidationRequired",
+          "auditId",
+          "createdAt",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "ApproveActionsRequest": {
+        "type": "object",
+        "properties": {
+          "proposalId": {
+            "type": "string"
+          },
+          "actionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "comment": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposalId",
+          "actionIds"
+        ],
+        "additionalProperties": false
+      },
+      "ApproveActionsResponse": {
+        "type": "object",
+        "properties": {
+          "proposalId": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "actionId": {
+                  "type": "string"
+                },
+                "type": {
+                  "$ref": "#/components/schemas/EmailAnalysis/properties/suggestedActions/items/properties/type"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "executed",
+                    "pending_client",
+                    "pending_compliance",
+                    "rejected",
+                    "failed"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "clientInstruction": {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "type": "string"
+                    },
+                    "parameters": {
+                      "type": "object",
+                      "additionalProperties": {},
+                      "default": {}
+                    }
+                  },
+                  "required": [
+                    "operation"
+                  ],
+                  "additionalProperties": false
+                },
+                "auditId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "actionId",
+                "type",
+                "status",
+                "auditId"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "proposalId",
+          "results"
+        ],
+        "additionalProperties": false
+      },
+      "ComplianceCheckRequest": {
+        "type": "object",
+        "properties": {
+          "draft": {
+            "type": "object",
+            "properties": {
+              "draftId": {
+                "type": "string"
+              },
+              "from": {
+                "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email/properties/from"
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email/properties/from"
+                },
+                "default": []
+              },
+              "cc": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email/properties/from"
+                },
+                "default": []
+              },
+              "bcc": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email/properties/from"
+                },
+                "default": []
+              },
+              "subject": {
+                "type": "string",
+                "default": ""
+              },
+              "body": {
+                "type": "string",
+                "default": ""
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email/properties/attachments/items"
+                },
+                "default": []
+              },
+              "sensitivityLabel": {
+                "type": "string"
+              },
+              "isReplyAll": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "language": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/language"
+          }
+        },
+        "required": [
+          "draft"
+        ],
+        "additionalProperties": false
+      },
+      "ComplianceCheckResponse": {
+        "type": "object",
+        "properties": {
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "external_recipient",
+                    "confidential_attachment",
+                    "missing_classification_label",
+                    "sensitive_client_information",
+                    "policy_violation",
+                    "suspicious_recipient_domain",
+                    "large_distribution",
+                    "reply_all_external"
+                  ]
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "severity": {
+                  "$ref": "#/components/schemas/EmailAnalysis/properties/risks/items/properties/severity"
+                },
+                "subject": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "code",
+                "title",
+                "description",
+                "severity"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "recommendedActions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailAnalysis/properties/suggestedActions/items"
+            }
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "warn",
+              "block"
+            ]
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+          },
+          "auditId": {
+            "type": "string"
+          },
+          "checkedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "issues",
+          "recommendedActions",
+          "verdict",
+          "confidence",
+          "auditId",
+          "checkedAt"
+        ],
+        "additionalProperties": false
+      },
+      "PhishingCheckRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/email"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "PhishingCheckResponse": {
+        "type": "object",
+        "properties": {
+          "score": {
+            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "clean",
+              "suspicious",
+              "likely_phishing"
+            ]
+          },
+          "indicators": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "weight": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "description",
+                "weight"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "auditId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "score",
+          "verdict",
+          "indicators",
+          "auditId"
+        ],
+        "additionalProperties": false
+      },
+      "Escalation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "requestedBy": {
+            "type": "string"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "decidedBy": {
+            "type": "string"
+          },
+          "decidedAt": {
+            "type": "string"
+          },
+          "decisionComment": {
+            "type": "string"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComplianceCheckResponse/properties/issues/items"
+            },
+            "default": []
+          },
+          "draft": {
+            "$ref": "#/components/schemas/ComplianceCheckRequest/properties/draft"
+          },
+          "actionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "requestedBy",
+          "requestedAt",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "AutomationList": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "userId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "trigger": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "conditions": {
+                  "type": "object",
+                  "properties": {
+                    "fromAddress": {
+                      "type": "string"
+                    },
+                    "fromDomain": {
+                      "type": "string"
+                    },
+                    "subjectContains": {
+                      "type": "string"
+                    },
+                    "hasAttachments": {
+                      "type": "boolean"
+                    },
+                    "attachmentTypes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "description",
+                "conditions"
+              ],
+              "additionalProperties": false
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "order": {
+                    "type": "integer"
+                  },
+                  "type": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/EmailAnalysis/properties/suggestedActions/items/properties/type"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "detect_attachment",
+                          "save_attachment"
+                        ]
+                      }
+                    ]
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "parameters": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "default": {}
+                  }
+                },
+                "required": [
+                  "order",
+                  "type",
+                  "title",
+                  "description"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "proposed",
+                "simulated",
+                "approved",
+                "active",
+                "rejected",
+                "paused"
+              ]
+            },
+            "stats": {
+              "type": "object",
+              "properties": {
+                "occurrences": {
+                  "type": "integer"
+                },
+                "perWeek": {
+                  "type": "number"
+                },
+                "estimatedMinutesPerOccurrence": {
+                  "type": "number"
+                },
+                "estimatedMinutesSavedPerWeek": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "occurrences",
+                "perWeek",
+                "estimatedMinutesPerOccurrence",
+                "estimatedMinutesSavedPerWeek"
+              ],
+              "additionalProperties": false
+            },
+            "confidence": {
+              "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+            },
+            "riskLevel": {
+              "$ref": "#/components/schemas/EmailAnalysis/properties/risks/items/properties/severity"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "lastSimulation": {
+              "type": "object",
+              "properties": {
+                "runAt": {
+                  "type": "string"
+                },
+                "sampleSize": {
+                  "type": "integer"
+                },
+                "checks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "passed": {
+                        "type": "boolean"
+                      },
+                      "detail": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "passed"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "results": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "emailId": {
+                        "type": "string"
+                      },
+                      "subject": {
+                        "type": "string"
+                      },
+                      "wouldApply": {
+                        "type": "boolean"
+                      },
+                      "stepsPreview": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "emailId",
+                      "subject",
+                      "wouldApply",
+                      "stepsPreview"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "runAt",
+                "sampleSize",
+                "checks",
+                "results"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "description",
+            "trigger",
+            "steps",
+            "status",
+            "stats",
+            "confidence",
+            "riskLevel",
+            "createdAt",
+            "updatedAt"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "AuditPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "timestamp": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "email"
+                  ],
+                  "additionalProperties": false
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "summary_generated",
+                    "thread_synthesis_generated",
+                    "draft_reply_generated",
+                    "search_executed",
+                    "chat_answered",
+                    "emails_indexed",
+                    "actions_proposed",
+                    "action_approved",
+                    "action_rejected",
+                    "action_executed",
+                    "action_failed",
+                    "compliance_check",
+                    "compliance_alert",
+                    "compliance_escalated",
+                    "compliance_decision",
+                    "phishing_check",
+                    "automation_proposed",
+                    "automation_simulated",
+                    "automation_approved",
+                    "automation_rejected",
+                    "automation_executed",
+                    "label_applied",
+                    "policy_updated",
+                    "error"
+                  ]
+                },
+                "source": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "emailId": {
+                      "type": "string"
+                    },
+                    "conversationId": {
+                      "type": "string"
+                    },
+                    "counterpart": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label"
+                  ],
+                  "additionalProperties": false
+                },
+                "riskLevel": {
+                  "$ref": "#/components/schemas/EmailAnalysis/properties/risks/items/properties/severity"
+                },
+                "approvalStatus": {
+                  "type": "string",
+                  "enum": [
+                    "auto_approved",
+                    "approved",
+                    "rejected",
+                    "escalated",
+                    "pending",
+                    "n/a"
+                  ],
+                  "default": "n/a"
+                },
+                "approvedBy": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "latencyMs": {
+                  "type": "number"
+                },
+                "details": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "default": {}
+                },
+                "correlationId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "timestamp",
+                "user",
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "pageSize": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "additionalProperties": false
+      },
+      "AuditStats": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "additionalProperties": false
+          },
+          "kpis": {
+            "type": "object",
+            "properties": {
+              "emailsSummarized": {
+                "type": "integer"
+              },
+              "draftsGenerated": {
+                "type": "integer"
+              },
+              "automationsProposed": {
+                "type": "integer"
+              },
+              "automationsApproved": {
+                "type": "integer"
+              },
+              "complianceAlerts": {
+                "type": "integer"
+              },
+              "errorsAvoided": {
+                "type": "integer"
+              },
+              "deltas": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "default": {}
+              }
+            },
+            "required": [
+              "emailsSummarized",
+              "draftsGenerated",
+              "automationsProposed",
+              "automationsApproved",
+              "complianceAlerts",
+              "errorsAvoided"
+            ],
+            "additionalProperties": false
+          },
+          "activityOverTime": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": {
+                  "type": "string"
+                },
+                "summaries": {
+                  "type": "integer"
+                },
+                "drafts": {
+                  "type": "integer"
+                },
+                "automations": {
+                  "type": "integer"
+                },
+                "complianceAlerts": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "date",
+                "summaries",
+                "drafts",
+                "automations",
+                "complianceAlerts"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "actionsByType": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                },
+                "share": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "type",
+                "count",
+                "share"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "complianceAlertsByCategory": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "category": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                },
+                "share": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "category",
+                "count",
+                "share"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "automationsApprovalRate": {
+            "type": "object",
+            "properties": {
+              "current": {
+                "type": "number"
+              },
+              "previous": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "current",
+              "previous"
+            ],
+            "additionalProperties": false
+          },
+          "topUsers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "userId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "actions": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "userId",
+                "displayName",
+                "actions"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "totalActions": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "period",
+          "kpis",
+          "activityOverTime",
+          "actionsByType",
+          "complianceAlertsByCategory",
+          "automationsApprovalRate",
+          "topUsers",
+          "totalActions"
+        ],
+        "additionalProperties": false
+      },
+      "Policy": {
+        "type": "object",
+        "properties": {
+          "internalDomains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidentialPatterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requiredClassificationLabels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sensitiveDataPatterns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "pattern": {
+                  "type": "string"
+                },
+                "severity": {
+                  "$ref": "#/components/schemas/EmailAnalysis/properties/risks/items/properties/severity"
+                }
+              },
+              "required": [
+                "name",
+                "pattern",
+                "severity"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "largeDistributionThreshold": {
+            "type": "integer",
+            "default": 10
+          },
+          "complianceApprovalFor": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailAnalysis/properties/suggestedActions/items/properties/type"
+            },
+            "default": []
+          },
+          "approvalRequiredFrom": {
+            "$ref": "#/components/schemas/EmailAnalysis/properties/risks/items/properties/severity",
+            "default": "low"
+          },
+          "blockOnHighRisk": {
+            "type": "boolean",
+            "default": false
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "internalDomains",
+          "confidentialPatterns",
+          "requiredClassificationLabels",
+          "sensitiveDataPatterns"
+        ],
+        "additionalProperties": false
+      },
+      "FeedbackRequest": {
+        "type": "object",
+        "properties": {
+          "auditId": {
+            "type": "string"
+          },
+          "rating": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ]
+          },
+          "comment": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "auditId",
+          "rating"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "parameters": {
+      "AcceptLanguage": {
+        "name": "accept-language",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "fr"
+        },
+        "description": "Response language (fr|en)."
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    },
+    {
+      "devHeaders": []
+    }
+  ],
+  "paths": {
+    "/live": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "getLive",
+        "summary": "Liveness probe",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Process is up"
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "getReady",
+        "summary": "Readiness probe",
+        "description": "200 when the database is reachable and migrations are applied. An LLM or Graph outage does not make the service unready.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Ready"
+          },
+          "503": {
+            "description": "Not ready (database unreachable or migrations pending)"
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "servers": [
+        {
+          "url": "/",
+          "description": "Root (no API prefix)"
+        }
+      ],
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "getMetrics",
+        "summary": "Prometheus metrics (served at `/metrics`, outside the API prefix)",
+        "description": "Requires `Authorization: Bearer <METRICS_TOKEN>` when `METRICS_TOKEN` is set.",
+        "responses": {
+          "200": {
+            "description": "Prometheus exposition format",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid metrics token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "getHealth",
+        "summary": "Detailed health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/config/features": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "getFeatures",
+        "summary": "Feature flags",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureFlags"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "getMe",
+        "summary": "Caller identity",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserIdentity"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analyze/email": {
+      "post": {
+        "tags": [
+          "analysis"
+        ],
+        "operationId": "analyzeEmail",
+        "summary": "Analyse one email",
+        "description": "Triage runs first: non-conversation emails are answered from heuristics with `source: \"heuristic\"` and no model call. Identical content already analysed returns `source: \"cache\"`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeEmailRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailAnalysis"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The model is unavailable and no heuristic answer was possible (`llm_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analyze/email/{emailId}": {
+      "get": {
+        "tags": [
+          "analysis"
+        ],
+        "operationId": "getAnalysisByEmail",
+        "summary": "Precomputed / cached analysis of a known email",
+        "description": "Never calls the model. Returns `source: \"precomputed\"` or `\"cache\"`. **404 means \"not computed yet\"** — the caller should POST `/analyze/email` with the content it already has.",
+        "parameters": [
+          {
+            "name": "emailId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailAnalysis"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No analysis available for this email yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analyze/thread": {
+      "post": {
+        "tags": [
+          "analysis"
+        ],
+        "operationId": "analyzeThread",
+        "summary": "Synthesise a conversation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeThreadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadSynthesis"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/draft/reply": {
+      "post": {
+        "tags": [
+          "analysis"
+        ],
+        "operationId": "draftReply",
+        "summary": "Generate a reply draft (never sent)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftReplyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftReply"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/brief/daily": {
+      "get": {
+        "tags": [
+          "analysis"
+        ],
+        "operationId": "getDailyBrief",
+        "summary": "Stored daily brief",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "2026-09-15"
+            },
+            "description": "ISO date in the user's timezone (default: today)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyBrief"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No brief generated for that date",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "analysis"
+        ],
+        "operationId": "generateDailyBrief",
+        "summary": "Generate the daily brief on demand",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DailyBriefRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyBrief"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailbox/sync": {
+      "get": {
+        "tags": [
+          "analysis"
+        ],
+        "operationId": "getMailboxSync",
+        "summary": "Precomputation status",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Admin only: another user's status."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailboxSyncStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "analysis"
+        ],
+        "operationId": "triggerMailboxSync",
+        "summary": "Trigger a sync now",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Admin only: sync another user."
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Sync executed; the body also carries a `result` summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailboxSyncStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A sync is already running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Precomputation is disabled (`graph_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "operationId": "search",
+        "summary": "Hybrid retrieval",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "search"
+        ],
+        "operationId": "searchGet",
+        "summary": "Hybrid retrieval (query string)",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "operationId": "chat",
+        "summary": "Answer a question over the mailbox",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/index/emails": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "operationId": "indexEmails",
+        "summary": "Index emails for retrieval",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IndexEmailsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexEmailsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/actions/propose": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "operationId": "proposeActions",
+        "summary": "Propose actions (human validation required)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposeActionsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionProposal"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/actions/approve": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "operationId": "approveActions",
+        "summary": "Approve and execute selected actions",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Retry-safe key kept for `IDEMPOTENCY_TTL_HOURS` (default 24 h). Replaying it with a different body returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveActionsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproveActionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Proposal expired, or Idempotency-Key reused with a different body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compliance/check": {
+      "post": {
+        "tags": [
+          "compliance"
+        ],
+        "operationId": "complianceCheck",
+        "summary": "Pre-send compliance check",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComplianceCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceCheckResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compliance/phishing": {
+      "post": {
+        "tags": [
+          "compliance"
+        ],
+        "operationId": "phishingCheck",
+        "summary": "Inbound phishing screening (heuristic, no model call)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhishingCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhishingCheckResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compliance/escalations": {
+      "get": {
+        "tags": [
+          "compliance"
+        ],
+        "operationId": "listEscalations",
+        "summary": "List compliance escalations",
+        "responses": {
+          "200": {
+            "description": "Escalations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Escalation"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "compliance"
+        ],
+        "operationId": "createEscalation",
+        "summary": "Escalate to compliance",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Escalation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/automations": {
+      "get": {
+        "tags": [
+          "automations"
+        ],
+        "operationId": "listAutomations",
+        "summary": "List detected automations",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "operationId": "queryAudit",
+        "summary": "Query the audit trail",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/stats": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "operationId": "auditStats",
+        "summary": "Audit KPIs",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditStats"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/export": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "operationId": "auditExport",
+        "summary": "Stream the audit trail as CSV",
+        "description": "Streamed with keyset pagination, so a multi-year export never buffers in memory.",
+        "responses": {
+          "200": {
+            "description": "CSV stream",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feedback": {
+      "post": {
+        "tags": [
+          "audit"
+        ],
+        "operationId": "submitFeedback",
+        "summary": "Thumbs up/down on an AI answer",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Recorded"
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/policy": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "getPolicy",
+        "summary": "Current policy",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Policy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "putPolicy",
+        "summary": "Replace the policy",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Policy"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Policy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/system": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "getSystemStatus",
+        "summary": "Runtime status (queue, circuit, caches, sync)",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Mailbox whose sync status is included."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

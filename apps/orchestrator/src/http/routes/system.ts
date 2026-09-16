@@ -1,0 +1,127 @@
+import type { FastifyInstance } from "fastify";
+import { FeatureFlagsSchema, HealthSchema, Routes, SystemStatusSchema, UserIdentitySchema } from "@oao/shared";
+import { APP_VERSION } from "../../config.js";
+import type { Container } from "../../container.js";
+import { AppError } from "../../errors.js";
+
+/**
+ * System endpoints.
+ *
+ * Probe semantics (Kubernetes):
+ *  - `GET /api/v1/live`  — liveness: 200 as soon as the process is up. It never
+ *    touches a dependency, so a slow database can never trigger a pod restart.
+ *  - `GET /api/v1/ready` — readiness: database reachable **and** migrations
+ *    applied. An LLM or Graph outage does **not** make the pod unready: the
+ *    service still answers with heuristics, and removing it from the Service
+ *    would turn a degradation into an outage.
+ *  - `GET /api/v1/health` — unchanged detailed view (used by the runbook).
+ */
+export async function systemRoutes(app: FastifyInstance, c: Container) {
+  app.get(Routes.live, async (_req, reply) => reply.status(200).send({ status: "ok", version: APP_VERSION, role: c.cfg.ROLE, uptimeSeconds: Math.round((Date.now() - c.startedAt) / 1000) }));
+
+  app.get(Routes.ready, async (_req, reply) => {
+    const r = await c.ready();
+    c.metrics.dbUp.set(r.ok ? 1 : 0);
+    return reply.status(r.ok ? 200 : 503).send({ status: r.ok ? "ok" : "unready", detail: r.detail, version: APP_VERSION });
+  });
+
+  app.get(Routes.health, async () => {
+    const [db, llm] = await Promise.all([c.deps.repos.ping(2000), c.deps.llm.ping(2000)]);
+    const queue = c.llmQueue?.stats;
+    const checks = {
+      database: { status: db.ok ? "ok" : "down", detail: db.detail },
+      llm: { status: llm.ok && !queue?.circuitOpen ? "ok" : "degraded", detail: queue?.circuitOpen ? `circuit open after ${queue.consecutiveFailures} failures` : llm.detail },
+      graph: { status: c.cfg.GRAPH_ENABLED ? "ok" : "degraded", detail: c.cfg.GRAPH_ENABLED ? `enabled (${c.cfg.GRAPH_AUTH_MODE})` : "disabled (GRAPH_ENABLED=false) — client fallbacks" },
+      workers: {
+        status: c.cfg.WORKERS_ENABLED && c.cfg.ROLE !== "api" ? "ok" : "degraded",
+        detail: c.cfg.ROLE === "api" ? "API-only role (ROLE=api)" : c.cfg.WORKERS_ENABLED ? `scheduler enabled (precompute=${c.cfg.PRECOMPUTE_ENABLED})` : "WORKERS_ENABLED=false",
+      },
+    } as const;
+    const status = !db.ok ? "down" : !llm.ok || queue?.circuitOpen ? "degraded" : "ok";
+    return HealthSchema.parse({ status, checks, version: APP_VERSION, timestamp: new Date().toISOString() });
+  });
+
+  app.get(Routes.features, async () => FeatureFlagsSchema.parse(features(c)));
+
+  app.get(Routes.me, async (req) => UserIdentitySchema.parse({ id: req.user.id, email: req.user.email, displayName: req.user.displayName, tenantId: req.user.tenantId, roles: req.user.roles }));
+
+  /**
+   * `GET /metrics` — Prometheus exposition. Outside `/api/v1` on purpose so a
+   * NetworkPolicy / ServiceMonitor can target it separately. Protected by
+   * `METRICS_TOKEN` when set (constant-time compare).
+   */
+  app.get(Routes.metrics, async (req, reply) => {
+    if (!c.cfg.METRICS_ENABLED) throw AppError.notFound("Metrics endpoint");
+    if (c.cfg.METRICS_TOKEN) {
+      const auth = req.headers.authorization ?? "";
+      const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : (req.headers["x-metrics-token"] as string | undefined);
+      if (!bearer || !timingSafeEqual(bearer, c.cfg.METRICS_TOKEN)) throw AppError.unauthorized("Invalid metrics token");
+    }
+    // Gauges are sampled at scrape time, which is the cheapest place to do it.
+    const queue = c.llmQueue?.stats;
+    if (queue) {
+      c.metrics.llmQueueDepth.set({ lane: "pending" }, queue.pending);
+      c.metrics.llmQueueDepth.set({ lane: "running" }, queue.running);
+      c.metrics.llmQueueRunning.set(queue.running);
+      c.metrics.llmCircuitOpen.set(queue.circuitOpen ? 1 : 0);
+    }
+    const { contentType, body } = await c.metrics.render();
+    return reply.header("content-type", contentType).send(body);
+  });
+}
+
+/** Feature flags shared by `/config/features` and `/admin/system`. */
+export function features(c: Container) {
+  return {
+    graphEnabled: c.cfg.GRAPH_ENABLED,
+    embeddingsEnabled: c.services.indexEmails.embeddingsAvailable,
+    llmProvider: c.deps.llm.name,
+    llmModel: c.deps.llm.model,
+    llmFastModel: c.cfg.LLM_FAST_MODEL,
+    embeddingModel: c.deps.embeddings?.model,
+    authMode: c.cfg.AUTH_MODE,
+    precomputeEnabled: c.services.mailboxSync.enabled,
+    dailyBriefEnabled: c.cfg.DAILY_BRIEF_ENABLED,
+    organizationName: c.cfg.ORGANIZATION_NAME,
+    version: APP_VERSION,
+  };
+}
+
+/** Admin: full runtime status (queues, caches, workers, sync). */
+export async function systemStatus(c: Container, userId?: string) {
+  const [db, llm] = await Promise.all([c.deps.repos.ping(2000), c.deps.llm.ping(2000)]);
+  const queue = c.llmQueue?.stats;
+  const cache = c.services.cache.stats;
+  const embedding = c.embeddingCache?.stats ?? { hits: 0, misses: 0 };
+  const sync = userId ? await c.services.mailboxSync.status(userId).catch(() => undefined) : undefined;
+  return SystemStatusSchema.parse({
+    health: {
+      status: !db.ok ? "down" : !llm.ok || queue?.circuitOpen ? "degraded" : "ok",
+      checks: {
+        database: { status: db.ok ? "ok" : "down", detail: db.detail },
+        llm: { status: llm.ok && !queue?.circuitOpen ? "ok" : "degraded", detail: queue?.circuitOpen ? "circuit open" : llm.detail },
+      },
+      version: APP_VERSION,
+      timestamp: new Date().toISOString(),
+    },
+    features: features(c),
+    llmQueue: {
+      pending: queue?.pending ?? 0,
+      running: queue?.running ?? 0,
+      concurrency: queue?.concurrency ?? c.cfg.LLM_CONCURRENCY,
+      avgLatencyMs: queue?.avgLatencyMs,
+      circuitOpen: queue?.circuitOpen ?? false,
+    },
+    cache: { analysisHits: cache.hits, analysisMisses: cache.misses, embeddingHits: embedding.hits, embeddingMisses: embedding.misses },
+    sync,
+    uptimeSeconds: Math.round((Date.now() - c.startedAt) / 1000),
+  });
+}
+
+/** Length-independent comparison so the metrics token cannot be probed byte by byte. */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}

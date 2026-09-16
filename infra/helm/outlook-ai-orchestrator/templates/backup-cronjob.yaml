@@ -1,0 +1,165 @@
+{{- if .Values.postgres.backup.enabled }}
+{{- $fullname := include "oao.fullname" . -}}
+{{- $b := .Values.postgres.backup -}}
+{{- $extDb := include "oao.externalDbSecretName" . -}}
+{{- $dbSecret := ternary $extDb (include "oao.secretName" .) (ne $extDb "") -}}
+{{- $dbKey := ternary .Values.postgres.external.existingSecretKey "DATABASE_URL" (ne $extDb "") -}}
+# ---------------------------------------------------------------------------
+# Logical backup: pg_dump -Fc of the whole database, daily.
+#   destination=pvc -> a ReadWriteOnce volume in the cluster (restore with
+#                      pg_restore, see docs/OPERATIONS.md)
+#   destination=s3  -> an S3-compatible bucket (Nutanix Objects, MinIO)
+# A logical dump is NOT a substitute for storage-level snapshots on a
+# regulated workload: keep both (docs/OPERATIONS.md, DR/RPO/RTO).
+# ---------------------------------------------------------------------------
+{{- if and (eq $b.destination "pvc") (not $b.pvc.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullname }}-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "backup") | indent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $b.pvc.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $b.pvc.size | quote }}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $fullname }}-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "backup") | indent 4 }}
+spec:
+  schedule: {{ $b.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+{{ include "oao.selectorLabels" (list . "backup") | indent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ include "oao.serviceAccountName" . }}
+          automountServiceAccountToken: false
+          {{- include "oao.imagePullSecrets" . | nindent 10 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          {{- if eq $b.destination "s3" }}
+          initContainers:
+            - name: dump
+          {{- else }}
+          containers:
+            - name: dump
+          {{- end }}
+              image: {{ printf "%s:%s" $b.image.repository $b.image.tag | quote }}
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  set -eu
+                  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+                  OUT="/backup/oao-${STAMP}.dump"
+                  echo "==> pg_dump -> ${OUT}"
+                  pg_dump --format=custom --compress=6 --no-owner --no-acl \
+                    --file="${OUT}" "${DATABASE_URL}"
+                  ls -lh "${OUT}"
+                  {{- if eq $b.destination "pvc" }}
+                  echo "==> pruning dumps older than {{ $b.retentionDays }} days"
+                  find /backup -name 'oao-*.dump' -type f -mtime +{{ $b.retentionDays }} -print -delete
+                  {{- end }}
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $dbSecret }}
+                      key: {{ $dbKey }}
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              resources:
+{{ toYaml $b.resources | indent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          {{- if eq $b.destination "s3" }}
+          containers:
+            - name: upload
+              image: {{ printf "%s:%s" $b.s3.image.repository $b.s3.image.tag | quote }}
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  set -eu
+                  for f in /backup/oao-*.dump; do
+                    echo "==> uploading $(basename "$f")"
+                    aws --endpoint-url "${S3_ENDPOINT}" s3 cp "$f" \
+                      "s3://${S3_BUCKET}/${S3_PREFIX}/$(basename "$f")"
+                  done
+                  echo "==> pruning objects older than {{ $b.retentionDays }} days"
+                  CUTOFF="$(date -u -d '-{{ $b.retentionDays }} days' +%Y-%m-%d 2>/dev/null || date -u +%Y-%m-%d)"
+                  aws --endpoint-url "${S3_ENDPOINT}" s3 ls "s3://${S3_BUCKET}/${S3_PREFIX}/" \
+                    | awk -v c="${CUTOFF}" '$1 < c { print $4 }' \
+                    | while read -r key; do
+                        [ -n "${key}" ] || continue
+                        echo "    delete ${key}"
+                        aws --endpoint-url "${S3_ENDPOINT}" s3 rm "s3://${S3_BUCKET}/${S3_PREFIX}/${key}"
+                      done
+              env:
+                - name: S3_ENDPOINT
+                  value: {{ $b.s3.endpoint | quote }}
+                - name: S3_BUCKET
+                  value: {{ $b.s3.bucket | quote }}
+                - name: S3_PREFIX
+                  value: {{ $b.s3.prefix | quote }}
+                - name: AWS_DEFAULT_REGION
+                  value: {{ $b.s3.region | quote }}
+                - name: AWS_EC2_METADATA_DISABLED
+                  value: "true"
+                {{- if $b.s3.forcePathStyle }}
+                - name: AWS_S3_FORCE_PATH_STYLE
+                  value: "true"
+                {{- end }}
+              envFrom:
+                - secretRef:
+                    name: {{ $b.s3.existingSecret }}
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              resources:
+{{ toYaml $b.resources | indent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          {{- end }}
+          volumes:
+            - name: backup
+              {{- if eq $b.destination "s3" }}
+              emptyDir:
+                sizeLimit: 8Gi
+              {{- else }}
+              persistentVolumeClaim:
+                claimName: {{ $b.pvc.existingClaim | default (printf "%s-backup" $fullname) }}
+              {{- end }}
+{{- end }}

@@ -1,0 +1,697 @@
+# ===========================================================================
+#  Outlook AI Orchestrator — Helm values (documented reference)
+# ---------------------------------------------------------------------------
+#  This file is the *generic* default (works on any CNCF-conformant cluster).
+#  For Nutanix Kubernetes Platform use it together with values-nkp.yaml:
+#
+#     helm upgrade --install oao infra/helm/outlook-ai-orchestrator \
+#       -n oao --create-namespace \
+#       -f infra/helm/outlook-ai-orchestrator/values-nkp.yaml \
+#       -f my-secrets.yaml
+#
+#  Values an operator MUST set before a production install are marked
+#  >>> REQUIRED <<<.
+# ===========================================================================
+
+## -- Name overrides -------------------------------------------------------
+nameOverride: ""
+fullnameOverride: ""
+
+## -- Labels/annotations added to every object produced by this chart -------
+commonLabels: {}
+commonAnnotations: {}
+
+# ---------------------------------------------------------------------------
+# Container images
+# ---------------------------------------------------------------------------
+# Image reference = <registry>/<repositoryPrefix>-<component>:<tag>
+#   e.g. ghcr.io/northbridge-capital/oao-orchestrator:0.1.0
+# Override a single component with e.g. orchestrator.image.repository.
+image:
+  registry: ghcr.io
+  repositoryPrefix: northbridge-capital/oao
+  # Defaults to .Chart.AppVersion when empty. Flux image automation / CI
+  # rewrite this field (see infra/gitops/README.md).
+  tag: ""
+  pullPolicy: IfNotPresent
+  # Names of pre-existing imagePullSecrets (GHCR is private by default).
+  pullSecrets: []
+  # - name: ghcr-pull
+
+# ---------------------------------------------------------------------------
+# Public DNS names (must resolve to the cluster ingress / Traefik VIP)
+# ---------------------------------------------------------------------------
+hosts:
+  api: api.oao.northbridge.example     # >>> REQUIRED <<< orchestrator API
+  admin: admin.oao.northbridge.example # >>> REQUIRED <<< supervision dashboard
+  addin: addin.oao.northbridge.example # >>> REQUIRED <<< static add-in + manifest host
+
+# ---------------------------------------------------------------------------
+# Non-secret orchestrator configuration (rendered into the ConfigMap)
+# ---------------------------------------------------------------------------
+config:
+  organizationName: Northbridge Capital
+  nodeEnv: production
+  logLevel: info                 # fatal|error|warn|info|debug|trace
+  logFormat: json
+  defaultLanguage: fr            # fr|en
+  # Domains treated as internal by the compliance engine (comma separated).
+  internalDomains: northbridge.example
+  # CORS allow-list. Empty => https://<hosts.addin> is used.
+  corsOrigins: ""
+  rateLimitPerMinute: 120
+  bodyLimitBytes: 2097152        # 2 MiB — keep in sync with ingress.proxyBodySize
+  requestTimeoutMs: 30000
+  shutdownTimeoutMs: 15000
+  # Audit: false = only SHA-256 hashes of prompt/response are persisted.
+  # Enabling this stores raw email bodies — compliance sign-off required.
+  auditStoreContent: false
+  auditRetentionDays: 1095       # 36 months, enforced by the worker retention job
+  indexRetentionDays: 365
+  # /metrics (Prometheus). Protected by METRICS_TOKEN + NetworkPolicy.
+  metricsEnabled: true
+  # Swagger UI — keep false in production.
+  apiDocsEnabled: false
+  # Fastify `trustProxy`: true/false, a hop count, or a comma-separated
+  # IP/CIDR allow-list. Behind an ingress this decides whether the rate limit
+  # sees the client IP or the load balancer.
+  trustProxy: "true"
+  # IANA timezone driving the daily-brief schedule and the brief dates.
+  timezone: Europe/Zurich
+  # Lifetime of an `Idempotency-Key` record (POST /actions/approve).
+  idempotencyTtlHours: 24
+  # PostgreSQL client pool (orchestrator side, per pod).
+  db:
+    poolMin: 0
+    poolMax: 10
+    statementTimeoutMs: 15000
+    idleTimeoutMs: 30000
+    connectionTimeoutMs: 5000
+  # Free-form extra ConfigMap entries (KEY: "value"), escape hatch for new
+  # orchestrator env vars without a chart upgrade.
+  extraEnv: {}
+
+# ---------------------------------------------------------------------------
+# Internal LLM endpoint (OpenAI-compatible: vLLM / TGI / Ollama / private AOAI)
+# ---------------------------------------------------------------------------
+llm:
+  provider: openai-compatible    # openai-compatible|mock
+  baseUrl: http://gpu-node.northbridge.example:8000/v1  # >>> REQUIRED <<< LLM_BASE_URL
+  model: qwen3-30b-a3b           # >>> REQUIRED <<< LLM_MODEL, must match --served-model-name
+  # >>> REQUIRED <<< LLM_FAST_MODEL — smaller model for triage-assist,
+  # classification, phishing/compliance and extraction. Empty = everything runs
+  # on `model`, which roughly doubles the GPU bill (docs/PRODUCTION_CHECKLIST.md).
+  fastModel: ""
+  timeoutMs: 60000
+  maxTokens: 2048
+  jsonMode: auto                 # auto|response_format|prompt
+  concurrency: 4
+  circuitFailures: 5
+  circuitCooldownMs: 30000
+  inputMaxChars: 24000
+  queueTimeoutMs: 30000
+  # Most recent messages kept verbatim in a thread prompt (older ones digested).
+  threadMaxMessages: 12
+  # Part of every analysis-cache key: bump it to invalidate every cached
+  # analysis after a prompt change (keep it aligned with the app default).
+  promptVersion: "2026-09-v2"
+  embeddings:
+    enabled: true
+    model: bge-m3                # >>> REQUIRED <<< EMBEDDING_MODEL
+    dimensions: 1024             # >>> REQUIRED <<< EMBEDDING_DIMENSIONS, must match the vector(N) column in migrations
+    batchSize: 16
+  # Egress NetworkPolicy target for the LLM endpoint. Kubernetes
+  # NetworkPolicy cannot match hostnames: give the CIDR of the GPU node(s).
+  egress:
+    cidrs:
+      - 10.0.0.0/8
+    ports:
+      - 8000
+
+# ---------------------------------------------------------------------------
+# Authentication (orchestrator API)
+# ---------------------------------------------------------------------------
+auth:
+  mode: aad                      # aad (production) | dev (refused when NODE_ENV=production)
+  aad:
+    tenantId: ""                 # >>> REQUIRED <<< Entra ID directory (tenant) ID
+    clientId: ""                 # >>> REQUIRED <<< API app registration client ID
+    allowedTenants: ""           # extra tenant IDs, comma separated (usually empty)
+    requireScope: access_as_user
+    clockSkewSeconds: 60
+  # Fallback role mapping used when app roles are not assigned yet.
+  adminEmails: ""
+  complianceEmails: ""
+
+# ---------------------------------------------------------------------------
+# Microsoft Graph (optional) and the precompute/sync worker
+# ---------------------------------------------------------------------------
+graph:
+  enabled: false
+  authMode: obo                  # obo (delegated, per-user) | app (application permissions)
+  sync:
+    # Mail-enabled security group the Exchange application access policy is
+    # scoped to — the worker only ever syncs members of this group.
+    groupId: ""
+    users: ""                    # explicit UPN allow-list, comma separated
+    intervalMinutes: 15
+    maxMessagesPerRun: 200
+
+features:
+  precompute: false              # worker precomputes analyses for synced mailboxes
+  dailyBrief: false
+  dailyBriefHour: 7
+  triage: true
+  analysisCache: true
+  analysisCacheTtlHours: 72
+  # Cache of embedding vectors keyed by (model, sha256(chunk)).
+  embeddingCache: true
+  embeddingCacheTtlDays: 365
+  demoSeed: false                # NEVER true in production
+
+# ---------------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------------
+# Three mutually exclusive strategies:
+#   1. secrets.create=true  -> this chart renders a Secret from the values
+#      below (only acceptable when the values come from SOPS-encrypted files).
+#   2. secrets.existingSecret=<name> -> a Secret you manage (kubectl, SOPS,
+#      Sealed Secrets, ESO). Keys expected: secrets.existingSecretKeys.
+#   3. externalSecrets.enabled=true -> an ExternalSecret is rendered and the
+#      External Secrets Operator materialises <fullname>-secrets for you.
+secrets:
+  create: true
+  existingSecret: ""
+  # Keys the chart expects to find in that Secret. Every key listed here MUST
+  # exist, otherwise the matching <KEY>_FILE would point at a missing file.
+  existingSecretKeys:
+    - LLM_API_KEY
+    - AAD_CLIENT_SECRET
+    - ADMIN_API_TOKEN
+    - METRICS_TOKEN
+    - DATABASE_URL
+    - AUTH_MICROSOFT_ENTRA_ID_SECRET
+    - AUTH_SECRET
+    # Required when postgres.enabled=true (consumed by the StatefulSet).
+    - POSTGRES_PASSWORD
+  # When true the Secret is mounted as files under secrets.mountPath and the
+  # orchestrator reads <NAME>_FILE (recommended: no secret in the pod env,
+  # no secret in `kubectl describe pod`). When false, envFrom is used.
+  mountAsFiles: true
+  mountPath: /run/secrets/oao
+  # Values (leave empty to omit the key entirely).
+  # >>> REQUIRED <<< LLM_API_KEY when the internal endpoint enforces one
+  # (often empty for an in-cluster vLLM/TGI). Mounted as
+  # /run/secrets/oao/LLM_API_KEY and read through LLM_API_KEY_FILE.
+  llmApiKey: ""
+  aadClientSecret: ""            # >>> REQUIRED <<< when auth.mode=aad
+  adminApiToken: ""              # >>> REQUIRED <<< shared secret admin -> API
+  metricsToken: ""               # >>> REQUIRED <<< bearer token for /metrics
+  # Admin dashboard only (Auth.js). Rendered as AUTH_MICROSOFT_ENTRA_ID_SECRET
+  # and AUTH_SECRET; never injected into the orchestrator pods.
+  adminEntraClientSecret: ""     # >>> REQUIRED <<< when admin.authMode=aad
+  adminAuthSecret: ""            # >>> REQUIRED <<< when admin.authMode=aad (session cookie key)
+  notifyWebhookUrl: ""
+  # Only used when postgres.enabled=true (DATABASE_URL is derived from it).
+  postgresPassword: ""           # >>> REQUIRED <<< when postgres.enabled=true
+  # Only used when postgres.enabled=false and no external existingSecret.
+  databaseUrl: ""
+
+externalSecrets:
+  enabled: false
+  secretStoreRef:
+    name: nkp-vault
+    kind: ClusterSecretStore
+  refreshInterval: 1h
+  # remoteRef per secret key: <K8s key>: { key: <store path>, property: <field> }
+  data:
+    LLM_API_KEY:
+      key: oao/llm
+      property: api_key
+    AAD_CLIENT_SECRET:
+      key: oao/entra
+      property: client_secret
+    ADMIN_API_TOKEN:
+      key: oao/admin
+      property: api_token
+    METRICS_TOKEN:
+      key: oao/metrics
+      property: token
+    AUTH_MICROSOFT_ENTRA_ID_SECRET:
+      key: oao/admin
+      property: entra_client_secret
+    AUTH_SECRET:
+      key: oao/admin
+      property: auth_secret
+    DATABASE_URL:
+      key: oao/postgres
+      property: url
+
+# ---------------------------------------------------------------------------
+# ServiceAccounts
+# ---------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  annotations: {}
+  automountServiceAccountToken: false
+
+# ---------------------------------------------------------------------------
+# Orchestrator — API role (ROLE=api, stateless, horizontally scalable)
+# ---------------------------------------------------------------------------
+orchestrator:
+  image:
+    repository: ""               # defaults to <prefix>-orchestrator
+    tag: ""                      # defaults to image.tag / appVersion
+  api:
+    replicaCount: 2
+    resources:
+      requests: { cpu: 500m, memory: 1Gi }
+      limits: { cpu: "2", memory: 2Gi }
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+      # Requests/s per pod. Requires prometheus-adapter exposing the custom
+      # pod metric `oao_http_requests_per_second`. Empty = CPU only.
+      targetRequestsPerSecond: ""
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 300
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    # soft = preferred anti-affinity (single-AZ clusters), hard = required
+    antiAffinity: soft
+    topologySpreadConstraints: []
+    probes:
+      liveness:
+        initialDelaySeconds: 15
+        periodSeconds: 15
+        timeoutSeconds: 5
+        failureThreshold: 5
+      readiness:
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      startup:
+        enabled: true
+        periodSeconds: 5
+        failureThreshold: 30
+    podAnnotations: {}
+    podLabels: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    priorityClassName: ""
+    extraEnv: []
+  # -- Worker role (ROLE=worker): mailbox sync, precompute, daily brief,
+  # retention. Exactly one active instance; leader election uses a Postgres
+  # advisory lock so a rolling restart is safe, but keep replicaCount: 1.
+  worker:
+    enabled: true
+    replicaCount: 1
+    # ROLE for the worker pod:
+    #   all    — scheduler + a local HTTP listener. REQUIRED for the HTTP
+    #            probes, the worker Service and the /metrics scrape (sync lag
+    #            and queue depth only exist on this role). Not exposed through
+    #            the Ingress: only the monitoring namespace may reach it.
+    #   worker — scheduler only. `servesApi()` is false, so the process never
+    #            opens a port: the chart then drops the probes, the Service and
+    #            the ServiceMonitor endpoint for this pod.
+    role: all
+    workersEnabled: true
+    resources:
+      requests: { cpu: 500m, memory: 1Gi }
+      limits: { cpu: "2", memory: 2Gi }
+    podAnnotations: {}
+    podLabels: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    priorityClassName: ""
+    extraEnv: []
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    seccompProfile: { type: RuntimeDefault }
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities: { drop: ["ALL"] }
+
+# ---------------------------------------------------------------------------
+# Admin dashboard (Next.js standalone, port 3001)
+# ---------------------------------------------------------------------------
+admin:
+  enabled: true
+  image:
+    repository: ""               # defaults to <prefix>-admin
+    tag: ""
+  replicaCount: 1
+  # aad = Entra ID sign-in (production), token = shared ADMIN_API_TOKEN only.
+  authMode: aad
+  entra:
+    clientId: ""                 # >>> REQUIRED <<< dashboard app registration
+    tenantId: ""                 # defaults to auth.aad.tenantId when empty
+    issuer: ""                   # defaults to https://login.microsoftonline.com/<tenant>/v2.0
+  # Client id of the ORCHESTRATOR API app registration: the dashboard requests
+  # `api://<id>/access_as_user` so the session carries a token the API accepts.
+  # Empty = auth.aad.clientId (the usual case). `src/env.ts` refuses to start in
+  # ADMIN_AUTH_MODE=aad when neither this nor apiScope is set.
+  orchestratorApiClientId: ""
+  apiScope: ""                   # full override, e.g. api://oao-api/access_as_user
+  # JWT session lifetime in seconds (300 - 86400).
+  sessionMaxAgeSeconds: 3600
+  # IANA timezone used to render every date/time in the dashboard.
+  timezone: Europe/Zurich
+  mock: false
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+  service:
+    type: ClusterIP
+    port: 3001
+    annotations: {}
+  probes:
+    path: /api/health
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    seccompProfile: { type: RuntimeDefault }
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities: { drop: ["ALL"] }
+
+# ---------------------------------------------------------------------------
+# Add-in (static Vite build served by nginx over HTTPS on 3000)
+# ---------------------------------------------------------------------------
+# Office requires HTTPS end-to-end for the task pane host, so the pod
+# terminates TLS itself and the ingress speaks HTTPS to the backend.
+addin:
+  enabled: true
+  image:
+    repository: ""               # defaults to <prefix>-addin
+    tag: ""
+  replicaCount: 2
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+  tls:
+    # certManager = render a cert-manager Certificate for hosts.addin
+    # secret      = use an existing kubernetes.io/tls Secret
+    # selfSigned  = let the container generate a throwaway cert (dev only)
+    mode: certManager
+    secretName: ""               # defaults to <fullname>-addin-tls
+    issuerRef:
+      kind: ClusterIssuer
+      name: northbridge-internal-ca
+      group: cert-manager.io
+    duration: 2160h              # 90d
+    renewBefore: 360h            # 15d
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  antiAffinity: soft
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  service:
+    type: ClusterIP
+    port: 3000
+    # With ingress.className=traefik the chart adds
+    # `traefik.ingress.kubernetes.io/service.serversscheme: https` here
+    # automatically (the pod terminates TLS itself).
+    annotations: {}
+  traefik:
+    # Traefik ServersTransport used to reach the add-in pod over HTTPS.
+    # Needed when the pod serves a self-signed certificate (tls.mode=selfSigned)
+    # or a certificate Traefik's trust store does not know.
+    serversTransport:
+      enabled: false
+      insecureSkipVerify: true
+      # Secret (type Opaque, key ca.crt) with the internal CA, used instead of
+      # insecureSkipVerify when provided.
+      rootCAsSecret: ""
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 101               # nginx user of nginxinc/nginx-unprivileged
+    runAsGroup: 101
+    fsGroup: 101
+    seccompProfile: { type: RuntimeDefault }
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities: { drop: ["ALL"] }
+
+# ---------------------------------------------------------------------------
+# Ingress
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  # NKP ships Traefik as the default ingress controller.
+  className: traefik
+  # Annotations applied to every Ingress object of this chart.
+  annotations: {}
+  # Extra annotations per object (merged over `annotations`).
+  apiAnnotations: {}
+  adminAnnotations: {}
+  addinAnnotations: {}
+  # Request body limit propagated to the controller (matches config.bodyLimitBytes).
+  proxyBodySize: 2m
+  # Proxy timeouts in seconds (LLM calls can be slow).
+  timeouts:
+    read: 120
+    send: 120
+    connect: 10
+  tls:
+    enabled: true
+    # One TLS secret per host. Empty names default to
+    # <fullname>-{api,admin}-tls (the add-in reuses addin.tls.secretName).
+    apiSecretName: ""
+    adminSecretName: ""
+    # Render cert-manager Certificates for the API and admin hosts.
+    certManager:
+      enabled: true
+      issuerRef:
+        kind: ClusterIssuer
+        name: northbridge-internal-ca
+        group: cert-manager.io
+      duration: 2160h
+      renewBefore: 360h
+
+# -- Traefik-native alternative to the Ingress objects above. Enable it when
+# you need middlewares/TLSOptions that Ingress annotations cannot express.
+traefik:
+  # Traefik Middleware limiting the request body (the equivalent of
+  # nginx's proxy-body-size, which has no Traefik annotation).
+  middleware:
+    bodyLimit:
+      enabled: true
+      memoryRequestBodyBytes: 1048576
+  ingressRoute:
+    enabled: false
+    entryPoints: [websecure]
+    # Middleware refs applied to every route (e.g. rate limit, headers).
+    middlewares: []
+    # - name: oao-secure-headers
+    tlsSecretName: ""            # defaults to ingress.tls.apiSecretName
+    tlsOptionRef: ""             # e.g. "modern@kubernetescrd"
+
+# ---------------------------------------------------------------------------
+# NetworkPolicies (default deny + explicit allow)
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: true
+  # Deny all ingress+egress in the namespace, then allow only what follows.
+  defaultDeny: true
+  dns:
+    enabled: true
+    # Namespace hosting CoreDNS/kube-dns.
+    namespaceSelector:
+      kubernetes.io/metadata.name: kube-system
+  # Namespace of the ingress controller allowed to reach the pods.
+  ingressController:
+    namespaceSelector:
+      kubernetes.io/metadata.name: kommander
+  # Namespace of the Prometheus that scrapes /metrics.
+  monitoring:
+    enabled: true
+    namespaceSelector:
+      kubernetes.io/metadata.name: kommander
+  # Egress to Entra ID (login.microsoftonline.com) and Microsoft Graph
+  # (graph.microsoft.com). Kubernetes NetworkPolicy has no FQDN matching:
+  # by default 443/tcp to the public internet is allowed while every RFC1918
+  # range stays blocked. Set explicit cidrs (or use a CiliumNetworkPolicy
+  # with toFQDNs) to narrow it further.
+  microsoft:
+    enabled: true
+    ports: [443]
+    cidrs: []
+    exceptPrivateRanges: true
+  # Extra egress rules appended to the orchestrator policy verbatim.
+  extraEgress: []
+
+# ---------------------------------------------------------------------------
+# Database migrations (Helm hook: pre-install, pre-upgrade)
+# ---------------------------------------------------------------------------
+migration:
+  enabled: true
+  # DB_AUTO_MIGRATE: let the orchestrator apply migrations at boot instead of
+  # (or in addition to) the hook Job. Keep false in production: the hook runs
+  # once, before the new pods roll, whereas at-boot migration races between
+  # replicas. Set true + enabled=false when using External Secrets, where the
+  # Secret does not exist yet during the first pre-install hook.
+  autoAtBoot: false
+  # Also run the reference-data seed (safe/idempotent, no demo data).
+  seed: false
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 3600
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+
+# ---------------------------------------------------------------------------
+# PostgreSQL + pgvector
+# ---------------------------------------------------------------------------
+# postgres.enabled=true renders a single-replica StatefulSet. It is adequate
+# for 50 users but it is NOT highly available: prefer an external, backed-up
+# PostgreSQL 16 with the `vector` extension when one is available.
+postgres:
+  enabled: true
+  image:
+    repository: pgvector/pgvector
+    tag: pg16
+    pullPolicy: IfNotPresent
+  auth:
+    username: oao
+    database: oao
+    # Password comes from secrets.postgresPassword (or existingSecret key
+    # POSTGRES_PASSWORD).
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""             # "" = cluster default
+    accessModes: [ReadWriteOnce]
+  resources:
+    requests: { cpu: "1", memory: 2Gi }
+    limits: { cpu: "2", memory: 4Gi }
+  # Tuned for 2 GiB of RAM; adjust together with resources.
+  parameters:
+    maxConnections: "100"
+    sharedBuffers: 512MB
+    effectiveCacheSize: 1536MB
+    workMem: 16MB
+    maintenanceWorkMem: 128MB
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+    seccompProfile: { type: RuntimeDefault }
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false   # the postgres image writes to /var/run/postgresql
+    capabilities: { drop: ["ALL"] }
+  # -- External PostgreSQL (used when postgres.enabled=false)
+  external:
+    host: ""                     # >>> REQUIRED <<< when postgres.enabled=false
+    port: 5432
+    database: oao
+    username: oao
+    sslmode: require
+    # A Secret you manage containing the full connection string. Takes
+    # precedence over secrets.databaseUrl.
+    existingSecret: ""
+    existingSecretKey: DATABASE_URL
+    # CIDR of the external database, for the egress NetworkPolicy.
+    cidrs: []
+  # -- Logical backup CronJob (pg_dump -Fc) to a PVC or an S3-compatible
+  # bucket (Nutanix Objects, MinIO, ...).
+  backup:
+    enabled: false
+    schedule: "30 1 * * *"       # 01:30 UTC daily
+    destination: pvc             # pvc|s3
+    retentionDays: 14
+    # pg_dump runs from the postgres client image.
+    image:
+      repository: pgvector/pgvector
+      tag: pg16
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+    pvc:
+      size: 50Gi
+      storageClass: ""
+      existingClaim: ""
+    s3:
+      endpoint: https://objects.northbridge.example
+      bucket: oao-backups
+      region: us-east-1
+      prefix: postgres
+      forcePathStyle: true
+      # Secret holding AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+      existingSecret: oao-backup-s3
+      # Image providing the `aws` CLI (must be mirrored internally if the
+      # cluster has no internet egress).
+      image:
+        repository: amazon/aws-cli
+        tag: "2.17.0"
+
+# ---------------------------------------------------------------------------
+# Observability (kube-prometheus-stack, shipped with NKP/Kommander)
+# ---------------------------------------------------------------------------
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    # Extra labels so the NKP Prometheus selects it (see values-nkp.yaml).
+    labels: {}
+    relabelings: []
+    metricRelabelings: []
+  prometheusRule:
+    enabled: true
+    labels: {}
+    # Alert thresholds.
+    thresholds:
+      http5xxRatio: 0.05         # 5% of requests over 5 min
+      p95LatencySeconds: 15
+      syncLagMinutes: 60
+      llmErrorRatio: 0.25
+  grafanaDashboard:
+    enabled: true
+    # Sidecar discovery label used by kube-prometheus-stack.
+    labels:
+      grafana_dashboard: "1"
+    # Empty = release namespace.
+    namespace: ""

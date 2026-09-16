@@ -1,0 +1,23 @@
+# Configuration SOPS pour les Secrets GitOps de ce répertoire.
+# SOPS remonte l'arborescence depuis le fichier chiffré : ce fichier couvre
+# tout `infra/gitops/**`.
+#
+#   age-keygen -o age.agekey                        # une fois, hors dépôt
+#   # clé publique -> `age` ci-dessous
+#   kubectl -n flux-system create secret generic sops-age \
+#     --from-file=age.agekey=age.agekey             # lue par Flux
+#
+#   sops --encrypt --in-place infra/gitops/envs/prod/secrets.enc.yaml
+#   sops infra/gitops/envs/prod/secrets.enc.yaml    # éditer en clair
+#
+# `encrypted_regex` limite le chiffrement aux valeurs : les métadonnées
+# (kind, name, namespace) restent lisibles pour kustomize et pour la revue.
+creation_rules:
+  - path_regex: envs/prod/.*\.enc\.ya?ml$
+    encrypted_regex: "^(data|stringData)$"
+    age: >-
+      age1exampleprodpublickeyreplacemewithyourownage1exampleprodkey00
+  - path_regex: envs/dev/.*\.enc\.ya?ml$
+    encrypted_regex: "^(data|stringData)$"
+    age: >-
+      age1exampledevpublickeyreplacemewithyourownage1exampledevkey000

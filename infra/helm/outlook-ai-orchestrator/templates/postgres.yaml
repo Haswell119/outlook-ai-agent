@@ -1,0 +1,165 @@
+{{- if .Values.postgres.enabled }}
+{{- $name := include "oao.postgres.fullname" . -}}
+# ---------------------------------------------------------------------------
+# In-cluster PostgreSQL 16 + pgvector, single replica.
+# Sized for ~50 users (see values-nkp.yaml). It is NOT highly available:
+# a node failure means a restart on another node with the same PVC, so the
+# storage class must support ReadWriteOnce re-attachment (nutanix-volume does).
+# Set postgres.enabled=false to use an external/managed database instead.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "postgres") | indent 4 }}
+data:
+  01-extensions.sql: |
+    -- Runs once, on first initialisation of the data volume.
+    CREATE EXTENSION IF NOT EXISTS vector;
+    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "postgres") | indent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+  selector:
+{{ include "oao.selectorLabels" (list . "postgres") | indent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "postgres") | indent 4 }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "postgres") | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "oao.selectorLabels" (list . "postgres") | indent 8 }}
+      {{- with .Values.postgres.podAnnotations }}
+      annotations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "oao.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- include "oao.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+{{ toYaml .Values.postgres.securityContext | indent 8 }}
+      {{- with .Values.postgres.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.postgres.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.postgres.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: postgres
+          image: {{ printf "%s:%s" .Values.postgres.image.repository .Values.postgres.image.tag | quote }}
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          args:
+            - -c
+            - max_connections={{ .Values.postgres.parameters.maxConnections }}
+            - -c
+            - shared_buffers={{ .Values.postgres.parameters.sharedBuffers }}
+            - -c
+            - effective_cache_size={{ .Values.postgres.parameters.effectiveCacheSize }}
+            - -c
+            - work_mem={{ .Values.postgres.parameters.workMem }}
+            - -c
+            - maintenance_work_mem={{ .Values.postgres.parameters.maintenanceWorkMem }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.auth.username | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.auth.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oao.secretName" . }}
+                  key: POSTGRES_PASSWORD
+            # The image refuses to initialise a non-empty mount point, so the
+            # data directory is a sub-path of the volume.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+            - name: run
+              mountPath: /var/run/postgresql
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgres.auth.username | quote }}, "-d", {{ .Values.postgres.auth.database | quote }}]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgres.auth.username | quote }}, "-d", {{ .Values.postgres.auth.database | quote }}]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+{{ toYaml .Values.postgres.resources | indent 12 }}
+          securityContext:
+{{ toYaml .Values.postgres.containerSecurityContext | indent 12 }}
+      volumes:
+        - name: init
+          configMap:
+            name: {{ $name }}-init
+        - name: run
+          emptyDir:
+            sizeLimit: 16Mi
+        {{- if not .Values.postgres.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.postgres.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+{{ include "oao.componentLabels" (list . "postgres") | indent 10 }}
+      spec:
+        accessModes:
+{{ toYaml .Values.postgres.persistence.accessModes | indent 10 }}
+        {{- with .Values.postgres.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size | quote }}
+  {{- end }}
+{{- end }}

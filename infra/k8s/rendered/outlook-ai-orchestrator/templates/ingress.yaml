@@ -1,0 +1,132 @@
+---
+# Source: outlook-ai-orchestrator/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oao-api
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator-api
+  annotations:
+    
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: oao-oao-body-limit@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - "api.oao.northbridge.example"
+      secretName: oao-api-tls
+  rules:
+    - host: "api.oao.northbridge.example"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: oao-api
+                port:
+                  number: 8080
+---
+# Source: outlook-ai-orchestrator/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oao-admin
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: admin
+  annotations:
+    
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - "admin.oao.northbridge.example"
+      secretName: oao-admin-tls
+  rules:
+    - host: "admin.oao.northbridge.example"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: oao-admin
+                port:
+                  number: 3001
+---
+# Source: outlook-ai-orchestrator/templates/ingress.yaml
+# The add-in pod terminates TLS itself (Office requires HTTPS for the task
+# pane host), so the controller must re-encrypt towards the backend:
+#   nginx   -> backend-protocol: HTTPS annotation (below)
+#   traefik -> serversscheme: https annotation on the Service (see addin.yaml)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oao-addin
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: addin
+  annotations:
+    
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - "addin.oao.northbridge.example"
+      secretName: oao-addin-tls
+  rules:
+    - host: "addin.oao.northbridge.example"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: oao-addin
+                port:
+                  number: 3000
+---
+# Source: outlook-ai-orchestrator/templates/ingress.yaml
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: oao-body-limit
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator-api
+spec:
+  buffering:
+    maxRequestBodyBytes: 2.097152e+06
+    memRequestBodyBytes: 1.048576e+06

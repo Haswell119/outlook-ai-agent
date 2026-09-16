@@ -1,0 +1,16 @@
+# Optionnel — Flux image automation : Flux surveille GHCR, choisit la
+# dernière version selon la policy, et réécrit le champ `image.tag` marqué
+# par le commentaire `# {"$imagepolicy": "flux-system:oao:tag"}` dans
+# infra/gitops/envs/<env>/values.yaml.
+#
+# Sans ce mécanisme, c'est la CI (release.yml) qui ouvre une PR de bump.
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: oao
+  namespace: flux-system
+spec:
+  image: ghcr.io/northbridge-capital/oao-orchestrator
+  interval: 10m
+  secretRef:
+    name: ghcr-pull

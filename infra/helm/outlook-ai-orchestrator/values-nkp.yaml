@@ -1,0 +1,177 @@
+# ===========================================================================
+#  Nutanix Kubernetes Platform (NKP) — surcharges de production
+# ---------------------------------------------------------------------------
+#  Dimensionné pour ~50 utilisateurs Northbridge Capital.
+#
+#    helm upgrade --install oao infra/helm/outlook-ai-orchestrator \
+#      -n oao --create-namespace \
+#      -f infra/helm/outlook-ai-orchestrator/values-nkp.yaml \
+#      -f secrets.enc.yaml            # déchiffré par SOPS / fourni par ESO
+#
+#  Ce fichier ne contient AUCUN secret : voir infra/gitops/README.md.
+# ===========================================================================
+
+# Noms d'objets courts et stables (oao-api, oao-worker, oao-admin, ...)
+# indépendamment du nom de la release Helm/Flux.
+fullnameOverride: oao
+
+# --- Ingress : NKP embarque Traefik comme contrôleur par défaut -------------
+ingress:
+  enabled: true
+  className: traefik
+  proxyBodySize: 2m
+  timeouts:
+    read: 120
+    send: 120
+    connect: 10
+  tls:
+    enabled: true
+    certManager:
+      enabled: true
+      issuerRef:
+        # ClusterIssuer adossé à la PKI interne Northbridge (cert-manager est
+        # installé par Kommander — voir docs/NKP.md §cert-manager).
+        kind: ClusterIssuer
+        name: northbridge-internal-ca
+        group: cert-manager.io
+
+addin:
+  tls:
+    mode: certManager
+    issuerRef:
+      kind: ClusterIssuer
+      name: northbridge-internal-ca
+      group: cert-manager.io
+  traefik:
+    serversTransport:
+      # Traefik doit faire confiance au certificat interne du pod add-in.
+      enabled: true
+      insecureSkipVerify: false
+      rootCAsSecret: northbridge-internal-ca
+  replicaCount: 2
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+
+# --- NetworkPolicies : Traefik et kube-prometheus-stack vivent dans
+#     l'espace de noms `kommander` sur NKP ----------------------------------
+networkPolicy:
+  enabled: true
+  defaultDeny: true
+  ingressController:
+    namespaceSelector:
+      kubernetes.io/metadata.name: kommander
+  monitoring:
+    enabled: true
+    namespaceSelector:
+      kubernetes.io/metadata.name: kommander
+  dns:
+    enabled: true
+    namespaceSelector:
+      kubernetes.io/metadata.name: kube-system
+
+# --- Dimensionnement (50 utilisateurs) -------------------------------------
+orchestrator:
+  api:
+    replicaCount: 2
+    resources:
+      requests: { cpu: 500m, memory: 1Gi }
+      limits: { cpu: "2", memory: 2Gi }
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    antiAffinity: soft
+  worker:
+    enabled: true
+    replicaCount: 1
+    resources:
+      requests: { cpu: 500m, memory: 1Gi }
+      limits: { cpu: "2", memory: 2Gi }
+
+admin:
+  enabled: true
+  replicaCount: 1
+  authMode: aad
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+# --- Base de données : StatefulSet interne sur le storage Nutanix ----------
+# Passer postgres.enabled=false et renseigner postgres.external.* si
+# Northbridge fournit un PostgreSQL 16 managé avec l'extension `vector`.
+postgres:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: nutanix-volume
+  resources:
+    requests: { cpu: "1", memory: 2Gi }
+    limits: { cpu: "2", memory: 4Gi }
+  backup:
+    enabled: true
+    destination: pvc
+    schedule: "30 1 * * *"
+    retentionDays: 14
+    pvc:
+      size: 50Gi
+      storageClass: nutanix-volume
+    # Variante Nutanix Objects (S3) :
+    # destination: s3
+    # s3:
+    #   endpoint: https://objects.northbridge.example
+    #   bucket: oao-backups
+    #   existingSecret: oao-backup-s3
+
+# --- Observabilité : kube-prometheus-stack fourni par Kommander ------------
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    labels:
+      # Sélecteur du Prometheus de Kommander sur NKP.
+      release: kube-prometheus-stack
+  prometheusRule:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+  grafanaDashboard:
+    enabled: true
+    labels:
+      grafana_dashboard: "1"
+
+# --- Images : registre GHCR, tirées via un pull secret ----------------------
+image:
+  registry: ghcr.io
+  repositoryPrefix: northbridge-capital/oao
+  pullPolicy: IfNotPresent
+  pullSecrets:
+    - name: ghcr-pull
+
+# --- Noms DNS publics ------------------------------------------------------
+hosts:
+  api: api.oao.northbridge.example
+  admin: admin.oao.northbridge.example
+  addin: addin.oao.northbridge.example
+
+config:
+  nodeEnv: production
+  logLevel: info
+  defaultLanguage: fr
+  internalDomains: northbridge.example
+  auditStoreContent: false
+  auditRetentionDays: 1095
+  metricsEnabled: true
+  apiDocsEnabled: false
+
+auth:
+  mode: aad
+
+secrets:
+  create: true
+  mountAsFiles: true

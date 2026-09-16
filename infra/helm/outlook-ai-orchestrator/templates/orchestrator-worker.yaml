@@ -1,0 +1,146 @@
+{{- if .Values.orchestrator.worker.enabled }}
+{{- $role := .Values.orchestrator.worker.role | default "all" -}}
+{{- $servesHttp := ne $role "worker" -}}
+# Background role: mailbox sync (Graph), precompute, daily brief and retention
+# jobs. Leader election uses a PostgreSQL advisory lock, so a rolling restart
+# can never run two schedulers at once — but keep replicaCount at 1: a second
+# replica would only sit idle waiting for the lock.
+#
+# ROLE: `servesApi()` in apps/orchestrator/src/config.ts is true only for
+# `api` and `all`. With ROLE=worker the process never opens a port, so the
+# HTTP probes, the Service and the /metrics scrape below only exist when
+# orchestrator.worker.role is `all` (the default).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oao.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-worker") | indent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.orchestrator.worker.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "orchestrator-worker") | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "oao.selectorLabels" (list . "orchestrator-worker") | indent 8 }}
+        {{- with .Values.orchestrator.worker.podLabels }}
+{{ toYaml . | indent 8 }}
+        {{- end }}
+      annotations:
+{{ include "oao.checksums" . | indent 8 }}
+        {{- with .Values.orchestrator.worker.podAnnotations }}
+{{ toYaml . | indent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "oao.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- include "oao.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.orchestrator.worker.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+{{ toYaml .Values.orchestrator.securityContext | indent 8 }}
+      {{- with .Values.orchestrator.worker.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.orchestrator.worker.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.orchestrator.worker.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: orchestrator
+          image: {{ include "oao.image" (list . "orchestrator" .Values.orchestrator.image) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node"]
+          args: ["apps/orchestrator/dist/server.js"]
+          {{- if $servesHttp }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          {{- end }}
+          env:
+            - name: ROLE
+              value: {{ $role | quote }}
+            - name: WORKERS_ENABLED
+              value: {{ .Values.orchestrator.worker.workersEnabled | quote }}
+{{ include "oao.secretEnv" . | indent 12 }}
+            {{- with .Values.orchestrator.worker.extraEnv }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "oao.fullname" . }}-config
+            {{- if not .Values.secrets.mountAsFiles }}
+            - secretRef:
+                name: {{ include "oao.secretName" . }}
+            {{- end }}
+          {{- if $servesHttp }}
+          livenessProbe:
+            httpGet:
+              path: /api/v1/live
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /api/v1/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- end }}
+          resources:
+{{ toYaml .Values.orchestrator.worker.resources | indent 12 }}
+          securityContext:
+{{ toYaml .Values.orchestrator.containerSecurityContext | indent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+{{ include "oao.secretVolumeMount" . | indent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+{{ include "oao.secretVolume" . | indent 8 }}
+{{- if $servesHttp }}
+---
+# ClusterIP (not routed through the Ingress) so Prometheus can scrape the
+# worker's /metrics — sync lag and queue depth only exist on this role.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oao.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-worker") | indent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.orchestrator.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+{{ include "oao.selectorLabels" (list . "orchestrator-worker") | indent 4 }}
+{{- end }}
+{{- end }}

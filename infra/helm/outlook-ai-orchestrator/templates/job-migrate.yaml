@@ -1,0 +1,132 @@
+{{- if .Values.migration.enabled }}
+{{- $fullname := include "oao.fullname" . -}}
+{{- $chartSecret := and .Values.secrets.create (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) -}}
+{{- $jobSecret := ternary (printf "%s-migrate-secrets" $fullname) (include "oao.secretName" .) $chartSecret -}}
+{{- $extDb := include "oao.externalDbSecretName" . -}}
+# ---------------------------------------------------------------------------
+# SQL migrations, as a Helm hook (pre-install + pre-upgrade): the schema is
+# always in place before the new orchestrator pods start.
+#
+# Hooks run BEFORE the release's own ConfigMap/Secret exist on a first
+# install, so the Job gets its own hook-scoped copies (weight -10). They are
+# deleted once the hook succeeds; a failed Job and its config are kept for
+# post-mortem (kubectl logs job/<name>).
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-migrate-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "migrate") | indent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+{{ include "oao.config.data" . | indent 2 }}
+{{- if $chartSecret }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $jobSecret }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "migrate") | indent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+type: Opaque
+{{- $data := include "oao.secretData" . | fromYaml }}
+{{- if $data }}
+stringData:
+{{ toYaml $data | indent 2 }}
+{{- else }}
+stringData: {}
+{{- end }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-migrate
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "migrate") | indent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.migration.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+{{ include "oao.selectorLabels" (list . "migrate") | indent 8 }}
+      {{- with .Values.migration.podAnnotations }}
+      annotations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "oao.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- include "oao.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+{{ toYaml .Values.orchestrator.securityContext | indent 8 }}
+      {{- with .Values.migration.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.migration.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "oao.image" (list . "orchestrator" .Values.orchestrator.image) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node"]
+          {{- if .Values.migration.seed }}
+          args:
+            - -e
+            - |
+              const { execFileSync } = require("node:child_process");
+              for (const s of ["apps/orchestrator/dist/adapters/db/migrate.js", "apps/orchestrator/dist/adapters/db/seed.js"]) {
+                execFileSync(process.execPath, [s], { stdio: "inherit" });
+              }
+          {{- else }}
+          args: ["apps/orchestrator/dist/adapters/db/migrate.js"]
+          {{- end }}
+          env:
+            - name: ROLE
+              value: migrate
+            {{- if $extDb }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $extDb }}
+                  key: {{ .Values.postgres.external.existingSecretKey }}
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ $fullname }}-migrate-config
+            - secretRef:
+                name: {{ $jobSecret }}
+                optional: true
+          resources:
+{{ toYaml .Values.migration.resources | indent 12 }}
+          securityContext:
+{{ toYaml .Values.orchestrator.containerSecurityContext | indent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+{{- end }}

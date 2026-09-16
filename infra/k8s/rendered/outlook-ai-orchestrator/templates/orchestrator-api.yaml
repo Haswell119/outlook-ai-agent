@@ -1,0 +1,238 @@
+---
+# Source: outlook-ai-orchestrator/templates/orchestrator-api.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: oao-api
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: orchestrator-api
+---
+# Source: outlook-ai-orchestrator/templates/orchestrator-api.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: oao-api
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator-api
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/component: orchestrator-api
+---
+# Source: outlook-ai-orchestrator/templates/orchestrator-api.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oao-api
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator-api
+spec:
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: outlook-ai-orchestrator
+      app.kubernetes.io/instance: oao
+      app.kubernetes.io/component: orchestrator-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: outlook-ai-orchestrator
+        app.kubernetes.io/instance: oao
+        app.kubernetes.io/component: orchestrator-api
+      annotations:
+        checksum/config: 9b22f3320df7a48aa3d1d73c9eaa225eccae4077f9b0f6c087e280fcba92e6f1
+    spec:
+      serviceAccountName: oao
+      automountServiceAccountToken: false
+      
+      imagePullSecrets:
+      - name: ghcr-pull
+      securityContext:
+        fsGroup: 1001
+        runAsGroup: 1001
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: outlook-ai-orchestrator
+                    app.kubernetes.io/instance: oao
+                    app.kubernetes.io/component: orchestrator-api
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: orchestrator
+          image: "ghcr.io/northbridge-capital/oao-orchestrator:0.1.0"
+          imagePullPolicy: IfNotPresent
+          args: ["apps/orchestrator/dist/server.js"]
+          command: ["node"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: ROLE
+              value: api
+            # `runsWorkers()` is false for ROLE=api anyway; set explicitly so
+            # the split between the two Deployments is visible in the pod spec.
+            - name: WORKERS_ENABLED
+              value: "false"
+            
+            - name: LLM_API_KEY_FILE
+              value: "/run/secrets/oao/LLM_API_KEY"
+            - name: AAD_CLIENT_SECRET_FILE
+              value: "/run/secrets/oao/AAD_CLIENT_SECRET"
+            - name: ADMIN_API_TOKEN_FILE
+              value: "/run/secrets/oao/ADMIN_API_TOKEN"
+            - name: METRICS_TOKEN_FILE
+              value: "/run/secrets/oao/METRICS_TOKEN"
+            - name: DATABASE_URL_FILE
+              value: "/run/secrets/oao/DATABASE_URL"
+            - name: POSTGRES_PASSWORD_FILE
+              value: "/run/secrets/oao/POSTGRES_PASSWORD"
+          envFrom:
+            - configMapRef:
+                name: oao-config
+          startupProbe:
+            httpGet:
+              path: /api/v1/live
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /api/v1/live
+              port: http
+            failureThreshold: 5
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/v1/ready
+              port: http
+            failureThreshold: 3
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: "2"
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            
+            - name: secrets
+              mountPath: "/run/secrets/oao"
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        
+        - name: secrets
+          secret:
+            secretName: oao-secrets
+            defaultMode: 0400
+            items:
+              - key: LLM_API_KEY
+                path: LLM_API_KEY
+              - key: AAD_CLIENT_SECRET
+                path: AAD_CLIENT_SECRET
+              - key: ADMIN_API_TOKEN
+                path: ADMIN_API_TOKEN
+              - key: METRICS_TOKEN
+                path: METRICS_TOKEN
+              - key: DATABASE_URL
+                path: DATABASE_URL
+              - key: POSTGRES_PASSWORD
+                path: POSTGRES_PASSWORD
+---
+# Source: outlook-ai-orchestrator/templates/orchestrator-api.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: oao-api
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: oao-api
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300

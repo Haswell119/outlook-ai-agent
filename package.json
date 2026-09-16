@@ -1,0 +1,34 @@
+{
+  "name": "outlook-ai-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Outlook AI Orchestrator - secure, human-in-the-loop AI assistant for Outlook (add-in + orchestrator backend + admin dashboard)",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm --filter @oao/shared build && pnpm -r --filter \"./apps/**\" build",
+    "dev": "pnpm --filter @oao/shared build && pnpm -r --parallel --filter \"./apps/**\" dev",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "db:migrate": "pnpm --filter @oao/orchestrator db:migrate",
+    "db:seed": "pnpm --filter @oao/orchestrator db:seed",
+    "e2e": "pnpm -r --filter \"./apps/**\" run --if-present e2e",
+    "setup:dev": "node scripts/setup-dev.mjs",
+    "dev:db": "node scripts/dev-db.mjs",
+    "certs": "node scripts/certs.mjs",
+    "check:llm": "node scripts/check-llm.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "manifest:render": "pnpm --filter @oao/addin manifest:render",
+    "manifest:sideload": "node scripts/sideload-manifest.mjs",
+    "k8s:render": "node scripts/render-k8s.mjs"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": ">=8.5.23",
+      "@fastify/static": ">=10.1.2"
+    }
+  }
+}

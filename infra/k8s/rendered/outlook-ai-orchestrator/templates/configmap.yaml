@@ -1,0 +1,83 @@
+---
+# Source: outlook-ai-orchestrator/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oao-config
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator
+data:
+  NODE_ENV: "production"
+  PORT: "8080"
+  HOST: "0.0.0.0"
+  ORGANIZATION_NAME: "Northbridge Capital"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  DEFAULT_LANGUAGE: "fr"
+  INTERNAL_DOMAINS: "northbridge.example"
+  CORS_ORIGINS: "https://addin.oao.northbridge.example"
+  RATE_LIMIT_PER_MINUTE: "120"
+  BODY_LIMIT_BYTES: "2.097152e+06"
+  REQUEST_TIMEOUT_MS: "30000"
+  SHUTDOWN_TIMEOUT_MS: "15000"
+  AUDIT_STORE_CONTENT: "false"
+  AUDIT_RETENTION_DAYS: "1095"
+  INDEX_RETENTION_DAYS: "365"
+  METRICS_ENABLED: "true"
+  API_DOCS_ENABLED: "false"
+  LLM_PROVIDER: "openai-compatible"
+  LLM_BASE_URL: "http://gpu-node.northbridge.example:8000/v1"
+  LLM_MODEL: "qwen3-30b-a3b"
+  LLM_TIMEOUT_MS: "60000"
+  LLM_MAX_TOKENS: "2048"
+  LLM_JSON_MODE: "auto"
+  LLM_CONCURRENCY: "4"
+  LLM_CIRCUIT_FAILURES: "5"
+  LLM_CIRCUIT_COOLDOWN_MS: "30000"
+  LLM_INPUT_MAX_CHARS: "24000"
+  LLM_QUEUE_TIMEOUT_MS: "30000"
+  EMBEDDINGS_ENABLED: "true"
+  EMBEDDING_MODEL: "bge-m3"
+  EMBEDDING_DIMENSIONS: "1024"
+  EMBEDDING_BATCH_SIZE: "16"
+  AUTH_MODE: "aad"
+  AAD_TENANT_ID: ""
+  AAD_CLIENT_ID: ""
+  AAD_ALLOWED_TENANTS: ""
+  AAD_REQUIRE_SCOPE: "access_as_user"
+  AAD_CLOCK_SKEW_SECONDS: "60"
+  ADMIN_EMAILS: ""
+  COMPLIANCE_EMAILS: ""
+  GRAPH_ENABLED: "false"
+  GRAPH_AUTH_MODE: "obo"
+  SYNC_GROUP_ID: ""
+  SYNC_USERS: ""
+  SYNC_INTERVAL_MINUTES: "15"
+  SYNC_MAX_MESSAGES_PER_RUN: "200"
+  PRECOMPUTE_ENABLED: "false"
+  DAILY_BRIEF_ENABLED: "false"
+  DAILY_BRIEF_HOUR: "7"
+  TRIAGE_ENABLED: "true"
+  ANALYSIS_CACHE_ENABLED: "true"
+  ANALYSIS_CACHE_TTL_HOURS: "72"
+  DEMO_SEED: "false"
+  DB_AUTO_MIGRATE: "false"
+  DB_POOL_MIN: "0"
+  DB_POOL_MAX: "10"
+  DB_STATEMENT_TIMEOUT_MS: "15000"
+  DB_IDLE_TIMEOUT_MS: "30000"
+  DB_CONNECTION_TIMEOUT_MS: "5000"
+  TRUST_PROXY: "true"
+  TZ: "Europe/Zurich"
+  IDEMPOTENCY_TTL_HOURS: "24"
+  PROMPT_VERSION: "2026-09-v2"
+  THREAD_MAX_MESSAGES: "12"
+  EMBEDDING_CACHE_ENABLED: "true"
+  EMBEDDING_CACHE_TTL_DAYS: "365"

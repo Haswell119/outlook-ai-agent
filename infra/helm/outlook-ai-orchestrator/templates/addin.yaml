@@ -1,0 +1,190 @@
+{{- if .Values.addin.enabled }}
+{{- $tlsSecret := include "oao.tls.addinSecretName" . -}}
+{{- $selfSigned := eq .Values.addin.tls.mode "selfSigned" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oao.fullname" . }}-addin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "addin") | indent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.addin.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "addin") | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "oao.selectorLabels" (list . "addin") | indent 8 }}
+        {{- with .Values.addin.podLabels }}
+{{ toYaml . | indent 8 }}
+        {{- end }}
+      annotations:
+        checksum/tls-mode: {{ .Values.addin.tls.mode | sha256sum | trunc 16 }}
+        {{- with .Values.addin.podAnnotations }}
+{{ toYaml . | indent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "oao.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- include "oao.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+{{ toYaml .Values.addin.securityContext | indent 8 }}
+      {{- if .Values.addin.affinity }}
+      affinity:
+{{ toYaml .Values.addin.affinity | indent 8 }}
+      {{- else }}
+      affinity:
+{{ include "oao.antiAffinity" (list . "addin" .Values.addin.antiAffinity) | indent 8 }}
+      {{- end }}
+      {{- with .Values.addin.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.addin.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: addin
+          image: {{ include "oao.image" (list . "addin" .Values.addin.image) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: https
+              containerPort: 3000
+              protocol: TCP
+          env:
+            # Only used by the entrypoint when it has to fall back to a
+            # self-signed certificate (CN). The bundle and the Office
+            # manifests are baked at build time — see infra/docker/README.md.
+            - name: ADDIN_HOST
+              value: {{ .Values.hosts.addin | quote }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+{{ toYaml .Values.addin.resources | indent 12 }}
+          securityContext:
+{{ toYaml .Values.addin.containerSecurityContext | indent 12 }}
+          volumeMounts:
+            - name: certs
+              mountPath: /etc/nginx/certs
+              readOnly: {{ not $selfSigned }}
+            # nginx runs with a read-only root filesystem: every path it needs
+            # to write is an emptyDir (see infra/docker/nginx.conf).
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-conf-d
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: certs
+          {{- if $selfSigned }}
+          emptyDir:
+            sizeLimit: 8Mi
+          {{- else }}
+          secret:
+            secretName: {{ $tlsSecret }}
+            defaultMode: 0400
+            items:
+              - key: tls.crt
+                path: addin.crt
+              - key: tls.key
+                path: addin.key
+          {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: nginx-cache
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: nginx-conf-d
+          emptyDir:
+            sizeLimit: 8Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oao.fullname" . }}-addin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "addin") | indent 4 }}
+  annotations:
+    {{- if and .Values.ingress.enabled (contains "traefik" .Values.ingress.className) }}
+    # The pod terminates TLS itself: Traefik must speak HTTPS to it.
+    traefik.ingress.kubernetes.io/service.serversscheme: https
+    {{- if .Values.addin.traefik.serversTransport.enabled }}
+    traefik.ingress.kubernetes.io/service.serverstransport: {{ printf "%s-%s-addin@kubernetescrd" .Release.Namespace (include "oao.fullname" .) }}
+    {{- end }}
+    {{- end }}
+    {{- with .Values.addin.service.annotations }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.addin.service.type }}
+  ports:
+    - name: https
+      port: {{ .Values.addin.service.port }}
+      targetPort: https
+      protocol: TCP
+  selector:
+{{ include "oao.selectorLabels" (list . "addin") | indent 4 }}
+{{- if .Values.addin.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "oao.fullname" . }}-addin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "addin") | indent 4 }}
+spec:
+  minAvailable: {{ .Values.addin.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "addin") | indent 6 }}
+{{- end }}
+{{- if .Values.addin.traefik.serversTransport.enabled }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: {{ include "oao.fullname" . }}-addin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "addin") | indent 4 }}
+spec:
+  serverName: {{ .Values.hosts.addin | quote }}
+  {{- if .Values.addin.traefik.serversTransport.rootCAsSecret }}
+  rootCAsSecrets:
+    - {{ .Values.addin.traefik.serversTransport.rootCAsSecret }}
+  {{- else }}
+  insecureSkipVerify: {{ .Values.addin.traefik.serversTransport.insecureSkipVerify }}
+  {{- end }}
+{{- end }}
+{{- end }}

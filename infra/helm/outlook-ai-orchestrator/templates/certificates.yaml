@@ -1,0 +1,79 @@
+{{/*
+  cert-manager Certificates. NKP ships cert-manager; issue from the internal
+  Northbridge CA (a ClusterIssuer of kind CA or an ACME/step-ca issuer) so no
+  certificate material is ever stored in git.
+*/}}
+{{- if and .Values.addin.enabled (eq .Values.addin.tls.mode "certManager") }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "oao.fullname" . }}-addin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "addin") | indent 4 }}
+spec:
+  secretName: {{ include "oao.tls.addinSecretName" . }}
+  commonName: {{ .Values.hosts.addin | quote }}
+  dnsNames:
+    - {{ .Values.hosts.addin | quote }}
+  duration: {{ .Values.addin.tls.duration }}
+  renewBefore: {{ .Values.addin.tls.renewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+  issuerRef:
+{{ toYaml .Values.addin.tls.issuerRef | indent 4 }}
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.ingress.tls.enabled .Values.ingress.tls.certManager.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "oao.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-api") | indent 4 }}
+spec:
+  secretName: {{ include "oao.tls.apiSecretName" . }}
+  commonName: {{ .Values.hosts.api | quote }}
+  dnsNames:
+    - {{ .Values.hosts.api | quote }}
+  duration: {{ .Values.ingress.tls.certManager.duration }}
+  renewBefore: {{ .Values.ingress.tls.certManager.renewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+  issuerRef:
+{{ toYaml .Values.ingress.tls.certManager.issuerRef | indent 4 }}
+{{- if .Values.admin.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "oao.fullname" . }}-admin
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "admin") | indent 4 }}
+spec:
+  secretName: {{ include "oao.tls.adminSecretName" . }}
+  commonName: {{ .Values.hosts.admin | quote }}
+  dnsNames:
+    - {{ .Values.hosts.admin | quote }}
+  duration: {{ .Values.ingress.tls.certManager.duration }}
+  renewBefore: {{ .Values.ingress.tls.certManager.renewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+  issuerRef:
+{{ toYaml .Values.ingress.tls.certManager.issuerRef | indent 4 }}
+{{- end }}
+{{- end }}

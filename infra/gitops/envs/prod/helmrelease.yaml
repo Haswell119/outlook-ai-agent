@@ -1,0 +1,53 @@
+# Production. Le chart est lu depuis le tag git courant (GitRepository
+# `oao-release`, ref.semver) : values.yaml + values-nkp.yaml du chart, puis
+# l'overlay d'environnement (ConfigMap oao-values), puis les secrets
+# (Secret oao-secrets chiffré SOPS, référencé via secrets.existingSecret).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: oao
+  namespace: oao
+spec:
+  interval: 10m
+  releaseName: oao
+  targetNamespace: oao
+  chart:
+    spec:
+      chart: infra/helm/outlook-ai-orchestrator
+      sourceRef:
+        kind: GitRepository
+        name: oao-release
+        namespace: flux-system
+      # Les fichiers sont relatifs au répertoire du chart.
+      valuesFiles:
+        - values.yaml
+        - values-nkp.yaml
+      interval: 10m
+  install:
+    createNamespace: false
+    remediation:
+      retries: 2
+    # Laisse au hook de migration le temps de tourner avant l'échec.
+    timeout: 15m
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 2
+      remediateLastFailure: true
+      strategy: rollback
+    timeout: 15m
+  rollback:
+    cleanupOnFail: true
+    recreate: false
+  driftDetection:
+    mode: enabled
+  valuesFrom:
+    - kind: ConfigMap
+      name: oao-values
+      valuesKey: values.yaml
+  values:
+    # Les secrets ne transitent jamais par ce fichier : ils vivent dans le
+    # Secret oao-secrets (SOPS), consommé via existingSecret.
+    secrets:
+      create: false
+      existingSecret: oao-secrets

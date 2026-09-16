@@ -1,0 +1,250 @@
+# ---------------------------------------------------------------------------
+# Outlook AI Orchestrator — déploiement Docker depuis les images publiées.
+#
+# Chemin de secours (site unique, pas de Kubernetes) : la cible de production
+# recommandée reste NKP — infra/helm + infra/gitops, voir docs/NKP.md. Ce
+# fichier ne fournit ni haute disponibilité, ni HPA, ni NetworkPolicy, ni
+# rotation de certificat automatique.
+#
+#   export OAO_VERSION=1.2.3
+#   cp .env.example .env     # puis renseigner LLM_*, AAD_*, ADMIN_*, POSTGRES_*
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml ps
+#
+# Vérification de la chaîne d'approvisionnement avant tout `up` :
+#   cosign verify ghcr.io/<owner>/oao-orchestrator:$OAO_VERSION \
+#     --certificate-identity-regexp '^https://github.com/<owner>/.*' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+# ---------------------------------------------------------------------------
+
+name: oao-prod
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: always
+    <<: *logging
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-oao}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+    volumes:
+      - oao_prod_postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres-init:/docker-entrypoint-initdb.d:ro
+      - oao_prod_backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-oao}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    # Jamais publié sur l'hôte : seul le réseau interne y accède.
+    networks: [oao]
+
+  migrate:
+    image: ${OAO_REGISTRY:-ghcr.io/northbridge-capital}/oao-orchestrator:${OAO_VERSION:-0.1.0}
+    command: ["node", "apps/orchestrator/dist/adapters/db/migrate.js"]
+    restart: "no"
+    <<: *logging
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-oao}
+      ROLE: migrate
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [oao]
+
+  orchestrator:
+    image: ${OAO_REGISTRY:-ghcr.io/northbridge-capital}/oao-orchestrator:${OAO_VERSION:-0.1.0}
+    restart: always
+    <<: *logging
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-oao}
+      DB_AUTO_MIGRATE: "false"
+      NODE_ENV: production
+      ROLE: api
+      PORT: "8080"
+      AUTH_MODE: ${AUTH_MODE:-aad}
+      CORS_ORIGINS: https://${ADDIN_HOST:?ADDIN_HOST is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${ORCHESTRATOR_BIND:-127.0.0.1}:8080:8080"
+    read_only: true
+    tmpfs: [/tmp]
+    # Une seule instance publie le port 8080 : pour scaler, retirer la section
+    # `ports` et placer un reverse proxy (Traefik/nginx) devant, ou passer sur
+    # Kubernetes — c'est précisément ce que fait infra/helm.
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2G }
+        reservations: { cpus: "0.5", memory: 1G }
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/api/v1/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [oao]
+
+  # ROLE=worker n'ouvre aucun port (servesApi() est faux) : ni healthcheck ni
+  # /metrics ici. Le chart Helm déploie ce pod en ROLE=all pour que Prometheus
+  # puisse scraper oao_mailbox_sync_lag_seconds.
+  worker:
+    image: ${OAO_REGISTRY:-ghcr.io/northbridge-capital}/oao-orchestrator:${OAO_VERSION:-0.1.0}
+    restart: always
+    <<: *logging
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-oao}
+      DB_AUTO_MIGRATE: "false"
+      NODE_ENV: production
+      ROLE: worker
+      PORT: "8080"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    # Exactement une instance : l'élection de leader passe par un advisory
+    # lock PostgreSQL, une seconde instance resterait inactive.
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2G }
+        reservations: { cpus: "0.5", memory: 1G }
+    networks: [oao]
+
+  admin:
+    image: ${OAO_REGISTRY:-ghcr.io/northbridge-capital}/oao-admin:${OAO_VERSION:-0.1.0}
+    restart: always
+    <<: *logging
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      ORCHESTRATOR_URL: http://orchestrator:8080
+      ADMIN_AUTH_MODE: ${ADMIN_AUTH_MODE:-aad}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:?ADMIN_API_TOKEN is required}
+      ADMIN_MOCK: "false"
+      # Noms issus de apps/admin/src/env.ts (schéma propre au dashboard).
+      ADMIN_DEFAULT_LANGUAGE: ${ADMIN_DEFAULT_LANGUAGE:-fr}
+      ADMIN_TENANT_NAME: ${ORGANIZATION_NAME:-Northbridge Capital}
+      ADMIN_TZ: ${ADMIN_TZ:-Europe/Zurich}
+      ADMIN_SESSION_MAX_AGE: ${ADMIN_SESSION_MAX_AGE:-3600}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      COMPLIANCE_EMAILS: ${COMPLIANCE_EMAILS:-}
+      AUTH_URL: https://${ADMIN_HOST:?ADMIN_HOST is required}
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      AUTH_MICROSOFT_ENTRA_ID_ID: ${AUTH_MICROSOFT_ENTRA_ID_ID:-}
+      AUTH_MICROSOFT_ENTRA_ID_SECRET: ${AUTH_MICROSOFT_ENTRA_ID_SECRET:-}
+      # Auth.js v5 identifie le tenant par l'issuer (pas de *_TENANT_ID).
+      AUTH_MICROSOFT_ENTRA_ID_ISSUER: ${AUTH_MICROSOFT_ENTRA_ID_ISSUER:-https://login.microsoftonline.com/${AAD_TENANT_ID}/v2.0}
+      # Scope demandé à la connexion : sans lui, ADMIN_AUTH_MODE=aad refuse de
+      # démarrer (apps/admin/src/env.ts).
+      ORCHESTRATOR_API_CLIENT_ID: ${ORCHESTRATOR_API_CLIENT_ID:-${AAD_CLIENT_ID:-}}
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    ports:
+      - "${ADMIN_BIND:-127.0.0.1}:3001:3001"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/admin/.next/cache
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [oao]
+
+  addin:
+    # L'image add-in fige les hôtes au build : utiliser le tag construit avec
+    # ADDIN_HOST/API_HOST de cet environnement (infra/docker/README.md).
+    image: ${OAO_REGISTRY:-ghcr.io/northbridge-capital}/oao-addin:${OAO_VERSION:-0.1.0}
+    restart: always
+    <<: *logging
+    environment:
+      ADDIN_HOST: ${ADDIN_HOST}
+    ports:
+      - "${ADDIN_BIND:-0.0.0.0}:3000:3000"
+    volumes:
+      # Certificat réel obligatoire : Outlook refuse un certificat auto-signé.
+      # Placer addin.crt + addin.key (PKI interne) dans ce répertoire.
+      - ${ADDIN_CERT_DIR:-./certs/addin}:/etc/nginx/certs:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /etc/nginx/conf.d
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--no-check-certificate", "-O", "/dev/null", "https://127.0.0.1:3000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [oao]
+
+  # Sauvegarde logique quotidienne (équivalent du CronJob du chart Helm).
+  # `docker compose -f docker-compose.prod.yml --profile backup run --rm backup`
+  # ou via une tâche cron/systemd-timer de l'hôte.
+  backup:
+    image: pgvector/pgvector:pg16
+    profiles: ["backup"]
+    restart: "no"
+    <<: *logging
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        STAMP="$$(date -u +%Y%m%dT%H%M%SZ)"
+        OUT="/backups/oao-$${STAMP}.dump"
+        pg_dump --format=custom --compress=6 --no-owner --no-acl --file="$${OUT}" "$${DATABASE_URL}"
+        ls -lh "$${OUT}"
+        find /backups -name 'oao-*.dump' -type f -mtime +${BACKUP_RETENTION_DAYS:-14} -print -delete
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-oao}
+    volumes:
+      - oao_prod_backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [oao]
+
+networks:
+  oao:
+    driver: bridge
+
+volumes:
+  oao_prod_postgres_data:
+  oao_prod_backups:

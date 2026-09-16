@@ -1,0 +1,45 @@
+---
+# Source: outlook-ai-orchestrator/templates/servicemonitor.yaml
+# Prometheus Operator (kube-prometheus-stack ships with NKP/Kommander).
+# /metrics is protected by METRICS_TOKEN: the scrape presents it as a bearer
+# token read from the release Secret. The Prometheus instance must be allowed
+# to read Secrets in this namespace (Prometheus Operator resolves the
+# reference server-side).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: oao
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - oao
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [outlook-ai-orchestrator]
+      - key: app.kubernetes.io/instance
+        operator: In
+        values: [oao]
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [orchestrator-api, orchestrator-worker]
+  endpoints:
+    - port: http
+      path: /metrics
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 10s
+      bearerTokenSecret:
+        name: oao-secrets
+        key: METRICS_TOKEN

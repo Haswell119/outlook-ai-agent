@@ -1,0 +1,226 @@
+# ---------------------------------------------------------------------------
+# Outlook AI Orchestrator — full local stack (PostgreSQL/pgvector +
+# orchestrator api + orchestrator worker + admin + addin), built from source.
+#
+#   pnpm setup:dev            # creates .env from .env.example
+#   docker compose up --build
+#
+# Portable across Docker Desktop (Windows/macOS) and Docker Engine (Linux):
+# no host networking, no bind mount that requires POSIX permissions, named
+# volumes only, healthcheck on every service.
+#
+# Production runs on Kubernetes/NKP (infra/helm, infra/gitops). For a
+# Docker-only deployment from published images, see docker-compose.prod.yml.
+# ---------------------------------------------------------------------------
+
+name: oao
+
+x-orchestrator-image: &orchestrator-build
+  build:
+    context: .
+    dockerfile: infra/docker/orchestrator.Dockerfile
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oao}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oao}
+      POSTGRES_DB: ${POSTGRES_DB:-oao}
+      # Keep the data directory in a sub-path: the image refuses to
+      # initialise a non-empty mount point (and Docker Desktop volumes are).
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - oao_postgres_data:/var/lib/postgresql/data
+      # Enables the `vector` extension on first init (empty volume only).
+      - ./infra/docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oao} -d ${POSTGRES_DB:-oao}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [oao]
+
+  # One-shot schema migration, exactly like the Helm pre-upgrade hook.
+  migrate:
+    <<: *orchestrator-build
+    command: ["node", "apps/orchestrator/dist/adapters/db/migrate.js"]
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-oao}:${POSTGRES_PASSWORD:-oao}@postgres:5432/${POSTGRES_DB:-oao}
+      ROLE: migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [oao]
+
+  orchestrator:
+    <<: *orchestrator-build
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      # Override the host-facing DATABASE_URL from .env with the in-network
+      # compose service name.
+      DATABASE_URL: postgres://${POSTGRES_USER:-oao}:${POSTGRES_PASSWORD:-oao}@postgres:5432/${POSTGRES_DB:-oao}
+      DB_AUTO_MIGRATE: "false"
+      ROLE: api
+      PORT: "8080"
+    ports:
+      - "${ORCHESTRATOR_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Same posture as the Kubernetes deployment: read-only rootfs + tmpfs.
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/api/v1/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [oao]
+
+  # Background role: mailbox sync, precompute, daily brief, retention.
+  # Disabled by default locally (`docker compose --profile worker up`) because
+  # it needs Microsoft Graph to do anything useful.
+  #
+  # ROLE=worker never opens a port (servesApi() is false), hence no healthcheck
+  # and no /metrics here. The Helm chart runs this pod as ROLE=all so Prometheus
+  # can scrape oao_mailbox_sync_lag_seconds — see infra/helm/.../README.md.
+  worker:
+    <<: *orchestrator-build
+    profiles: ["worker"]
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-oao}:${POSTGRES_PASSWORD:-oao}@postgres:5432/${POSTGRES_DB:-oao}
+      DB_AUTO_MIGRATE: "false"
+      ROLE: worker
+      PORT: "8080"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [oao]
+
+  admin:
+    build:
+      context: .
+      dockerfile: infra/docker/admin.Dockerfile
+    restart: unless-stopped
+    environment:
+      ORCHESTRATOR_URL: ${ORCHESTRATOR_URL:-http://orchestrator:8080}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-change-me}
+      ADMIN_AUTH_MODE: ${ADMIN_AUTH_MODE:-token}
+      ADMIN_MOCK: ${ADMIN_MOCK:-false}
+      # Names from apps/admin/src/env.ts (the dashboard has its own schema).
+      ADMIN_DEFAULT_LANGUAGE: ${ADMIN_DEFAULT_LANGUAGE:-fr}
+      ADMIN_TENANT_NAME: ${ORGANIZATION_NAME:-Northbridge Capital}
+      ADMIN_TZ: ${ADMIN_TZ:-Europe/Zurich}
+      ADMIN_DEV_EMAIL: ${ADMIN_DEV_EMAIL:-admin@northbridge.example}
+      ADMIN_DEV_NAME: ${ADMIN_DEV_NAME:-Dashboard Operator}
+      ADMIN_DEV_ROLES: ${ADMIN_DEV_ROLES:-admin}
+      PORT: "3001"
+    ports:
+      - "${ADMIN_PORT:-3001}:3001"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/admin/.next/cache
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [oao]
+
+  addin:
+    build:
+      context: .
+      dockerfile: infra/docker/addin.Dockerfile
+      args:
+        ADDIN_HOST: ${ADDIN_HOST:-localhost:3000}
+        API_HOST: ${API_HOST:-localhost:8080}
+        ADMIN_HOST: ${ADMIN_HOST:-localhost:3001}
+        AAD_CLIENT_ID: ${AAD_CLIENT_ID:-}
+        # The Dockerfile derives VITE_API_BASE_URL=https://$API_HOST (origin
+        # only: Routes.* already carry the /api/v1 prefix).
+        VITE_AUTH_MODE: ${VITE_AUTH_MODE:-dev}
+        VITE_API_MOCK: ${VITE_API_MOCK:-false}
+        VITE_ONSEND_FAIL_MODE: ${VITE_ONSEND_FAIL_MODE:-open}
+        VITE_COMPLIANCE_EMAIL: ${VITE_COMPLIANCE_EMAIL:-compliance@northbridge.example}
+    restart: unless-stopped
+    environment:
+      # Used only for the CN of the self-signed fallback certificate.
+      ADDIN_HOST: ${ADDIN_HOST:-localhost}
+    ports:
+      - "3000:3000"
+    volumes:
+      # A named volume, so the container can generate its own self-signed
+      # certificate on first start on every OS. To serve a trusted cert
+      # instead, run `pnpm certs` and swap this for the bind mount below.
+      - oao_addin_certs:/etc/nginx/certs
+      # - ./apps/addin/certs:/etc/nginx/certs:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /etc/nginx/conf.d
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--no-check-certificate", "-O", "/dev/null", "https://127.0.0.1:3000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [oao]
+
+  # ---------------------------------------------------------------------------
+  # Optional: local model serving, for a machine with no access to the
+  # internal GPU endpoint. Not needed in normal operation — point LLM_BASE_URL
+  # at the internal vLLM endpoint instead. Enable with:
+  #   docker compose --profile llm up
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["llm"]
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - oao_ollama_data:/root/.ollama
+    networks: [oao]
+    # After start: `docker compose exec ollama ollama pull qwen3`, then set
+    # LLM_BASE_URL=http://ollama:11434/v1 and LLM_MODEL=qwen3 in .env.
+    # Ollama does not serve /v1/embeddings for every model — prefer vLLM or
+    # text-embeddings-inference for bge-m3 when EMBEDDINGS_ENABLED=true.
+
+networks:
+  oao:
+    driver: bridge
+
+volumes:
+  oao_postgres_data:
+  oao_addin_certs:
+  oao_ollama_data:

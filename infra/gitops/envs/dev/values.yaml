@@ -1,0 +1,72 @@
+# Overlay d'environnement DEV (aucun secret ici).
+hosts:
+  api: api.dev.oao.northbridge.example
+  admin: admin.dev.oao.northbridge.example
+  addin: addin.dev.oao.northbridge.example
+
+image:
+  tag: "main" # {"$imagepolicy": "flux-system:oao-dev:tag"}
+  pullPolicy: Always
+
+config:
+  nodeEnv: production
+  logLevel: debug
+  apiDocsEnabled: true
+
+llm:
+  # L'environnement de dev peut tourner sans GPU.
+  provider: mock
+  embeddings:
+    enabled: false
+
+auth:
+  mode: aad
+  aad:
+    tenantId: "00000000-0000-0000-0000-000000000000"
+    clientId: "00000000-0000-0000-0000-000000000000"
+
+admin:
+  # token : identité de développement, sans authentification réelle. Le
+  # dashboard refuse de servir des données réelles en NODE_ENV=production avec
+  # ce mode ; l'overlay dev l'assume avec mock: true.
+  authMode: token
+  mock: true
+
+graph:
+  enabled: false
+
+features:
+  precompute: false
+  dailyBrief: false
+
+orchestrator:
+  api:
+    replicaCount: 1
+    autoscaling:
+      enabled: false
+    podDisruptionBudget:
+      enabled: false
+  worker:
+    enabled: true
+    role: all
+
+addin:
+  # L'image add-in fige les hôtes au build (bundle Vite + manifests Office) :
+  # l'image de release pointe vers la prod. En dev on sideload l'add-in depuis
+  # le serveur local (`pnpm dev`, https://localhost:3000), ou on reconstruit
+  # une image dédiée avec --build-arg ADDIN_HOST/API_HOST (infra/docker/README.md).
+  enabled: false
+  replicaCount: 1
+  podDisruptionBudget:
+    enabled: false
+
+postgres:
+  enabled: true
+  persistence:
+    size: 10Gi
+    storageClass: nutanix-volume
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  backup:
+    enabled: false

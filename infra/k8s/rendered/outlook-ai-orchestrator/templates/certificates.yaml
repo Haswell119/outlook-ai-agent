@@ -1,0 +1,96 @@
+---
+# Source: outlook-ai-orchestrator/templates/certificates.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: oao-addin
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: addin
+spec:
+  secretName: oao-addin-tls
+  commonName: "addin.oao.northbridge.example"
+  dnsNames:
+    - "addin.oao.northbridge.example"
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: northbridge-internal-ca
+---
+# Source: outlook-ai-orchestrator/templates/certificates.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: oao-api
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: orchestrator-api
+spec:
+  secretName: oao-api-tls
+  commonName: "api.oao.northbridge.example"
+  dnsNames:
+    - "api.oao.northbridge.example"
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: northbridge-internal-ca
+---
+# Source: outlook-ai-orchestrator/templates/certificates.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: oao-admin
+  namespace: oao
+  labels:
+    helm.sh/chart: outlook-ai-orchestrator-0.1.0
+    app.kubernetes.io/name: outlook-ai-orchestrator
+    app.kubernetes.io/instance: oao
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: outlook-ai-orchestrator
+    app.kubernetes.io/component: admin
+spec:
+  secretName: oao-admin-tls
+  commonName: "admin.oao.northbridge.example"
+  dnsNames:
+    - "admin.oao.northbridge.example"
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: northbridge-internal-ca

@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: oao
+
+resources:
+  - namespace.yaml
+  - helmrelease.yaml
+  # Copier secrets.example.yaml -> secrets.enc.yaml, chiffrer avec
+  #   sops --encrypt --in-place infra/gitops/envs/prod/secrets.enc.yaml
+  # puis décommenter la ligne ci-dessous. Flux le déchiffre avec la clé age
+  # référencée par la Kustomization (clusters/nkp-prod/).
+  # - secrets.enc.yaml
+
+configMapGenerator:
+  - name: oao-values
+    files:
+      - values.yaml
+
+generatorOptions:
+  # Le HelmRelease référence le ConfigMap par son nom : pas de suffixe de hash.
+  disableNameSuffixHash: true
+  labels:
+    app.kubernetes.io/part-of: outlook-ai-orchestrator

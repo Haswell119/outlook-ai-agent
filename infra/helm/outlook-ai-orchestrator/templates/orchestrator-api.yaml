@@ -1,0 +1,199 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oao.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-api") | indent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  {{- if not .Values.orchestrator.api.autoscaling.enabled }}
+  replicas: {{ .Values.orchestrator.api.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "orchestrator-api") | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "oao.selectorLabels" (list . "orchestrator-api") | indent 8 }}
+        {{- with .Values.orchestrator.api.podLabels }}
+{{ toYaml . | indent 8 }}
+        {{- end }}
+      annotations:
+{{ include "oao.checksums" . | indent 8 }}
+        {{- with .Values.orchestrator.api.podAnnotations }}
+{{ toYaml . | indent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "oao.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- include "oao.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.orchestrator.api.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+{{ toYaml .Values.orchestrator.securityContext | indent 8 }}
+      {{- if .Values.orchestrator.api.affinity }}
+      affinity:
+{{ toYaml .Values.orchestrator.api.affinity | indent 8 }}
+      {{- else }}
+      affinity:
+{{ include "oao.antiAffinity" (list . "orchestrator-api" .Values.orchestrator.api.antiAffinity) | indent 8 }}
+      {{- end }}
+      {{- with .Values.orchestrator.api.topologySpreadConstraints }}
+      topologySpreadConstraints:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.orchestrator.api.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.orchestrator.api.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: orchestrator
+          image: {{ include "oao.image" (list . "orchestrator" .Values.orchestrator.image) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["apps/orchestrator/dist/server.js"]
+          command: ["node"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: ROLE
+              value: api
+            # `runsWorkers()` is false for ROLE=api anyway; set explicitly so
+            # the split between the two Deployments is visible in the pod spec.
+            - name: WORKERS_ENABLED
+              value: "false"
+{{ include "oao.secretEnv" . | indent 12 }}
+            {{- with .Values.orchestrator.api.extraEnv }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "oao.fullname" . }}-config
+            {{- if not .Values.secrets.mountAsFiles }}
+            - secretRef:
+                name: {{ include "oao.secretName" . }}
+            {{- end }}
+          {{- if .Values.orchestrator.api.probes.startup.enabled }}
+          startupProbe:
+            httpGet:
+              path: /api/v1/live
+              port: http
+            periodSeconds: {{ .Values.orchestrator.api.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.orchestrator.api.probes.startup.failureThreshold }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /api/v1/live
+              port: http
+{{ toYaml .Values.orchestrator.api.probes.liveness | indent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /api/v1/ready
+              port: http
+{{ toYaml .Values.orchestrator.api.probes.readiness | indent 12 }}
+          resources:
+{{ toYaml .Values.orchestrator.api.resources | indent 12 }}
+          securityContext:
+{{ toYaml .Values.orchestrator.containerSecurityContext | indent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+{{ include "oao.secretVolumeMount" . | indent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+{{ include "oao.secretVolume" . | indent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oao.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-api") | indent 4 }}
+  {{- with .Values.orchestrator.service.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.orchestrator.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.orchestrator.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+{{ include "oao.selectorLabels" (list . "orchestrator-api") | indent 4 }}
+{{- if .Values.orchestrator.api.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "oao.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-api") | indent 4 }}
+spec:
+  minAvailable: {{ .Values.orchestrator.api.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "orchestrator-api") | indent 6 }}
+{{- end }}
+{{- if .Values.orchestrator.api.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "oao.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "orchestrator-api") | indent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "oao.fullname" . }}-api
+  minReplicas: {{ .Values.orchestrator.api.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.orchestrator.api.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.orchestrator.api.autoscaling.targetCPUUtilizationPercentage }}
+    {{- with .Values.orchestrator.api.autoscaling.targetRequestsPerSecond }}
+    # Custom pod metric: requires prometheus-adapter to expose
+    # `oao_http_requests_per_second` (see docs/OPERATIONS.md §capacity).
+    - type: Pods
+      pods:
+        metric:
+          name: oao_http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: {{ . | quote }}
+    {{- end }}
+  {{- with .Values.orchestrator.api.autoscaling.behavior }}
+  behavior:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+{{- end }}

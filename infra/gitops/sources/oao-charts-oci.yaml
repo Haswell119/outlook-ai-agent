@@ -1,0 +1,21 @@
+# Alternative au chart servi depuis Git : le chart packagé et signé (cosign)
+# publié par .github/workflows/release.yml comme artefact OCI.
+#
+#   helm pull oci://ghcr.io/northbridge-capital/charts/outlook-ai-orchestrator --version 0.1.0
+#
+# Pour l'utiliser dans un HelmRelease, remplacer chart.spec.sourceRef par :
+#   sourceRef: { kind: HelmRepository, name: oao-charts, namespace: flux-system }
+#   chart: outlook-ai-orchestrator
+#   version: "0.1.0"
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: oao-charts
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 30m
+  url: oci://ghcr.io/northbridge-capital/charts
+  # Registre privé : Secret de type kubernetes.io/dockerconfigjson.
+  secretRef:
+    name: ghcr-pull
