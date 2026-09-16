@@ -71,6 +71,8 @@ services:
       DB_AUTO_MIGRATE: "false"
       ROLE: api
       PORT: "8080"
+      # The container must listen on all interfaces whatever .env says for local dev.
+      HOST: 0.0.0.0
     ports:
       - "${ORCHESTRATOR_PORT:-8080}:8080"
     depends_on:
