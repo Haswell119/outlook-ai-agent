@@ -379,6 +379,8 @@ export const IndexEmailsResponseSchema = z.object({
   indexed: z.number().int(),
   skipped: z.number().int(),
   mode: z.enum(["hybrid", "lexical"]),
+  /** Set when embeddings could not be computed/stored (endpoint down, dimension mismatch…): lexical search still works. */
+  warning: z.string().optional(),
 });
 export type IndexEmailsResponse = z.infer<typeof IndexEmailsResponseSchema>;
 
