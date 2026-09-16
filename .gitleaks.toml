@@ -1,0 +1,10 @@
+# gitleaks configuration — extends the default rule set.
+# Documentation examples use <angle-bracket> placeholders; never commit real values.
+title = "outlook-ai-orchestrator"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Angle-bracket placeholders used in documentation and examples"
+regexes = ['''<[A-Za-z0-9._-]+>''']

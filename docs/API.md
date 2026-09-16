@@ -265,7 +265,7 @@ ACTION_ID=$(echo "$PROPOSAL" | jq -r .actions[0].id)
 # stockée au lieu d'exécuter les actions une seconde fois.
 curl -s -X POST "$API/actions/approve" \
   -H "Content-Type: application/json" \
-  -H "Idempotency-Key: 6f1c2d84-approve-1" \
+  -H "Idempotency-Key: <uuid-v4-unique-par-tentative>" \
   -H "x-user-email: demo@northbridge.example" -H "x-user-name: Demo User" \
   -d "{ \"proposalId\": \"$PROPOSAL_ID\", \"actionIds\": [\"$ACTION_ID\"] }" | jq
 ```

@@ -43,8 +43,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // `pnpm --filter @oao/admin build` must have run first.
-    command: `npx next start -p ${PORT}`,
+    // Builds first when no production build exists (CI), then `next start`.
+    command: `node scripts/e2e-server.mjs`,
     url: `${baseURL}/api/ping`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
@@ -52,6 +52,7 @@ export default defineConfig({
     stderr: "pipe",
     env: {
       NODE_ENV: "production",
+      E2E_PORT: String(PORT),
       ADMIN_MOCK: "true",
       ADMIN_AUTH_MODE: "token",
       ADMIN_TENANT_NAME: "Northbridge Capital",
