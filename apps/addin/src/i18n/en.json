@@ -96,6 +96,8 @@
     "indexRecent": "Index recent emails",
     "indexHint": "Indexes the emails you opened in this session. When Microsoft Graph is enabled, the orchestrator indexes your mailbox directly.",
     "indexed": "{indexed} emails indexed ({skipped} skipped, mode {mode}).",
+    "indexedDegraded": "{indexed} emails indexed ({skipped} skipped) — search will be keyword-only: {warning}",
+    "indexFailed": "Indexing failed: {error}",
     "nothingToIndex": "Open a few emails first — nothing to index yet.",
     "empty": "Ask anything about your emails, e.g. \"Find the email where the client approved the mandate.\"",
     "thinking": "Searching your emails…",

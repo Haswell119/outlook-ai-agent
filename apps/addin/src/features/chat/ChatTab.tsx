@@ -128,9 +128,11 @@ export function ChatTab({ email, fixedScope }: ChatTabProps) {
     setIndexing(true);
     try {
       const r = await api.indexEmails({ emails });
-      toast.success(t("chat.indexed", { indexed: r.indexed, skipped: r.skipped, mode: r.mode }));
+      // Degraded indexing (no embeddings) still makes the emails searchable: say so instead of "success".
+      if (r.warning) toast.warning(t("chat.indexedDegraded", { indexed: r.indexed, skipped: r.skipped, warning: r.warning }));
+      else toast.success(t("chat.indexed", { indexed: r.indexed, skipped: r.skipped, mode: r.mode }));
     } catch (e) {
-      toast.error(errMsg(e));
+      toast.error(t("chat.indexFailed", { error: errMsg(e) }));
     } finally {
       setIndexing(false);
     }

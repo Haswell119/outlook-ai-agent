@@ -96,6 +96,8 @@
     "indexRecent": "Indexer les emails récents",
     "indexHint": "Indexe les emails ouverts pendant cette session. Lorsque Microsoft Graph est activé, l'orchestrateur indexe directement votre boîte aux lettres.",
     "indexed": "{indexed} emails indexés ({skipped} ignorés, mode {mode}).",
+    "indexedDegraded": "{indexed} emails indexés ({skipped} ignorés) — la recherche restera par mots-clés : {warning}",
+    "indexFailed": "Échec de l'indexation : {error}",
     "nothingToIndex": "Ouvrez d'abord quelques emails — rien à indexer pour l'instant.",
     "empty": "Posez une question sur vos emails, p. ex. « Trouve l'email où le client a approuvé le mandat. »",
     "thinking": "Recherche dans vos emails…",
