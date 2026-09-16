@@ -78,11 +78,23 @@ function earliest(text: string, patterns: RegExp[]): number {
   return at;
 }
 
-/** Cut the text at the first quoted-history marker. */
-export function stripQuotedHistory(body: string): { text: string; quoted: string } {
+/** Markers that introduce a *forwarded* message (its content is the point of the email). */
+const FORWARD_MARKERS: RegExp[] = [
+  /^-{2,}\s*(original message|message d'origine|message original|forwarded message|message transféré|message transfere)\s*-{2,}\s*$/im,
+  /^(?:From|De)\s*:\s*.{0,200}$\n^(?:Sent|Envoy(?:é|e)|Date)\s*:\s*.{0,200}$/im,
+  /^(?:Begin forwarded message|D(?:é|e)but du message transf(?:é|e)r(?:é|e))\s*:\s*$/im,
+];
+
+/**
+ * Cut the text at the first quoted-history marker. `kind` tells whether the
+ * quote looks like a forwarded message (header block) or a reply chain.
+ */
+export function stripQuotedHistory(body: string): { text: string; quoted: string; kind: "reply" | "forward" | "none" } {
   const at = earliest(body, QUOTE_MARKERS);
-  if (at < 0) return { text: body, quoted: "" };
-  return { text: body.slice(0, at).trimEnd(), quoted: body.slice(at) };
+  if (at < 0) return { text: body, quoted: "", kind: "none" };
+  const quoted = body.slice(at);
+  const kind = FORWARD_MARKERS.some((re) => re.test(quoted.slice(0, 400))) ? "forward" : "reply";
+  return { text: body.slice(0, at).trimEnd(), quoted, kind };
 }
 
 /**
@@ -173,14 +185,20 @@ export function cleanBody(body: string, opts: CleanOptions = {}): CleanResult {
   const originalChars = body.length;
   const normalised = collapseWhitespace(body);
 
-  const { text: withoutQuote, quoted } = opts.keepQuoted ? { text: normalised, quoted: "" } : stripQuotedHistory(normalised);
+  const { text: withoutQuote, quoted, kind } = opts.keepQuoted ? { text: normalised, quoted: "", kind: "none" as const } : stripQuotedHistory(normalised);
   const afterSig = stripSignature(withoutQuote);
   const afterDisclaimer = stripDisclaimers(afterSig);
   const afterUrls = stripTrackingUrls(afterDisclaimer);
   let text = collapseWhitespace(afterUrls);
 
-  // A message that is *only* quoted history: keep a slice of the quote rather than nothing.
-  if (!text && quoted) text = collapseWhitespace(stripTrackingUrls(stripDisclaimers(quoted)));
+  // The quoted part is kept when it *is* the content: a message made only of
+  // history, or a forward ("FYI, see below" + the forwarded email). A genuine
+  // reply keeps only the author's text — its history is already known.
+  const FORWARD_MIN_OWN_CHARS = 200;
+  if (quoted && (!text || (kind === "forward" && text.length < FORWARD_MIN_OWN_CHARS))) {
+    const quoteText = collapseWhitespace(stripTrackingUrls(stripDisclaimers(quoted)));
+    text = text ? `${text}\n\n${quoteText}` : quoteText;
+  }
 
   const truncated = text.length > maxChars;
   if (truncated) text = capHeadTail(text, maxChars);
