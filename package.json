@@ -5,7 +5,7 @@
   "description": "Outlook AI Orchestrator - secure, human-in-the-loop AI assistant for Outlook (add-in + orchestrator backend + admin dashboard)",
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "pnpm --filter @oao/shared build && pnpm -r --filter \"./apps/**\" build",

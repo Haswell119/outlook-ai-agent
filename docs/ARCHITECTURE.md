@@ -22,7 +22,7 @@ TGI, Azure OpenAI private tenant …). Switching model = changing environment va
 outlook-ai-agent/
 ├── apps/
 │   ├── addin/          # Outlook add-in  — React 18 + TypeScript + Vite + Office.js (Fluent UI v9)
-│   ├── orchestrator/   # AI Orchestrator — Node 20 + Fastify 5 + PostgreSQL (pgvector) + zod
+│   ├── orchestrator/   # AI Orchestrator — Node 22 + Fastify 5 + PostgreSQL (pgvector) + zod
 │   └── admin/          # Admin dashboard — Next.js (App Router) + Tailwind + shadcn/ui + Recharts
 ├── packages/
 │   └── shared/         # @oao/shared — zod contracts + types + route table (single source of truth)

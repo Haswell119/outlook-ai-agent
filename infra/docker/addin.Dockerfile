@@ -19,7 +19,7 @@
 #   - read-only root filesystem compatible: /tmp, /var/cache/nginx,
 #     /etc/nginx/conf.d and /etc/nginx/certs are the only writable paths
 # ---------------------------------------------------------------------------
-ARG NODE_IMAGE=node:20-bookworm-slim
+ARG NODE_IMAGE=node:22-bookworm-slim
 ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.27-alpine
 ARG PNPM_VERSION=10.33.0
 

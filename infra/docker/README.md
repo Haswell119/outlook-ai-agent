@@ -5,8 +5,8 @@ est le monorepo entier ; `.dockerignore` le réduit à ce qui est utile).
 
 | Image | Dockerfile | Base runtime | Port | Utilisateur |
 |---|---|---|---|---|
-| `oao-orchestrator` | `orchestrator.Dockerfile` | `node:20-bookworm-slim` | 8080 | 1001 |
-| `oao-admin` | `admin.Dockerfile` | `node:20-bookworm-slim` | 3001 | 1001 |
+| `oao-orchestrator` | `orchestrator.Dockerfile` | `node:22-bookworm-slim` | 8080 | 1001 |
+| `oao-admin` | `admin.Dockerfile` | `node:22-bookworm-slim` | 3001 | 1001 |
 | `oao-addin` | `addin.Dockerfile` | `nginxinc/nginx-unprivileged:1.27-alpine` | 3000 (HTTPS) | 101 |
 
 Publiées par `.github/workflows/release.yml` sur

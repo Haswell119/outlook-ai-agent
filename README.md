@@ -97,7 +97,7 @@ topologie de déploiement NKP).
 outlook-ai-agent/
 ├── apps/
 │   ├── addin/          # Add-in Outlook — React 18 + TypeScript + Vite + Office.js (Fluent UI v9)
-│   ├── orchestrator/   # AI Orchestrator — Node 20 + Fastify 5 + PostgreSQL (pgvector) + zod
+│   ├── orchestrator/   # AI Orchestrator — Node 22 + Fastify 5 + PostgreSQL (pgvector) + zod
 │   └── admin/          # Dashboard admin — Next.js (App Router) + Tailwind + shadcn/ui + Recharts
 ├── packages/
 │   └── shared/         # @oao/shared — contrats zod + types + table de routes (source unique de vérité)

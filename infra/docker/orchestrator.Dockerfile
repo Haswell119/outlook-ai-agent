@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # ---------------------------------------------------------------------------
-# @oao/orchestrator — Node 20 / Fastify 5 / PostgreSQL(pgvector)
+# @oao/orchestrator — Node 22 / Fastify 5 / PostgreSQL(pgvector)
 # One image, two roles: ROLE=api (HTTP) and ROLE=worker (sync/precompute/
 # retention). The same image also runs the migration Job.
 #
@@ -12,7 +12,7 @@
 #   - read-only root filesystem compatible: only /tmp is written
 #   - secrets accepted as <NAME>_FILE pointing at a mounted file
 # ---------------------------------------------------------------------------
-ARG NODE_IMAGE=node:20-bookworm-slim
+ARG NODE_IMAGE=node:22-bookworm-slim
 ARG PNPM_VERSION=10.33.0
 
 # ---- base: pnpm via corepack ----------------------------------------------

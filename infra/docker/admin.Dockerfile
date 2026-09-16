@@ -9,7 +9,7 @@
 #   - read-only root filesystem compatible: /tmp and
 #     /app/apps/admin/.next/cache are the only writable paths (emptyDir)
 # ---------------------------------------------------------------------------
-ARG NODE_IMAGE=node:20-bookworm-slim
+ARG NODE_IMAGE=node:22-bookworm-slim
 ARG PNPM_VERSION=10.33.0
 
 FROM ${NODE_IMAGE} AS base
