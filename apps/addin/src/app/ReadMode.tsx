@@ -42,7 +42,19 @@ function initialTabOf(value: string | null | undefined): TabKey {
   return TAB_KEYS.includes(value as TabKey) ? (value as TabKey) : "summary";
 }
 
-export function ReadMode({ initialTab, initialView }: { initialTab?: string | null; initialView?: string | null }) {
+export interface ReadModeProps {
+  initialTab?: string | null;
+  initialView?: string | null;
+  /**
+   * Bumped by the app shell on `ItemChanged` (pinned pane, the user clicked
+   * another message in the list). Re-reads the item, which then re-resolves the
+   * analysis through the three tiers — cache first, so switching back and forth
+   * stays free.
+   */
+  itemVersion?: number;
+}
+
+export function ReadMode({ initialTab, initialView, itemVersion = 0 }: ReadModeProps) {
   const s = useStyles();
   const { t, lang } = useI18n();
   const { api, features } = useApp();
@@ -50,8 +62,8 @@ export function ReadMode({ initialTab, initialView }: { initialTab?: string | nu
   const [wholeThread, setWholeThread] = useState(initialView === "thread");
   const liveRef = useRef<HTMLDivElement>(null);
 
-  // 1. current item
-  const emailState = useAsync<EmailContext>(() => readCurrentItem(), []);
+  // 1. current item (re-read whenever the pinned pane follows the selection)
+  const emailState = useAsync<EmailContext>(() => readCurrentItem(), [itemVersion]);
   const email = emailState.data;
 
   useEffect(() => {
@@ -164,7 +176,8 @@ export function ReadMode({ initialTab, initialView }: { initialTab?: string | nu
         {email && tab === "chat" && (
           <ErrorBoundary feature="chat">
             <Suspense fallback={<Skeleton cards={2} />}>
-              <LazyChatTab email={email} />
+              {/* Keyed by item: a chat transcript must never carry over to another email. */}
+              <LazyChatTab key={email.id} email={email} />
             </Suspense>
           </ErrorBoundary>
         )}

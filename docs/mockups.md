@@ -120,3 +120,54 @@ Charts row: **AI activity over time** (multi-line: Summaries, Drafts, Automation
 
 Right **Insights** card: "Automations approval rate **76%** vs 68% last week", "Top users by actions" ranked list, "View full analytics →".
 Footer: "© 2025 ABC Capital. All rights reserved." · "Data is processed in accordance with corporate policies and regulatory requirements." · "Last updated: …".
+
+---
+
+The two screens below have no original Outlook mock-up: they are the same visual
+language applied to the two surfaces that exist **without an opened email**
+(see `apps/addin/README.md` §6 and `docs/screenshots/selection.png` /
+`docs/screenshots/home-tab.png`).
+
+## H. Selection view (several messages selected in the list)
+
+Header subtitle: "Selection". Two stacked cards:
+
+1. **Selection** — card title with a mail-multiple icon, "3 selected" in secondary
+   text on the right. Then one numbered row per message: `1.` + bold subject +
+   grey "Sender · 25 May 2025, 09:24", with an open-external ↗ icon on the right
+   (the whole row is a button and opens the message). Subject only, in grey, when
+   the host would not load the body ("Only 2 of 3 messages could be read in
+   full…", with an info icon).
+2. **What do you want to do?** — a sparkle icon and three stacked full-width
+   buttons: primary **"Synthesise these 3 emails"**, then outline
+   **"Ask about the selection"** and **"Review proposed actions"**. Grey line
+   underneath: "Synthesising and asking use one AI call each. Listing the
+   selection costs nothing."
+
+Synthesising replaces the cards with the **thread synthesis screen** (§C) over the
+selection; "← Back to the 3 selected emails" returns to the list. "Ask about the
+selection" opens the chat (§B) with a single blue scope chip "This selection (3)"
+instead of the conversation/all toggle.
+
+When the host cannot report the selection (classic Outlook, Mailbox < 1.13) the
+view is one amber card: "Multi-select needs the new Outlook or Outlook on the
+web." + the reason in secondary text.
+
+## I. Home surface (Apps rail, no email at all)
+
+Header subtitle: "Your mailbox". Tab list: **Brief** | **Chat** (no Summary or
+Insights — they need a message). First card, mail-read icon, secondary text:
+"Open an email to analyse it — summary, risks and proposed actions need a
+message. Here you get what is mailbox-wide: your daily brief and the chat over
+your indexed emails." Then the **daily brief** (headline card with the
+"Precomputed" badge, What matters today, Priority emails, Open tasks, Deadlines,
+Alerts, Since the previous brief, Regenerate, AI confidence footer) and the
+**Mailbox sync** card ("Up to date" pill, last sync, precomputed analyses,
+indexed emails, pending, next sync, "Sync now"). The Chat tab is §B with a single
+"All emails" scope.
+
+No "Preview mode" pill here: this surface has no mailbox but a real backend. If
+the orchestrator cannot be reached, the pane shows one red card — "Orchestrator
+unreachable", the base URL it tried, "check that the backend is running and that
+VITE_API_BASE_URL points at it", the health error and a **Retry** button — and
+never the sample email.

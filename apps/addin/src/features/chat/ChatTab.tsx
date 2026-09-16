@@ -40,7 +40,18 @@ interface Turn {
   response?: ChatResponse;
 }
 
-export function ChatTab({ email }: { email: EmailContext }) {
+export interface ChatTabProps {
+  /** The opened message, when there is one (read pane). */
+  email?: EmailContext | null;
+  /**
+   * A retrieval scope pinned by the caller — the multi-select selection view
+   * passes `selection:<hash>` here. When `emails` is given they are indexed
+   * (once, on the first question) so the scoped retrieval can find them.
+   */
+  fixedScope?: { conversationId: string; label: string; emails?: EmailContext[] };
+}
+
+export function ChatTab({ email, fixedScope }: ChatTabProps) {
   const s = useStyles();
   const { t, lang } = useI18n();
   const { api } = useApp();
@@ -50,9 +61,11 @@ export function ChatTab({ email }: { email: EmailContext }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [indexing, setIndexing] = useState(false);
-  const [scope, setScope] = useState<"conversation" | "all">("conversation");
+  const [scope, setScope] = useState<"conversation" | "all">(email?.conversationId ? "conversation" : "all");
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
   const endRef = useRef<HTMLDivElement>(null);
+  /** The pinned selection is indexed once per session, on the first question. */
+  const indexedScope = useRef<string | null>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: "end" });
@@ -65,11 +78,29 @@ export function ChatTab({ email }: { email: EmailContext }) {
     setTurns((prev) => [...prev, { role: "user", text: message, at: new Date().toISOString() }]);
     setBusy(true);
     try {
+      // A pinned scope only retrieves what has been indexed under it: index the
+      // selected messages once, right before the first question.
+      if (fixedScope?.emails?.length && indexedScope.current !== fixedScope.conversationId) {
+        setIndexing(true);
+        try {
+          await api.indexEmails({ emails: fixedScope.emails });
+          indexedScope.current = fixedScope.conversationId;
+        } catch (e) {
+          // Retrieval will be thinner, but the question still goes through.
+          toast.info(errMsg(e));
+        } finally {
+          setIndexing(false);
+        }
+      }
       const res = await api.chat({
         sessionId,
         message,
-        currentEmail: email,
-        scope: scope === "conversation" && email.conversationId ? { conversationId: email.conversationId } : {},
+        currentEmail: email ?? undefined,
+        scope: fixedScope
+          ? { conversationId: fixedScope.conversationId }
+          : scope === "conversation" && email?.conversationId
+            ? { conversationId: email.conversationId }
+            : {},
         language: lang,
       });
       setSessionId(res.sessionId);
@@ -112,7 +143,13 @@ export function ChatTab({ email }: { email: EmailContext }) {
   return (
     <div className={s.root} data-testid="chat-tab">
       <div className={s.transcript} role="log" aria-label={t("tabs.chat")}>
-        {turns.length === 0 && !busy && <EmptyState title={t("tabs.chat")} description={t("chat.empty")} icon={<DatabaseSearch20Regular />} />}
+        {turns.length === 0 && !busy && (
+          <EmptyState
+            title={t("tabs.chat")}
+            description={fixedScope ? t("selection.chatEmpty", { count: fixedScope.emails?.length ?? 0 }) : email ? t("chat.empty") : t("home.chatEmpty")}
+            icon={<DatabaseSearch20Regular />}
+          />
+        )}
         {turns.map((turn, i) =>
           turn.role === "user" ? (
             <div key={i} className={s.userWrap}>
@@ -174,7 +211,7 @@ export function ChatTab({ email }: { email: EmailContext }) {
             </div>
           ),
         )}
-        {busy && <Spinner size="tiny" label={t("chat.thinking")} labelPosition="after" />}
+        {busy && <Spinner size="tiny" label={indexing ? t("selection.indexing") : t("chat.thinking")} labelPosition="after" />}
         {/* Announce the answer (and the wait) to assistive technology: a Fluent
             Spinner label alone is not reliably read out. */}
         <div aria-live="polite" aria-atomic="true" className="oao-visually-hidden">
@@ -186,17 +223,29 @@ export function ChatTab({ email }: { email: EmailContext }) {
       <div className={s.composer}>
         <div className={s.chips}>
           <Text className={s.hint}>{t("chat.scope")}:</Text>
-          <Button size="small" appearance="outline" className={mergeClasses(s.chip, scope === "conversation" && s.chipActive)} onClick={() => setScope("conversation")} aria-pressed={scope === "conversation"}>
-            {t("chat.scopeConversation")}
-          </Button>
-          <Button size="small" appearance="outline" className={mergeClasses(s.chip, scope === "all" && s.chipActive)} onClick={() => setScope("all")} aria-pressed={scope === "all"}>
-            {t("chat.scopeAll")}
-          </Button>
-          <Tooltip content={t("chat.indexHint")} relationship="description">
-            <Button size="small" appearance="subtle" icon={indexing ? <Spinner size="extra-tiny" /> : <DatabaseSearch20Regular />} onClick={() => void indexRecent()} disabled={indexing} style={{ marginLeft: "auto" }}>
-              {t("chat.indexRecent")}
-            </Button>
-          </Tooltip>
+          {fixedScope ? (
+            <span className={mergeClasses(s.chip, s.chipActive)} data-testid="chat-fixed-scope" style={{ padding: "2px 10px", lineHeight: "18px" }}>
+              {fixedScope.label}
+            </span>
+          ) : (
+            <>
+              {email?.conversationId && (
+                <Button size="small" appearance="outline" className={mergeClasses(s.chip, scope === "conversation" && s.chipActive)} onClick={() => setScope("conversation")} aria-pressed={scope === "conversation"}>
+                  {t("chat.scopeConversation")}
+                </Button>
+              )}
+              <Button size="small" appearance="outline" className={mergeClasses(s.chip, scope === "all" && s.chipActive)} onClick={() => setScope("all")} aria-pressed={scope === "all"}>
+                {t("chat.scopeAll")}
+              </Button>
+            </>
+          )}
+          {!fixedScope && (
+            <Tooltip content={t("chat.indexHint")} relationship="description">
+              <Button size="small" appearance="subtle" icon={indexing ? <Spinner size="extra-tiny" /> : <DatabaseSearch20Regular />} onClick={() => void indexRecent()} disabled={indexing} style={{ marginLeft: "auto" }}>
+                {t("chat.indexRecent")}
+              </Button>
+            </Tooltip>
+          )}
         </div>
         <div className={s.composerRow}>
           <Input value={input} onChange={(_, d) => setInput(d.value)} onKeyDown={onKey} placeholder={t("chat.placeholder")} style={{ flexGrow: 1 }} aria-label={t("chat.placeholder")} disabled={busy} />

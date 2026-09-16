@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Outlook AI Orchestrator \u2014 Outlook add-in (task pane, compose Compliance Guardian, Smart Alerts on send)",
+  "description": "Outlook AI Orchestrator — Outlook add-in (task pane, compose Compliance Guardian, Smart Alerts on send)",
   "scripts": {
     "dev": "pnpm build:commands && vite --host localhost --port 3000",
     "build": "pnpm build:commands && tsc --noEmit -p tsconfig.json && vite build",
@@ -21,6 +21,8 @@
     "build:commands": "vite build -c vite.commands.config.ts",
     "analyze": "ANALYZE=1 pnpm build",
     "manifest:render": "node scripts/manifest-template.mjs",
+    "manifest:package": "node scripts/package-manifest.mjs",
+    "manifest:package:dev": "node scripts/package-manifest.mjs --dev",
     "e2e": "node scripts/e2e.mjs",
     "e2e:ui": "playwright test --ui"
   },

@@ -1,8 +1,9 @@
 /**
- * The pane opened without a message selected — the "New mail" ribbon button, or
- * the Apps menu on an empty reading pane. Instead of an apologetic "select an
- * email", the first thing the user sees is their daily brief, which is already
- * precomputed and therefore instant.
+ * The **"Daily brief" ribbon button** (`?view=brief`): the brief on its own,
+ * whatever is selected. It is already precomputed, so it is instant.
+ *
+ * The pane opened with *nothing* selected renders `HomeMode` instead (brief +
+ * chat over the mailbox) — see `office/host.ts`.
  */
 import { makeStyles } from "@fluentui/react-components";
 import { Suspense } from "react";

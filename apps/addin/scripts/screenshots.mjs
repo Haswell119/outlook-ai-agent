@@ -112,6 +112,25 @@ await shot("daily-brief", "taskpane.html?mock=1&view=brief", {
   },
 });
 
+// The pane reached from the "Apps" rail of the new Outlook / OWA: no mailbox,
+// no sample email, no "Preview mode" pill — brief + chat over the mailbox.
+await shot("home-tab", "taskpane.html?mock=1&view=home&host=tab", {
+  before: async (p) => {
+    await ready(p, "home-mode");
+    await ready(p, "daily-brief");
+    await ready(p, "sync-status");
+  },
+});
+
+// Multi-select: three messages selected in the list (faked in preview mode).
+await shot("selection", "taskpane.html?mock=1&preview=1&selection=3", {
+  height: 560,
+  before: async (p) => {
+    await ready(p, "selection-view");
+    await p.waitForSelector("[data-testid=selection-item]", { timeout: 30_000 });
+  },
+});
+
 await shot("insights-automation", "taskpane.html?mock=1&tab=insights", {
   before: async (p) => {
     await ready(p, "sync-status");

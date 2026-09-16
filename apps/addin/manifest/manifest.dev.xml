@@ -205,7 +205,15 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="Taskpane.Url" />
+                      <!-- Pinnable (Mailbox 1.5): the pane stays open while the user
+                           navigates the message list; ItemChanged re-runs the analysis.
+                           SupportsNoItemContext (1.8): it may also open with *nothing*
+                           selected, where it shows the daily brief / chat home.
+                           SupportsMultiSelect (1.13): and on several selected messages,
+                           where it shows the Selection view. -->
                       <SupportsPinning>true</SupportsPinning>
+                      <SupportsNoItemContext>true</SupportsNoItemContext>
+                      <SupportsMultiSelect>true</SupportsMultiSelect>
                     </Action>
                   </Control>
                   <Control xsi:type="Button" id="msgReadAsk">
@@ -221,6 +229,12 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="TaskpaneChat.Url" />
+                      <!-- The chat needs no item at all: scoped to the conversation when
+                           one is open, to the selection on a multi-selection, otherwise
+                           to the whole indexed mailbox. -->
+                      <SupportsPinning>true</SupportsPinning>
+                      <SupportsNoItemContext>true</SupportsNoItemContext>
+                      <SupportsMultiSelect>true</SupportsMultiSelect>
                     </Action>
                   </Control>
                   <Control xsi:type="Button" id="msgReadBrief">
@@ -236,7 +250,10 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="TaskpaneBrief.Url" />
+                      <!-- The brief is about the day, not about the selection: pinnable and
+                           available with nothing selected, but not on a multi-selection. -->
                       <SupportsPinning>true</SupportsPinning>
+                      <SupportsNoItemContext>true</SupportsNoItemContext>
                     </Action>
                   </Control>
                 </Group>

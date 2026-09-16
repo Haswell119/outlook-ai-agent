@@ -511,12 +511,15 @@ pnpm dev
 | `pnpm smoke` | test de bout en bout (`--url`, `--token`, `--wait`) |
 | `pnpm manifest:render` | rend les manifests Office depuis `ADDIN_HOST`/`API_HOST`/`AAD_CLIENT_ID` |
 | `pnpm manifest:sideload` | charge le manifest dans Outlook (`--prod`, `--remove`, `--print`) |
+| `pnpm --filter @oao/addin manifest:package[:dev]` | package d'app Teams (zip `manifest.json` + `color.png`/`outline.png`) pour l'entrée « Apps » du nouvel Outlook (§10.2) |
 | `pnpm k8s:render` | régénère `infra/k8s/rendered/` depuis le chart Helm |
 | `pnpm typecheck` / `lint` / `test` / `build` / `e2e` | qualité |
 
 Toutes acceptent `--help`.
 
 ## 10. Sideload de l'add-in
+
+### 10.1 Manifest XML — volet depuis un e-mail, volet épinglé, sélection multiple
 
 ```bash
 pnpm manifest:sideload            # détecte l'OS et fait ce qu'il faut
@@ -534,6 +537,64 @@ Prérequis commun : le serveur qui héberge le volet doit être joignable et son
 certificat TLS reconnu (`pnpm certs` en local, CA interne déployée par GPO en
 production). New Outlook pour Windows ne lit **pas** la clé de registre WEF :
 utiliser la procédure web.
+
+Ce seul manifest donne déjà **trois** façons d'ouvrir le volet :
+
+1. depuis un e-mail ouvert → *AI Orchestrator → Ouvrir le panneau IA* ;
+2. **volet épinglé** (icône 📌 dessinée par Outlook en haut du volet,
+   `SupportsPinning`, Mailbox 1.5) : il reste ouvert pendant la navigation dans
+   la liste, se recalcule à chaque message sélectionné (`ItemChanged`) et
+   affiche l'accueil — résumé journalier + chat sur la boîte — quand **rien**
+   n'est sélectionné (`SupportsNoItemContext`, Mailbox 1.8) ;
+3. **plusieurs messages sélectionnés** (Ctrl/⌘ ou Maj + clic, `SupportsMultiSelect`,
+   Mailbox 1.13) : vue *Sélection* → synthèse des N e-mails, chat limité à la
+   sélection, actions proposées. Nécessite **le nouvel Outlook ou Outlook sur le
+   web** ; sur Outlook classique le bouton reste simplement inactif sur une
+   sélection multiple.
+
+### 10.2 Manifest unifié (JSON) — entrée dans la barre « Apps » du nouvel Outlook
+
+L'entrée dans la barre latérale **Apps** du nouvel Outlook / d'Outlook sur le web
+(volet ouvert **sans aucun e-mail**, mode « home » : résumé journalier, chat sur
+la boîte indexée, état de synchronisation, réglages) vient d'un **onglet
+personnel** (`staticTabs`) déclaré dans le manifest unifié. Le manifest XML
+classique **ne peut pas** l'exprimer.
+
+Un manifest unifié ne se téléverse pas seul : il faut un **package d'app Teams**,
+c'est-à-dire un zip contenant `manifest.json` à la racine plus les deux icônes
+qu'il nomme (`color.png` 192×192, `outline.png` 32×32 monochrome).
+
+```bash
+# production (lit ADDIN_HOST/API_HOST/AAD_CLIENT_ID comme manifest:render)
+pnpm manifest:render
+pnpm --filter @oao/addin manifest:package        # → apps/addin/manifest/oao-addin-teams-app.zip
+
+# développement (https://localhost:3000)
+pnpm --filter @oao/addin manifest:package:dev    # → …/oao-addin-teams-app.dev.zip
+```
+
+Téléversement en tant qu'**app personnalisée** :
+
+| Portée | Procédure |
+|---|---|
+| **Un utilisateur** (test, pilote) | Dans le nouvel Outlook ou dans Teams : *Apps → Gérer vos applications → Téléverser une application → Téléverser une application personnalisée* → choisir le zip. Nécessite la stratégie « autoriser le téléversement d'applications personnalisées » ; sinon l'entrée est grisée. |
+| **Le tenant** | *Centre d'administration Teams → Applications Teams → Gérer les applications → Télécharger une nouvelle application*, puis publier et assigner l'app (stratégies d'autorisation/installation). |
+| **Alternative M365** | *Microsoft 365 admin center → Paramètres → Applications intégrées → Téléverser des applications personnalisées* accepte aussi le package unifié ; c'est le même chemin que le §6 pour le XML. |
+
+Ensuite, dans le nouvel Outlook / Outlook sur le web, l'app apparaît dans la
+barre **Apps** à gauche ; un clic ouvre
+`taskpane.html?view=home&host=tab`. Points d'attention :
+
+* cet hôte n'a **pas** de `Office.context.mailbox` (et TeamsJS n'est
+  volontairement pas chargé) : tous les appels Office.js du volet sont gardés,
+  et le mode « home » n'a besoin d'aucun d'entre eux ;
+* ce n'est **pas** le mode « preview » : le backend réel est appelé, aucune
+  donnée d'exemple n'est affichée. Si l'orchestrator est injoignable, le volet
+  affiche l'URL tentée, l'erreur et un bouton *Réessayer* (jamais l'e-mail
+  d'exemple) ;
+* Outlook classique (Windows/Mac) n'a pas de barre Apps : y utiliser le §10.1 ;
+* ne pas déployer XML **et** JSON pour les mêmes utilisateurs dans le même
+  tenant (deux fois le même complément).
 
 ## 11. Checklist de mise en production
 

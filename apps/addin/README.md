@@ -8,9 +8,15 @@ renders precomputed work first, shows you where the answer came from, and never 
 | Surface | Entry | What it shows |
 |---|---|---|
 | Message **read** ribbon → "Open AI panel" / "Ask about this email" | `taskpane.html` (`?tab=chat`) | Summary · Chat · Insights · Brief tabs, "Whole conversation" thread synthesis, Action Approval dialog, Automation Coach |
-| Ribbon → **"Daily brief"**, or the pane opened with **no message selected** | `taskpane.html?view=brief` | Headline, highlights, priority emails, open tasks, deadlines, alerts, stats |
+| The same pane **pinned**, while you keep clicking through the message list | `taskpane.html` + `ItemChanged` | Re-runs the (cached / precomputed) analysis for each newly selected message; switches to the **home** surface (brief + chat) when nothing is selected |
+| **Several messages selected** in the list (`SupportsMultiSelect`) | `taskpane.html` + `getSelectedItemsAsync` | **Selection** view: the N selected emails, "Synthesise these N emails", "Ask about the selection", "Review proposed actions" |
+| Ribbon → **"Daily brief"** | `taskpane.html?view=brief` | Headline, highlights, priority emails, open tasks, deadlines, alerts, stats |
+| The **"Apps" rail** of the new Outlook / Outlook on the web (unified manifest `staticTabs`), and the pane opened with **no message selected** | `taskpane.html?view=home&host=tab` | **Home** mode: daily brief, chat over the indexed mailbox, sync status, settings — everything that does not need an item |
 | Message **compose** ribbon → "Compliance Guardian" | `taskpane.html?mode=compose` | Compliance Guardian (issues, recommended actions, escalation) + the in-window compliance banner |
 | **OnMessageSend** launch event (Smart Alerts, `SendMode=PromptUser`) | `commands.html` / `commands.js` → `onMessageSendHandler` | Runs the compliance check on Send; prompts on `warn`/`block`, always allows on any error |
+
+> **You do not have to open an email.** Pin the pane and it follows the list; select several messages and it synthesises them; open the
+> app from the Apps rail and it answers about the whole mailbox. See §6 for the three sideload paths and §7 for the requirement sets.
 
 ---
 
@@ -76,15 +82,17 @@ The id is `encodeURIComponent`-ed into the path by `Routes.analysisByEmail`. See
     3.0 kB  assets/ComplianceGuardian-*.js  lazy
     2.9 kB  assets/ActionApprovalDialog-*.js lazy
     2.5 kB  assets/ThreadView-*.js      lazy
-    2.4 kB  assets/ChatTab-*.js         lazy
-    2.2 kB  assets/SettingsSheet-*.js   lazy
-   42.7 kB  commands.js                 JS-only runtime for Smart Alerts (loaded by Outlook, not by the pane)
+    2.7 kB  assets/ChatTab-*.js         lazy
+    2.3 kB  assets/SettingsSheet-*.js   lazy
+    2.2 kB  assets/SelectionView-*.js   lazy (multi-select)
+    1.4 kB  assets/SyncStatusPill-*.js  lazy (also used by the home surface)
+   44.2 kB  commands.js                 JS-only runtime for Smart Alerts (loaded by Outlook, not by the pane)
   ─────────
-  215 kB    main entry (taskpane + react + fluent), budget 250 kB
-  293 kB    total js+css, gzip
+  218 kB    main entry (taskpane + react + fluent), budget 250 kB
+  301 kB    total js+css, gzip
 ```
 
-Chat, Insights, Automation, Compliance, the Daily brief, the Settings sheet, the Approval dialog and the Thread view are
+Chat, Insights, Automation, Compliance, the Daily brief, the Settings sheet, the Approval dialog, the Thread view and the Selection view are
 `React.lazy` chunks, **prefetched on tab hover/focus** and on idle after the first analysis renders (skipped on `saveData` / 2G).
 `ANALYZE=1 pnpm build` additionally writes a `dist/stats.html` treemap.
 
@@ -97,10 +105,12 @@ pnpm --filter @oao/addin dev              # https://localhost:3000 (builds comma
 pnpm --filter @oao/addin build            # typecheck + dist/ (taskpane.html, commands.html, commands.js, assets/)
 pnpm --filter @oao/addin preview          # serves dist/ on http://localhost:4173
 pnpm --filter @oao/addin typecheck        # tsc --noEmit (also used by `lint`)
-pnpm --filter @oao/addin test             # vitest (jsdom + Testing Library) — 95 tests
-pnpm --filter @oao/addin e2e              # Playwright against `vite preview` — 12 specs
+pnpm --filter @oao/addin test             # vitest (jsdom + Testing Library) — 134 tests
+pnpm --filter @oao/addin e2e              # Playwright against `vite preview` — 16 specs
 pnpm --filter @oao/addin analyze          # build + dist/stats.html bundle treemap
 pnpm --filter @oao/addin manifest:render  # regenerate every manifest from the one template
+pnpm --filter @oao/addin manifest:package # zip manifest.json + color.png/outline.png → Teams app package
+pnpm --filter @oao/addin manifest:package:dev
 pnpm --filter @oao/addin validate-manifest         # office-addin-manifest validate (XML + unified JSON)
 pnpm --filter @oao/addin validate-manifest:dev
 pnpm --filter @oao/addin certs            # office-addin-dev-certs install (trusted localhost cert)
@@ -177,43 +187,135 @@ pnpm --filter @oao/addin validate-manifest
 | File | Format | Use it for |
 |---|---|---|
 | `manifest/manifest.xml` | classic XML (`MailApp`) | Classic Outlook on Windows/Mac, Outlook on the web, the new Outlook, sideloading, and the Office Store |
-| `manifest/manifest.json` | unified (Teams-app style, `manifestVersion` 1.17) | Deployment through the **Microsoft 365 admin centre → Integrated apps**, and the new Outlook / Microsoft 365 ecosystem (Teams, Copilot surfaces later) |
+| `manifest/manifest.json` | unified (Teams-app style, `manifestVersion` 1.17) | Deployment through the **Microsoft 365 admin centre → Integrated apps** or as a **Teams app package**, the **"Apps" rail** entry (`staticTabs`), and the new Outlook / Microsoft 365 ecosystem (Teams, Copilot surfaces later) |
 | `manifest/manifest.dev.xml` · `manifest.dev.json` | same two, pointed at `https://localhost:3000` | Local sideloading |
 
 Both carry the same surfaces: `ribbons` for MessageRead (Open AI panel · Ask about this email · Daily brief) and MessageCompose
 (Compliance Guardian), `runtimes` for the task pane and the commands file, `autoRunEvents` with `messageSending` →
-`onMessageSendHandler` (`sendMode: promptUser`), and `webApplicationInfo` / `<WebApplicationInfo>` for Office SSO.
+`onMessageSendHandler` (`sendMode: promptUser`), and `webApplicationInfo` / `<WebApplicationInfo>` for Office SSO (only emitted
+when `AAD_CLIENT_ID` is a real GUID — Outlook rejects a manifest whose SSO id is a placeholder).
 
-Rule of thumb: **ship the XML manifest today** (it is the only one classic Outlook understands), and use the JSON manifest when the
-tenant deploys centrally through the admin centre to the new Outlook. Do not deploy both to the same tenant.
+Both also declare the list-level activations:
+
+| Capability | XML (`VersionOverridesV1_1` → `<Action xsi:type="ShowTaskpane">`) | Unified JSON (`runtimes[].actions[]`) | Requirement set |
+|---|---|---|---|
+| Pane stays open while you navigate the list | `<SupportsPinning>true</SupportsPinning>` | `"pinnable": true` | Mailbox 1.5 |
+| Pane may open with **nothing** selected | `<SupportsNoItemContext>true</SupportsNoItemContext>` | *(no per-action equivalent; the hosts that read the unified manifest open the pane without an item anyway)* | Mailbox 1.8 |
+| Pane activates on **several** selected messages | `<SupportsMultiSelect>true</SupportsMultiSelect>` | `"multiselect": true` | Mailbox 1.13 |
+| Entry in the new Outlook / OWA **"Apps" rail** | **not possible** | root-level `staticTabs` (personal tab) | — (Teams app) |
+
+"Open AI panel" and "Ask about this email" carry all three; "Daily brief" is pinnable and no-item but not multi-select (a brief is
+about the day, not about the selection).
+
+### The unified manifest must be uploaded as a Teams app package
+
+`manifest.json` alone is not installable: Outlook and Teams want a **zip** with `manifest.json` at the root plus the two icons it
+names (`icons.color` = `color.png` 192×192, `icons.outline` = `outline.png` 32×32 monochrome).
+
+```bash
+pnpm --filter @oao/addin manifest:package        # → manifest/oao-addin-teams-app.zip
+pnpm --filter @oao/addin manifest:package:dev    # → manifest/oao-addin-teams-app.dev.zip (localhost:3000)
+```
+
+The script (`scripts/package-manifest.mjs`) generates both icons from the same vector definition as `public/assets/icon-*.png`
+(`scripts/icon-png.mjs`) and writes the zip itself with `zlib` — no native dependency, fixed timestamps, so the same manifest always
+produces the same bytes. Upload it with **"Upload a custom app"**: Outlook/Teams → *Apps* → *Manage your apps* → *Upload an app* for
+yourself, or Teams admin centre → *Teams apps* → *Manage apps* → *Upload new app* for the tenant (see `docs/SETUP.md` §10).
+
+Rule of thumb: **ship the XML manifest today** (it is the only one classic Outlook understands), and add the JSON manifest — as a
+Teams app package — when you want the Apps-rail entry or when the tenant deploys centrally through the admin centre to the new
+Outlook. Do not deploy both to the same tenant.
 
 `validate-manifest` runs `office-addin-manifest validate` on each file (replacing the `{{AAD_CLIENT_ID}}` placeholder with a dummy
-GUID) and additionally structure-checks the unified manifest: ribbon `actionId`s resolve to declared runtime actions, every page is
-covered by `validDomains`, and `messageSending` uses `promptUser`.
+GUID; the XML goes through Microsoft's real XSD + acceptance service) and additionally structure-checks the unified manifest: ribbon
+`actionId`s resolve to declared runtime actions, every page **and every `staticTabs.contentUrl`** is covered by `validDomains`, the
+personal tab carries `scopes: ["personal"]`, `context: ["personalTab"]` and `host=tab`, at least one action is `pinnable` and one is
+`multiselect`, the icons are package-relative, and `messageSending` uses `promptUser`.
 
 ### Mock API and browser preview mode
 
-* **Mock API** — `VITE_API_MOCK=true`, `?mock=1`, or automatically when the backend health check fails in a dev build or in
-  preview mode. Every mock response is validated against the shared zod schemas; the fixtures reproduce `docs/mockups.md`
+* **Mock API** — `VITE_API_MOCK=true`, `?mock=1`, or — **only in browser preview** — when the backend health check fails.
+  `decideApi()` in `src/api/index.ts` is that decision, as a pure, unit-tested function:
+
+  | requested? | preview (no Outlook host)? | health check | result |
+  |---|---|---|---|
+  | yes | — | not even run | mock |
+  | no | — | OK | live |
+  | no | yes | fails | mock (the UI stays reviewable in a browser) |
+  | no | **no** | fails | **live + blocking error**, never sample data |
+
+  The last row is the point: a dev build used to fall back to the mock inside a *real* Outlook host, so the pane summarised — and
+  drafted replies from — the built-in **sample** email while the user was reading a real one, with nothing on screen saying so. Now
+  the pane blocks with `BackendUnreachable`: what is broken, the base URL it tried, "check `pnpm dev` and `VITE_API_BASE_URL`", the
+  health error and a **Retry**. Whenever the mock client *is* active the header shows a **"Mock data"** pill — in preview mode you
+  therefore see both pills, "Preview mode" (no Outlook) and "Mock data" (no backend).
+
+  Every mock response is validated against the shared zod schemas; the fixtures reproduce `docs/mockups.md`
   (summary 92 %, chat 95/78/62 %, 5 proposed actions, 4 compliance issues, "Client A Reporting" automation, 18 min/week) plus the
   new endpoints: a precomputed analysis for the sample email, a triaged newsletter, a daily brief, sync status and feature flags.
 * **Preview mode** — open `taskpane.html` directly in a browser: the Office adapters return the sample email/thread/draft, client
   actions become toasts, and a "Preview mode" pill is shown. Useful URLs:
-  `?mock=1`, `?tab=chat`, `?tab=insights`, `?view=thread`, `?view=brief`, `?mode=compose`, `?sample=newsletter` (triage layout).
+  `?mock=1`, `?tab=chat`, `?tab=insights`, `?view=thread`, `?view=brief`, `?mode=compose`, `?sample=newsletter` (triage layout),
+  `?preview=1&selection=3` (fake a three-message multi-selection).
+
+* **Preview mode is not "no mailbox"** — `?host=tab` and `?view=home` also have no `Office.context.mailbox`, but they are the real
+  **home** surface: real backend, no sample email, no "Preview mode" pill (`?mock=1` still forces the mock API, which is how the e2e
+  spec for `?view=home&host=tab` runs offline). `isPreviewMode()` in `src/office/env.ts` is the single decision:
+  `?preview=1` → always preview · a mailbox → never preview · `host=tab` / `view=home` → never preview · otherwise a browser → preview.
 
 ---
 
-## 6. Sideloading
+## 6. Sideloading — the three ways to reach the pane
 
-1. Start the dev server: `pnpm --filter @oao/addin dev` (https://localhost:3000). Trust the certificate with
-   `pnpm --filter @oao/addin certs`; without it Vite falls back to `@vitejs/plugin-basic-ssl` and you must accept the self-signed
-   certificate once at https://localhost:3000/taskpane.html, otherwise Outlook shows an empty pane.
-2. Sideload `manifest/manifest.dev.xml`:
+Common step for all three: start the dev server, `pnpm --filter @oao/addin dev` (https://localhost:3000). Trust the certificate with
+`pnpm --filter @oao/addin certs`; without it Vite falls back to `@vitejs/plugin-basic-ssl` and you must accept the self-signed
+certificate once at https://localhost:3000/taskpane.html, otherwise Outlook shows an empty pane.
+
+### 6.1 From an opened email (XML manifest)
+
+1. Sideload `manifest/manifest.dev.xml`:
    * **Outlook desktop (classic, Windows)** — Home → *Get Add-ins* → *My add-ins* → *Add a custom add-in* → *Add from file…*
    * **New Outlook / Outlook on the web** — <https://aka.ms/olksideload> → *Add a custom add-in* → *Add from file…*
    * **Outlook for Mac (classic)** — *Get Add-ins* → *My add-ins* → *Add from file…*
-3. Open a message → ribbon group **AI Orchestrator** → *Open AI panel*. Compose a message → *Compliance Guardian*.
+2. Open a message → ribbon group **AI Orchestrator** → *Open AI panel*. Compose a message → *Compliance Guardian*.
    The OnMessageSend handler requires Mailbox 1.10+ and, on classic Windows Outlook, the JavaScript-only runtime file `commands.js`.
+
+### 6.2 From the message list: pin the pane, and select several messages (same XML manifest)
+
+1. Sideload the same `manifest/manifest.dev.xml` (it already declares `SupportsPinning`, `SupportsNoItemContext` and
+   `SupportsMultiSelect`).
+2. **Pin it**: open *Open AI panel* once, then click the **pin** (📌) in the pane's top-right corner — that button is drawn by
+   Outlook, not by us. The pane now stays open while you click through the list:
+   * another message selected → the pane re-reads it and re-resolves the analysis (cache → precomputed → model), so switching back
+     and forth is free;
+   * **nothing** selected → it shows the **home** surface (daily brief + chat over the mailbox, the same one the Apps rail opens)
+     instead of an empty "select an email" state.
+3. **Multi-select**: hold <kbd>Ctrl</kbd>/<kbd>⌘</kbd> (or <kbd>Shift</kbd>) and select several messages, then click *Open AI panel*
+   (or *Ask about this email*). The pane opens the **Selection** view: the N messages, then *Synthesise these N emails* (one model
+   call, cached under `selection:<hash>`), *Ask about the selection* (the selected messages are indexed once, then the chat is scoped
+   to them) and *Review proposed actions* (proposed from the synthesis). Changing the selection while the pane is open refreshes it
+   (`SelectedItemsChanged`).
+   * Needs **new Outlook for Windows / Outlook on the web** (Mailbox 1.13). On classic Outlook for Windows/Mac the button is simply
+     not enabled for a multi-selection; if the view is reached anyway it says *"Multi-select needs the new Outlook or Outlook on the
+     web"* rather than failing.
+
+### 6.3 From the "Apps" rail, with no email at all (unified manifest, Teams app package)
+
+The classic XML manifest **cannot** declare this entry; only the unified manifest can, and it has to be uploaded as a Teams app
+package.
+
+1. `pnpm --filter @oao/addin manifest:package:dev` → `manifest/oao-addin-teams-app.dev.zip`
+   (`manifest.dev.json` + `color.png` + `outline.png`).
+2. Upload it as a **custom app**:
+   * just for you — in **Outlook** (new) or **Teams**: *Apps* → *Manage your apps* → *Upload an app* → *Upload a custom app* → pick
+     the zip. (Requires the tenant policy "allow uploading custom apps"; ask your admin if the entry is greyed out.)
+   * for the tenant — **Teams admin centre** → *Teams apps* → *Manage apps* → *Upload new app*, then publish/assign it.
+3. In the new Outlook / Outlook on the web, the app appears in the **left "Apps" bar**. Click it with no email selected: the pane
+   opens in **home** mode (`?view=home&host=tab`) with the daily brief, the chat over your indexed mailbox, the sync status and the
+   settings. The item-dependent features are hidden behind one line: *"Open an email to analyse it."*
+   * That host has **no `Office.context.mailbox`** (and TeamsJS is deliberately not loaded), so every Office.js call in the pane is
+     guarded; nothing in home mode needs the Office host.
+   * Outlook desktop (classic) has no Apps rail — use 6.1/6.2 there.
 
 ---
 
@@ -225,16 +327,24 @@ Mailbox **1.10** is the manifest minimum (Smart Alerts `OnMessageSend`). Every o
 * **1.1** — `item.body.getAsync("text")`, `item.attachments`, `displayReplyForm` / `displayReplyAllForm`,
   `displayNewAppointmentForm`, `displayMessageForm`, `userProfile`, `displayLanguage`
 * **1.3** — `convertToRestId` (→ the stable id for `analysisByEmail`)
-* **1.5** — `ewsUrl`, `Office.context.ui.closeContainer`
+* **1.5** — `ewsUrl`, `Office.context.ui.closeContainer`, **`SupportsPinning`** + the **`ItemChanged`** event (pinned pane follows the
+  message list; `Office.context.mailbox.item` is `null` when nothing — or more than one message — is selected)
+* **1.8** — also **`SupportsNoItemContext`**: the pane may be opened with no message selected (→ the daily brief)
 * **1.7** — `from.getAsync` (compose), `RecipientsChanged` event
 * **1.8** — `categories.getAsync/addAsync`, `masterCategories`, `getAttachmentsAsync`, `removeAttachmentAsync`, `AttachmentsChanged`
 * **1.10** — `LaunchEvent` / `OnMessageSend`, `Office.actions.associate`, `notificationMessages` insight messages with a
   `showTaskPane` action ("Compliance risk detected — Show panel")
-* **1.13** — `item.sensitivityLabel.setAsync` (only with a `labelId`; otherwise the user is asked to apply the label)
+* **1.13** — `item.sensitivityLabel.setAsync` (only with a `labelId`; otherwise the user is asked to apply the label), plus the whole
+  multi-select path: **`SupportsMultiSelect`**, `mailbox.getSelectedItemsAsync` and the **`SelectedItemsChanged`** event
+* **1.15** — `mailbox.loadItemByIdAsync`, used to load the body/sender/attachments of each selected message. Without it the Selection
+  view degrades to the subjects `getSelectedItemsAsync` returns (it does **not** return senders or bodies) and says so in the UI
 * **1.14** — `event.completed({ sendModeOverride, commandId })` on the Smart Alerts dialog (feature-detected; older hosts get the
   same call without those options)
 * **Identity API 1.3** — `OfficeRuntime.auth.getAccessToken` (`VITE_AUTH_MODE=aad`)
 * `Office.context.officeTheme` + the `OfficeThemeChanged` event for light/dark/high-contrast
+
+Every one of those is feature-detected, so the manifest minimum stays **1.10** and the add-in still installs on a host that has
+nothing else: no pinning, no multi-select, no Apps rail — just the read and compose panes.
 
 `OnAppointmentSend` is deliberately **not** registered: the Compliance Guardian policy is about mail recipients and attachments, so
 a handler that always allows would only add latency to every meeting booked.
@@ -263,6 +373,9 @@ pushed as a notification message on the item, so they survive the dialog being d
 * **Every API call** has a timeout (8 s for the fast GETs, 4 s for health, 60 s for model calls), an `x-correlation-id`, and
   exponential backoff with jitter (250 ms → ~700 ms → …, capped at 4 s) for **idempotent GETs only** — a POST is never replayed,
   because replaying `analyze/email` would cost a second model call. Retries fire on network/timeout/429/5xx only.
+* **No silent sample data** — the mock client is only used when it was asked for or in browser preview (see §5). Inside any Outlook
+  host — read, compose, pinned, multi-select, Apps-rail home — a failed startup health check blocks the pane with the base URL, the
+  error and a Retry button instead of answering with the sample email. Telemetry records the outcome as `api.mode {mode, reason}`.
 * **Offline** — `navigator.onLine` plus two consecutive network failures against the backend raise a non-blocking banner
   (`role="status"`, `aria-live="polite"`). Cached analyses stay readable; `observe` events go to a bounded outbox
   (max 100, dropped after 24 h, persisted in localStorage) and are flushed when connectivity returns.
@@ -342,19 +455,23 @@ After executing one the add-in POSTs `Routes.reportActionResult(id)` with `{acti
 ## 11. Project layout
 
 ```
-manifest/            manifest.xml · manifest.json (unified) · manifest.dev.xml · manifest.dev.json
+manifest/            manifest.xml · manifest.json (unified, incl. staticTabs) · manifest.dev.xml · manifest.dev.json
+                     + oao-addin-teams-app*.zip (generated by manifest:package, git-ignored)
 public/assets/       icon-16/32/64/80/128.png + icon.svg (generated)
 e2e/                 Playwright specs (run against `vite preview`)
 src/taskpane/        main.tsx (Office.onReady → React)
 src/commands/        commands.ts (onMessageSendHandler, send-mode semantics)
-src/app/             App · AppContext · Header · ReadMode · BriefMode · ErrorBoundary · settings · useAsync · useMediaQuery
-src/office/          env (incl. toStableEmailId) · sample · cache · readItem · readCompose · thread · actions · observe · sso · notifications
-src/api/             client (fetch + retry + zod) · mock · mockBrief · errors · types
+src/app/             App · AppContext · Header · ReadMode · BriefMode · HomeMode · BackendUnreachable · ErrorBoundary · settings ·
+                     useAsync · useMediaQuery
+src/office/          env (incl. toStableEmailId, isPreviewMode/isTabHost) · host (surface resolution) · events (one ItemChanged /
+                     SelectedItemsChanged handler for the whole pane) · selection (getSelectedItemsAsync + loadItemByIdAsync,
+                     selection:<hash>) · sample · cache · readItem · readCompose · thread · actions · observe · sso · notifications
+src/api/             client (fetch + retry + zod) · index (decideApi: live vs mock) · mock · mockBrief · errors · types
 src/cache/           idb (IndexedDB wrapper) · analysisCache (TTL, keys, pruning)
 src/net/             connectivity (online/offline) · outbox (bounded observe queue)
 src/security/        csp (policy builder) · sanitize (toPlainText / escapeHtml)
-src/features/        summary (+ useAnalysis, TriageCard) · thread · chat · insights (+ SyncStatusPill) · automation ·
-                     compliance · actions · brief · settings · lazy (code-splitting + prefetch)
+src/features/        summary (+ useAnalysis, TriageCard) · thread · chat · selection (multi-select view) · insights
+                     (+ SyncStatusPill) · automation · compliance · actions · brief · settings · lazy (code-splitting + prefetch)
 src/ui/              theme (tokens + palettes) · ThemeProvider · SourceBadge · OfflineBanner · ConfidenceBar · RiskBadge ·
                      SectionCard · AiFooter · States · toast
 src/i18n/            en.json · fr.json · hook (auto-detect + FR/EN toggle)
@@ -372,6 +489,8 @@ docs/screenshots/    generated by scripts/screenshots.mjs
 | `summary-fr.png` | Same in French |
 | `triage.png` | Compact layout for a newsletter + "Analyse anyway" |
 | `daily-brief.png` | Daily brief: headline, highlights, priority emails, tasks, deadlines, alerts, stats |
+| `home-tab.png` | Home mode from the Apps rail (`?view=home&host=tab`): brief + chat + sync status, no sample email |
+| `selection.png` | Multi-select: the 3 selected emails and the three next steps |
 | `thread.png` | Whole-conversation synthesis |
 | `chat.png` | Chat with cited sources and evidence |
 | `insights-automation.png` | Mailbox sync status + analysis details + Automation Coach simulation |

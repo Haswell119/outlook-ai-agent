@@ -19,9 +19,57 @@ export function isOfficeAvailable(): boolean {
   }
 }
 
-/** Browser preview: no Office host (or no mailbox) → sample data + toasts. */
+/**
+ * True when Office.js is loaded *and* reports an Office/Outlook context, even
+ * when that context carries no mailbox (the personal-tab surface in the new
+ * Outlook / Outlook on the web). In a plain browser `Office.context` is
+ * undefined, which is what separates "hosted, no mailbox" from "dev preview".
+ */
+export function isOfficeHost(): boolean {
+  try {
+    const ctx = officeGlobal()?.context as unknown as { host?: unknown; platform?: unknown; mailbox?: unknown } | undefined;
+    // Truthy, not merely defined: office.js loaded in a plain browser leaves
+    // `host` / `platform` null, and that must stay browser preview.
+    return !!ctx && (!!ctx.host || !!ctx.platform || !!ctx.mailbox);
+  } catch {
+    return false;
+  }
+}
+
+/** Where the pane is running. */
+export type AppHost = "outlook" | "tab" | "browser";
+
+/**
+ * `?host=tab` — the personal tab declared by `staticTabs` in the unified
+ * manifest, shown in the "Apps" rail of the new Outlook / Outlook on the web.
+ * There is no `Office.context.mailbox` there, so every Office.js call must be
+ * guarded; the pane runs mailbox-wide ("home" mode) against the real backend.
+ */
+export function isTabHost(): boolean {
+  if (queryParam("host") === "tab") return true;
+  // Hosted by Office but without a mailbox → same story as the personal tab.
+  return isOfficeHost() && !isOfficeAvailable();
+}
+
+export function hostSurface(): AppHost {
+  if (isOfficeAvailable()) return "outlook";
+  if (isTabHost()) return "tab";
+  return "browser";
+}
+
+/**
+ * Browser preview: sample email + toasts instead of Office.js calls.
+ *
+ * Preview mode is for **browser development only**. It is *not* the same thing
+ * as "no mailbox": the Apps-rail entry (`?host=tab`) and the explicit home view
+ * (`?view=home`) also have no mailbox, but they talk to the real backend and
+ * must never show the sample email. `?preview=1` forces preview anywhere.
+ */
 export function isPreviewMode(): boolean {
-  return !isOfficeAvailable();
+  if (queryParam("preview") === "1") return true;
+  if (isOfficeAvailable()) return false;
+  if (isTabHost() || queryParam("view") === "home") return false;
+  return true;
 }
 
 /** Guarded requirement-set check (never throws). */

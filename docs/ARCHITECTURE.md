@@ -129,15 +129,22 @@ Rules:
 
 ```
 apps/addin/
-├── manifest/manifest.xml        # Classic XML manifest (Outlook desktop + web), MessageRead + MessageCompose
+├── manifest/manifest.xml        # Classic XML manifest (Outlook desktop + web), MessageRead + MessageCompose,
+│                                #   + SupportsPinning / SupportsNoItemContext / SupportsMultiSelect (list-level activation)
 ├── manifest/manifest.json       # Unified (Teams-app style) manifest for centralised M365 deployment
+│                                #   + staticTabs (personal tab) = the "Apps" rail entry of the new Outlook / OWA
 ├── manifest/manifest.dev.*      # https://localhost:3000 variants for sideloading
 ├── scripts/manifest-template.mjs # Single source of truth for all four manifests (ADDIN_HOST/API_HOST/AAD_CLIENT_ID)
+├── scripts/package-manifest.mjs  # Teams app package: zip(manifest.json + color.png + outline.png), pure zlib
+├── scripts/icon-png.mjs          # shared icon rasteriser (public/assets/icon-*.png + the package icons)
 ├── src/
 │   ├── taskpane/                # entry: taskpane.html + main.tsx (Office.onReady)
 │   ├── commands/                # ribbon commands + ItemSend handler (Smart Alerts compliance check)
-│   ├── app/                     # App shell: ReadMode, BriefMode, Header, AppContext, ErrorBoundary, settings
-│   ├── office/                  # Office.js adapters: readItem, readCompose, thread, actions, observe, sso, notifications, env (toStableEmailId)
+│   ├── app/                     # App shell: ReadMode, BriefMode, HomeMode, BackendUnreachable, Header, AppContext,
+│   │                            #   ErrorBoundary, settings — the shell resolves the surface and re-resolves it on ItemChanged
+│   ├── office/                  # Office.js adapters: readItem, readCompose, thread, actions, observe, sso, notifications,
+│   │                            #   env (toStableEmailId, isPreviewMode/isTabHost), host (surface resolution),
+│   │                            #   events (one ItemChanged/SelectedItemsChanged handler per pane), selection (multi-select)
 │   ├── api/                     # typed client over @oao/shared Routes (fetch + zod + retry/backoff) · errors · mock · mockBrief
 │   ├── cache/                   # idb.ts (IndexedDB wrapper) · analysisCache.ts (TTL, content-hash keys, pruning)
 │   ├── net/                     # connectivity.ts (online/reachable) · outbox.ts (bounded queue for `observe` events)
@@ -147,7 +154,8 @@ apps/addin/
 │   │   ├── summary/             # Summary tab + TriageCard + useAnalysis (three-tier fetch: cache → precomputed → model)
 │   │   ├── brief/               # DailyBriefView (GET /brief/daily, POST to refresh)
 │   │   ├── chat/                # Chat tab (question → answer + Sources used + Evidence + "Open original email")
-│   │   ├── thread/              # Thread synthesis view
+│   │   ├── thread/              # Thread synthesis view (also renders a multi-selection synthesis)
+│   │   ├── selection/           # Selection view: N selected messages → synthesise / ask / propose actions
 │   │   ├── actions/             # Action approval dialog + actionRunner (client-side execution of approved actions)
 │   │   ├── automation/          # Automation Coach (detected steps, simulation, Approve / Edit rule)
 │   │   ├── compliance/          # Compliance Guardian (compose mode) — also the Smart Alerts path
@@ -159,6 +167,26 @@ apps/addin/
 │   └── ui/                      # shared components (ConfidenceBar, RiskBadge, SectionCard, SourceBadge, States, toast, theme)
 └── vite.config.ts               # https dev server on 3000, CSP meta injection, hidden source maps
 ```
+
+**Five surfaces, one page** (`src/office/host.ts`) — `taskpane.html` renders
+`compose`, `read`, `selection`, `brief` or `home` depending on the host and on
+what is selected. The synchronous guess is refined once by
+`getSelectedItemsAsync` (Mailbox 1.13), because "no item" means *either* nothing
+selected *or* a multi-selection, and re-resolved on every `ItemChanged` /
+`SelectedItemsChanged` — a pinned pane follows the message list for its whole
+lifetime, so surface detection cannot be a one-shot decision. A multi-selection
+gets a synthetic `conversationId` (`selection:<hash of the sorted item ids>`)
+which keys its `analyzeThread` cache entry and scopes its chat retrieval after
+the selected messages have been indexed.
+
+`home` is the surface with **no item**: the unified manifest's personal tab in
+the Apps rail (`?view=home&host=tab`, where there is no `Office.context.mailbox`
+at all) and the pinned pane with nothing selected. Brief + chat + sync status
+only, every `Office.*` call guarded. It is deliberately **not** the browser "preview"
+mode — preview is dev-only and shows the sample email, home talks to the real
+backend, and `decideApi()` (`src/api/index.ts`) never substitutes mock data for a
+real mailbox: inside any Outlook host a failed health check blocks the pane with
+the base URL, the error and a Retry.
 
 **Three-tier analysis** (`features/summary/useAnalysis.ts`) — the pane never
 calls the model when it can avoid it:

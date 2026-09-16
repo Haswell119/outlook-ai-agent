@@ -1,6 +1,8 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DailyBriefView } from "@/features/brief/DailyBriefView";
+import { SelectionView } from "@/features/selection/SelectionView";
+import { HomeMode } from "@/app/HomeMode";
 import { SyncStatusPill } from "@/features/insights/SyncStatusPill";
 import { TriageCard } from "@/features/summary/TriageCard";
 import { isCompactTriage, COMPACT_TRIAGE_KINDS } from "@/features/summary/useAnalysis";
@@ -154,5 +156,56 @@ describe("error boundary", () => {
     );
     expect(screen.getByTestId("ok")).toBeInTheDocument();
     expect(screen.queryByTestId("error-boundary")).not.toBeInTheDocument();
+  });
+});
+
+describe("selection view (multi-select)", () => {
+  const original = (globalThis as { Office?: unknown }).Office;
+  const setOffice = (stub: unknown) => Object.defineProperty(globalThis, "Office", { value: stub, configurable: true, writable: true });
+
+  afterEach(() => {
+    setOffice(original);
+    window.history.replaceState({}, "", "/taskpane.html");
+  });
+
+  it("says multi-select needs the new Outlook when the host cannot report the selection", async () => {
+    // Mailbox present but without getSelectedItemsAsync → Mailbox < 1.13.
+    setOffice({ context: { mailbox: {}, requirements: { isSetSupported: () => false } } });
+    renderWithProviders(<SelectionView />);
+    await waitFor(() => expect(screen.getByTestId("selection-unsupported")).toBeInTheDocument());
+    expect(screen.getByText(/Multi-select needs the new Outlook/)).toBeInTheDocument();
+    expect(screen.getByText(/1\.13/)).toBeInTheDocument();
+  });
+
+  it("lists the selected emails and offers the three next steps", async () => {
+    setOffice(undefined);
+    window.history.replaceState({}, "", "/taskpane.html?preview=1&selection=3");
+    renderWithProviders(<SelectionView />);
+
+    await waitFor(() => expect(screen.getByTestId("selection-view")).toBeInTheDocument());
+    expect(screen.getAllByTestId("selection-item")).toHaveLength(3);
+    expect(screen.getByTestId("selection-synthesise")).toHaveTextContent("Synthesise these 3 emails");
+    expect(screen.getByTestId("selection-ask")).toBeInTheDocument();
+    expect(screen.getByTestId("selection-actions")).toBeInTheDocument();
+    // Nothing was analysed yet: listing a selection must not cost a model call.
+    expect(screen.queryByTestId("thread-view")).not.toBeInTheDocument();
+  });
+});
+
+describe("home mode (Apps rail / no mailbox)", () => {
+  it("shows the brief and the chat, with a hint instead of the item-only features", async () => {
+    renderWithProviders(<HomeMode />);
+    expect(screen.getByTestId("home-hint")).toHaveTextContent("Open an email to analyse it");
+    expect(screen.getByTestId("tab-brief")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-chat")).toBeInTheDocument();
+    // No Summary / Insights tab: they need a message.
+    expect(screen.queryByTestId("tab-summary")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("daily-brief")).toBeInTheDocument(), { timeout: 5_000 });
+
+    fireEvent.click(screen.getByTestId("tab-chat"));
+    await waitFor(() => expect(screen.getByTestId("chat-tab")).toBeInTheDocument(), { timeout: 5_000 });
+    // Mailbox-wide chat: no "this conversation" scope to choose from.
+    expect(screen.queryByText("This conversation")).not.toBeInTheDocument();
+    expect(screen.getByText("All emails")).toBeInTheDocument();
   });
 });

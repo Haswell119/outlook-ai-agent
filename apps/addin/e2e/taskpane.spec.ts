@@ -204,3 +204,92 @@ test.describe("localisation, theme and accessibility", () => {
     expect(policy).not.toContain("frame-ancestors");
   });
 });
+
+test.describe("home mode (new Outlook / OWA Apps rail)", () => {
+  test("?view=home&host=tab renders the brief and the mailbox chat, with no sample email", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    page.on("console", (m) => {
+      if (m.type() !== "error") return;
+      const text = m.text();
+      if (IGNORED_CONSOLE.some((re) => re.test(text))) return;
+      errors.push(text);
+    });
+
+    await freshPane(page, "/taskpane.html?mock=1&view=home&host=tab");
+
+    // The personal tab has no mailbox, but it is *not* preview mode: the pane
+    // talks to the real backend and must not show the sample email.
+    await expect(page.getByTestId("home-mode")).toBeVisible();
+    await expect(page.getByTestId("preview-pill")).toHaveCount(0);
+    await expect(page.getByTestId("summary-tab")).toHaveCount(0);
+    await expect(page.getByTestId("tab-summary")).toHaveCount(0);
+    await expect(page.getByTestId("home-hint")).toContainText("Open an email to analyse it");
+
+    // Daily brief + sync status = everything that is mailbox-wide.
+    await expect(page.getByTestId("daily-brief")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("brief-headline")).toContainText("3 items need you today");
+    await expect(page.getByTestId("sync-status")).toBeVisible({ timeout: 30_000 });
+
+    // The chat works with no item at all, scoped to the indexed mailbox.
+    await page.getByTestId("tab-chat").click();
+    await expect(page.getByTestId("chat-tab")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "This conversation" })).toHaveCount(0);
+    await page.getByRole("textbox").first().fill("What am I still waiting for?");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("assistant-card")).toBeVisible({ timeout: 30_000 });
+
+    expect(errors, `console errors: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+test.describe("selection (multi-select)", () => {
+  test("lists the selected emails and synthesises them on demand", async ({ page }) => {
+    await freshPane(page, "/taskpane.html?mock=1&preview=1&selection=3");
+
+    const view = page.getByTestId("selection-view");
+    await expect(view).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("selection-item")).toHaveCount(3);
+    // Listing a selection costs nothing: no synthesis until it is asked for.
+    await expect(page.getByTestId("thread-view")).toHaveCount(0);
+
+    await page.getByTestId("selection-synthesise").click();
+    await expect(page.getByTestId("thread-view")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("missing-document").first()).toBeVisible();
+
+    await page.getByTestId("selection-back").click();
+    await expect(page.getByTestId("selection-view")).toBeVisible();
+
+    // The scoped chat is reachable and labels its scope.
+    await page.getByTestId("selection-ask").click();
+    await expect(page.getByTestId("chat-fixed-scope")).toContainText("This selection (3)");
+  });
+});
+
+test.describe("backend unreachable", () => {
+  test("blocks with the base URL and a retry instead of silently showing sample data", async ({ page }) => {
+    // No `?mock=1` and not preview mode (host=tab) → the live client is kept and
+    // the failed health check must be shown, never replaced by the sample email.
+    await freshPane(page, "/taskpane.html?view=home&host=tab");
+
+    const card = page.getByTestId("backend-unreachable");
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("backend-unreachable-url")).toContainText("http");
+    await expect(card).toContainText("VITE_API_BASE_URL");
+    await expect(page.getByTestId("backend-retry")).toBeVisible();
+    await expect(page.getByTestId("backend-unreachable-detail")).toContainText(/unreachable|timed out|Unexpected/i);
+
+    // Nothing from the mock / sample data leaked through.
+    await expect(page.getByTestId("daily-brief")).toHaveCount(0);
+    await expect(page.getByTestId("summary-tab")).toHaveCount(0);
+    await expect(page.getByTestId("mock-pill")).toHaveCount(0);
+    await expect(page.getByTestId("preview-pill")).toHaveCount(0);
+  });
+
+  test("preview mode still falls back to the mock, and says so with both pills", async ({ page }) => {
+    await freshPane(page, "/taskpane.html");
+    await expect(page.getByTestId("preview-pill")).toBeVisible();
+    await expect(page.getByTestId("mock-pill")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("summary-tab")).toBeVisible({ timeout: 30_000 });
+  });
+});

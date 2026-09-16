@@ -22,8 +22,8 @@
     "additionalLanguages": []
   },
   "icons": {
-    "outline": "assets/icon-32.png",
-    "color": "assets/icon-128.png"
+    "outline": "outline.png",
+    "color": "color.png"
   },
   "accentColor": "#0F6CBD",
   "validDomains": [
@@ -44,6 +44,20 @@
       ]
     }
   },
+  "staticTabs": [
+    {
+      "entityId": "oao.home",
+      "name": "Daily brief",
+      "contentUrl": "https://addin.northbridge.example/taskpane.html?view=home&host=tab",
+      "websiteUrl": "https://addin.northbridge.example/taskpane.html?view=home&host=tab",
+      "scopes": [
+        "personal"
+      ],
+      "context": [
+        "personalTab"
+      ]
+    }
+  ],
   "extensions": [
     {
       "requirements": {
@@ -70,7 +84,8 @@
               "id": "openPane",
               "type": "openPage",
               "view": "taskPaneView",
-              "pinnable": true
+              "pinnable": true,
+              "multiselect": true
             }
           ]
         },
@@ -86,7 +101,8 @@
               "id": "openChat",
               "type": "openPage",
               "view": "chatView",
-              "pinnable": false
+              "pinnable": true,
+              "multiselect": true
             }
           ]
         },

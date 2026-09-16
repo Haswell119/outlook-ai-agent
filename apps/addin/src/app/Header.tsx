@@ -83,7 +83,13 @@ export function Header({ subtitle }: { subtitle?: string }) {
           {t("app.previewMode")}
         </span>
       )}
-      {!preview && api?.mode === "mock" && <span className={`${s.pill} ${s.pillMock}`}>{t("app.mockApi")}</span>}
+      {/* Shown whenever the mock client is active — including in preview mode, where
+          both pills appear: "Preview mode" (no Outlook) and "Mock data" (no backend). */}
+      {api?.mode === "mock" && (
+        <span className={`${s.pill} ${s.pillMock}`} data-testid="mock-pill">
+          {t("app.mockApi")}
+        </span>
+      )}
       <div className={s.lang} role="group" aria-label={t("app.language")}>
         {(["fr", "en"] as const).map((l) => (
           <button key={l} type="button" className={`${s.langBtn} ${lang === l ? s.langActive : ""}`} onClick={() => setLang(l)} aria-pressed={lang === l}>

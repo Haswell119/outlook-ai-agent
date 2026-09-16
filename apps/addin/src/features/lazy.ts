@@ -20,6 +20,8 @@ const briefImport = () => import("./brief/DailyBriefView");
 const settingsImport = () => import("./settings/SettingsSheet");
 const approvalImport = () => import("./actions/ActionApprovalDialog");
 const threadImport = () => import("./thread/ThreadView");
+const selectionImport = () => import("./selection/SelectionView");
+const syncImport = () => import("./insights/SyncStatusPill");
 
 export const LazyChatTab = lazy(() => chatImport().then((m) => ({ default: m.ChatTab })));
 export const LazyInsightsTab = lazy(() => insightsImport().then((m) => ({ default: m.InsightsTab })));
@@ -28,6 +30,8 @@ export const LazyDailyBriefView = lazy(() => briefImport().then((m) => ({ defaul
 export const LazySettingsSheet = lazy(() => settingsImport().then((m) => ({ default: m.SettingsSheet })));
 export const LazyActionApprovalDialog = lazy(() => approvalImport().then((m) => ({ default: m.ActionApprovalDialog })));
 export const LazyThreadView = lazy(() => threadImport().then((m) => ({ default: m.ThreadView })));
+export const LazySelectionView = lazy(() => selectionImport().then((m) => ({ default: m.SelectionView })));
+export const LazySyncStatusPill = lazy(() => syncImport().then((m) => ({ default: m.SyncStatusPill })));
 
 const started = new Set<string>();
 
@@ -44,6 +48,7 @@ export const prefetchBrief = () => prefetch("brief", briefImport);
 export const prefetchSettings = () => prefetch("settings", settingsImport);
 export const prefetchApproval = () => prefetch("approval", approvalImport);
 export const prefetchThread = () => prefetch("thread", threadImport);
+export const prefetchSelection = () => prefetch("selection", selectionImport);
 
 /** Map a tab key to its prefetcher (used by the TabList hover handlers). */
 export const PREFETCH_BY_TAB: Record<string, () => void> = {

@@ -272,7 +272,15 @@ ${appDomains}
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="Taskpane.Url" />
+                      <!-- Pinnable (Mailbox 1.5): the pane stays open while the user
+                           navigates the message list; ItemChanged re-runs the analysis.
+                           SupportsNoItemContext (1.8): it may also open with *nothing*
+                           selected, where it shows the daily brief / chat home.
+                           SupportsMultiSelect (1.13): and on several selected messages,
+                           where it shows the Selection view. -->
                       <SupportsPinning>true</SupportsPinning>
+                      <SupportsNoItemContext>true</SupportsNoItemContext>
+                      <SupportsMultiSelect>true</SupportsMultiSelect>
                     </Action>
                   </Control>
                   <Control xsi:type="Button" id="${IDS.readAsk}">
@@ -288,6 +296,12 @@ ${appDomains}
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="TaskpaneChat.Url" />
+                      <!-- The chat needs no item at all: scoped to the conversation when
+                           one is open, to the selection on a multi-selection, otherwise
+                           to the whole indexed mailbox. -->
+                      <SupportsPinning>true</SupportsPinning>
+                      <SupportsNoItemContext>true</SupportsNoItemContext>
+                      <SupportsMultiSelect>true</SupportsMultiSelect>
                     </Action>
                   </Control>
                   <Control xsi:type="Button" id="${IDS.readBrief}">
@@ -303,7 +317,10 @@ ${appDomains}
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="TaskpaneBrief.Url" />
+                      <!-- The brief is about the day, not about the selection: pinnable and
+                           available with nothing selected, but not on a multi-selection. -->
                       <SupportsPinning>true</SupportsPinning>
+                      <SupportsNoItemContext>true</SupportsNoItemContext>
                     </Action>
                   </Control>
                 </Group>
@@ -419,7 +436,13 @@ function jsonManifest({ baseUrl, apiUrl, id, displayName, ssoResource, version }
       defaultLanguageTag: "en-us",
       additionalLanguages: [],
     },
-    icons: { outline: "assets/icon-32.png", color: "assets/icon-128.png" },
+    /**
+     * Package-relative, *not* URLs: a unified manifest is uploaded as a Teams
+     * app package (zip) that carries the two icons next to manifest.json.
+     * `pnpm manifest:package` generates them from the same vector definition as
+     * public/assets/icon-*.png (color 192x192, outline 32x32 monochrome).
+     */
+    icons: { outline: "outline.png", color: "color.png" },
     accentColor: "#0F6CBD",
     validDomains: [...new Set([host, apiHost])],
     ...(SSO_ENABLED ? { webApplicationInfo: { id: AAD_CLIENT_ID, resource: ssoResource } } : {}),
@@ -431,8 +454,37 @@ function jsonManifest({ baseUrl, apiUrl, id, displayName, ssoResource, version }
         ],
       },
     },
+    /**
+     * The **"Apps" rail entry** of the new Outlook / Outlook on the web.
+     *
+     * A personal tab is the only way to reach the add-in with *no* mailbox item
+     * at all — from the left app bar, before opening any email. It loads the
+     * same page in "home" mode (`?view=home&host=tab`): daily brief, chat over
+     * the indexed mailbox, sync status and settings, with the item-dependent
+     * features hidden. There is no `Office.context.mailbox` in that host, so the
+     * pane guards every Office.js call.
+     *
+     * The classic XML manifest cannot express this; only the unified manifest,
+     * uploaded as a Teams app package, can. See README §6.3.
+     */
+    staticTabs: [
+      {
+        entityId: "oao.home",
+        name: "Daily brief",
+        contentUrl: `${baseUrl}/taskpane.html?view=home&host=tab`,
+        websiteUrl: `${baseUrl}/taskpane.html?view=home&host=tab`,
+        scopes: ["personal"],
+        context: ["personalTab"],
+      },
+    ],
     extensions: [
       {
+        /*
+         * 1.10 is the hard minimum (Smart Alerts). Pinning (1.5), no-item
+         * activation (1.8), multi-select (1.13) and loadItemByIdAsync (1.15)
+         * are all feature-detected at runtime, so the add-in still installs on
+         * a host that only has 1.10.
+         */
         requirements: {
           scopes: ["mail"],
           capabilities: [{ name: "Mailbox", minVersion: "1.10" }],
@@ -448,14 +500,16 @@ function jsonManifest({ baseUrl, apiUrl, id, displayName, ssoResource, version }
             type: "general",
             code: { page: `${baseUrl}/taskpane.html` },
             lifetime: "short",
-            actions: [{ id: "openPane", type: "openPage", view: "taskPaneView", pinnable: true }],
+            /* `pinnable` → the pane survives navigating the list (ItemChanged);
+               `multiselect` → it also activates on several selected messages. */
+            actions: [{ id: "openPane", type: "openPage", view: "taskPaneView", pinnable: true, multiselect: true }],
           },
           {
             id: "ChatRuntime",
             type: "general",
             code: { page: `${baseUrl}/taskpane.html?tab=chat` },
             lifetime: "short",
-            actions: [{ id: "openChat", type: "openPage", view: "chatView", pinnable: false }],
+            actions: [{ id: "openChat", type: "openPage", view: "chatView", pinnable: true, multiselect: true }],
           },
           {
             id: "BriefRuntime",

@@ -3,7 +3,7 @@
     "title": "Outlook AI Orchestrator",
     "close": "Fermer",
     "previewMode": "Mode aperçu",
-    "mockApi": "API simulée",
+    "mockApi": "Données simulées",
     "language": "Langue",
     "automationCoach": "Coach d'automatisation",
     "complianceGuardian": "Compliance Guardian",
@@ -257,7 +257,11 @@
       "13010": "L'authentification unique n'est pas autorisée dans cette session de navigateur. Contactez votre administrateur (voir le runbook SSO).",
       "13012": "L'authentification unique est indisponible dans ce client Outlook. Contactez l'IT (voir le runbook SSO).",
       "13013": "Trop de tentatives de connexion. Attendez une minute puis réessayez."
-    }
+    },
+    "backendTitle": "Orchestrateur inaccessible",
+    "backendBody": "Le complément ne peut pas joindre l'AI Orchestrator : il n'a donc rien à afficher. Il ne basculera pas sur des données d'exemple — l'analyse d'un e-mail d'exemple n'est pas une réponse sur votre boîte.",
+    "backendHint": "Vérifiez que le backend tourne (pnpm dev) et que VITE_API_BASE_URL pointe dessus, puis réessayez.",
+    "backendDetail": "Contrôle de santé : {message}"
   },
   "source": {
     "precomputed": "Précalculé",
@@ -379,5 +383,32 @@
     "models": "Modèles",
     "featureFlags": "Fonctionnalités",
     "noneEnabled": "aucune"
+  },
+  "home": {
+    "subtitle": "Votre boîte aux lettres",
+    "openEmailHint": "Ouvrez un e-mail pour l'analyser — résumé, risques et actions proposées ont besoin d'un message. Ici vous trouvez ce qui concerne toute la boîte : votre résumé journalier et le chat sur vos e-mails indexés.",
+    "chatEmpty": "Posez une question sur votre boîte, par exemple « Qu'est-ce que j'attends encore du client ? »"
+  },
+  "selection": {
+    "title": "Sélection",
+    "count": "{count} sélectionnés",
+    "loading": "Lecture des e-mails sélectionnés…",
+    "empty": "Aucune sélection. Sélectionnez plusieurs e-mails dans la liste, ou ouvrez-en un.",
+    "unsupported": "La sélection multiple nécessite le nouvel Outlook ou Outlook sur le web.",
+    "unsupportedHint": "Cette version d'Outlook ne peut pas indiquer à un complément quels messages sont sélectionnés (ensemble d'exigences Mailbox 1.13). Ouvrez un e-mail, ou épinglez le volet et utilisez le résumé journalier.",
+    "noSubject": "(sans objet)",
+    "unknownSender": "Expéditeur indisponible",
+    "degraded": "Seuls {loaded} des {count} messages ont pu être lus entièrement. Outlook n'a pas autorisé le chargement des autres (Mailbox 1.13 sans 1.15) : la synthèse n'utilise que leur objet.",
+    "whatNext": "Que voulez-vous faire ?",
+    "synthesise": "Synthétiser ces {count} e-mails",
+    "ask": "Poser une question sur la sélection",
+    "reviewActions": "Examiner les actions proposées",
+    "synthesiseFirst": "Les actions sont proposées à partir de la synthèse — elle démarre.",
+    "costHint": "La synthèse et le chat consomment un appel IA chacun. Lister la sélection ne coûte rien.",
+    "back": "← Retour aux {count} e-mails sélectionnés",
+    "threadSubject": "{count} e-mails sélectionnés",
+    "scope": "Cette sélection ({count})",
+    "chatEmpty": "Posez une question sur les {count} e-mails sélectionnés ; la recherche reste dans la sélection.",
+    "indexing": "Indexation des e-mails sélectionnés…"
   }
 }

@@ -1,4 +1,7 @@
 export * from "./env";
+export * from "./host";
+export * from "./events";
+export * from "./selection";
 export * from "./sample";
 export * from "./cache";
 export * from "./readItem";

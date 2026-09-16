@@ -3,7 +3,7 @@
     "title": "Outlook AI Orchestrator",
     "close": "Close",
     "previewMode": "Preview mode",
-    "mockApi": "Mock API",
+    "mockApi": "Mock data",
     "language": "Language",
     "automationCoach": "Automation Coach",
     "complianceGuardian": "Compliance Guardian",
@@ -257,7 +257,11 @@
       "13010": "Single sign-on is not allowed in this browser session. Ask your administrator (see the SSO runbook).",
       "13012": "Single sign-on is unavailable in this Outlook client. Contact IT (see the SSO runbook).",
       "13013": "Too many sign-in attempts. Wait a minute and try again."
-    }
+    },
+    "backendTitle": "Orchestrator unreachable",
+    "backendBody": "The add-in cannot reach the AI Orchestrator, so it has nothing to show. It will not fall back to sample data: an analysis of a sample email is not an answer about your mailbox.",
+    "backendHint": "Check that the backend is running (pnpm dev) and that VITE_API_BASE_URL points at it, then retry.",
+    "backendDetail": "Health check: {message}"
   },
   "source": {
     "precomputed": "Precomputed",
@@ -379,5 +383,32 @@
     "models": "Models",
     "featureFlags": "Features",
     "noneEnabled": "none"
+  },
+  "home": {
+    "subtitle": "Your mailbox",
+    "openEmailHint": "Open an email to analyse it — summary, risks and proposed actions need a message. Here you get what is mailbox-wide: your daily brief and the chat over your indexed emails.",
+    "chatEmpty": "Ask anything about your mailbox, e.g. \"What am I still waiting for from the client?\""
+  },
+  "selection": {
+    "title": "Selection",
+    "count": "{count} selected",
+    "loading": "Reading the selected emails…",
+    "empty": "Nothing is selected. Select several emails in the list, or open one.",
+    "unsupported": "Multi-select needs the new Outlook or Outlook on the web.",
+    "unsupportedHint": "This Outlook version cannot tell an add-in which messages are selected (Mailbox requirement set 1.13). Open a single email instead, or pin the pane and use the daily brief.",
+    "noSubject": "(no subject)",
+    "unknownSender": "Sender not available",
+    "degraded": "Only {loaded} of {count} messages could be read in full. Outlook did not allow loading the others (Mailbox 1.13 without 1.15), so the synthesis uses their subjects only.",
+    "whatNext": "What do you want to do?",
+    "synthesise": "Synthesise these {count} emails",
+    "ask": "Ask about the selection",
+    "reviewActions": "Review proposed actions",
+    "synthesiseFirst": "Actions are proposed from the synthesis — running it first.",
+    "costHint": "Synthesising and asking use one AI call each. Listing the selection costs nothing.",
+    "back": "← Back to the {count} selected emails",
+    "threadSubject": "{count} selected emails",
+    "scope": "This selection ({count})",
+    "chatEmpty": "Ask a question about the {count} selected emails; retrieval stays inside the selection.",
+    "indexing": "Indexing the selected emails…"
   }
 }

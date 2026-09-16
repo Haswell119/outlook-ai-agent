@@ -25,7 +25,7 @@ function toAttachment(a: Office.AttachmentDetails): AttachmentMeta {
 /**
  * Read the currently opened message (read mode) into the shared EmailContext.
  * Every optional Office.js API is guarded by a requirement-set check.
- * In preview mode (no Outlook) the ABC Capital sample email is returned.
+ * In preview mode (no Outlook) the sample email is returned.
  */
 export async function readCurrentItem(): Promise<EmailContext> {
   if (!isOfficeAvailable()) {
@@ -34,8 +34,18 @@ export async function readCurrentItem(): Promise<EmailContext> {
     cacheItem(sample);
     return sample;
   }
-  const item = officeGlobal()!.context.mailbox.item as unknown as Office.MessageRead;
+  return readMessageItem(officeGlobal()!.context.mailbox.item as unknown as Office.MessageRead);
+}
 
+/**
+ * Map an Office.js read item to the shared `EmailContext`.
+ *
+ * Used for the item currently open in the reading pane **and** for the items
+ * returned by `loadItemByIdAsync` in the multi-select selection view, which
+ * expose the same read-item surface (`fallbackId` is used when a loaded item
+ * does not carry its own `itemId`).
+ */
+export async function readMessageItem(item: Office.MessageRead, fallbackId?: string): Promise<EmailContext> {
   const body = await tryAsync<string>((cb) => item.body.getAsync(Office.CoercionType.Text, cb), "");
 
   let categories: string[] = [];
@@ -61,7 +71,7 @@ export async function readCurrentItem(): Promise<EmailContext> {
   }
 
   const email: EmailContext = {
-    id: item.itemId,
+    id: item.itemId || fallbackId || "",
     conversationId: item.conversationId || undefined,
     internetMessageId,
     subject: item.subject ?? "",
