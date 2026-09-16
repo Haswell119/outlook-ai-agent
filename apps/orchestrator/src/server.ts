@@ -1,5 +1,5 @@
 // Must run before anything reads process.env (side-effect import).
-import { LOADED_ENV_FILES } from "./env-file.js";
+import { LOADED_ENV_FILES, candidateEnvFiles } from "./env-file.js";
 import pino from "pino";
 import { buildApp } from "./app.js";
 import { APP_VERSION, ConfigError, effectiveConfig, isMemoryDatabase, loadConfigDetailed, runsWorkers, servesApi, type Config } from "./config.js";
@@ -67,6 +67,12 @@ const logger = pino({
 });
 
 logger.info({ config: effectiveConfig(cfg), secretsFromFiles, envFiles: LOADED_ENV_FILES }, "effective configuration (secrets redacted)");
+if (LOADED_ENV_FILES.length === 0 && cfg.NODE_ENV !== "production") {
+  logger.warn(
+    { lookedAt: candidateEnvFiles() },
+    "no .env file found — running with built-in defaults (LLM on localhost:8000, in-memory or default DB…). Create <repo>/.env (pnpm setup:dev) or set OAO_ENV_FILE=<path>.",
+  );
+}
 
 /* -------------------------------- container ------------------------------ */
 

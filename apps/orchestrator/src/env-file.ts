@@ -39,8 +39,14 @@ export function parseEnvFile(content: string): Record<string, string> {
   return out;
 }
 
+/** Candidate files, highest precedence first (`OAO_ENV_FILE` = explicit extra file). */
+export function candidateEnvFiles(env: NodeJS.ProcessEnv = process.env): string[] {
+  const explicit = env.OAO_ENV_FILE?.trim();
+  return [...(explicit ? [path.resolve(explicit)] : []), path.join(packageRoot, ".env"), path.join(repoRoot, ".env")];
+}
+
 /** Applies the files in order; returns the files that were actually loaded. */
-export function loadEnvFiles(files: string[] = [path.join(packageRoot, ".env"), path.join(repoRoot, ".env")], env: NodeJS.ProcessEnv = process.env): string[] {
+export function loadEnvFiles(files: string[] = candidateEnvFiles(), env: NodeJS.ProcessEnv = process.env): string[] {
   if (env.NODE_ENV === "test" || env.OAO_SKIP_ENV_FILE === "1") return [];
   const loaded: string[] = [];
   for (const file of files) {

@@ -485,7 +485,13 @@ faible : variable déjà présente dans le shell ou le conteneur → `apps/<app>
 (optionnel, pour surcharger localement) → `.env` racine. Après une modification
 du `.env`, relancer `pnpm dev` : les valeurs sont lues une fois au démarrage.
 L'orchestrator journalise les fichiers chargés (`envFiles`) et sa configuration
-effective (secrets masqués) dans sa première ligne de log.
+effective (secrets masqués) dans sa première ligne de log. **Si `envFiles` est
+vide**, il n'a trouvé aucun fichier et tourne avec ses valeurs par défaut
+(modèle sur `localhost:8000`, `ROLE=api`…) : un avertissement `no .env file
+found` liste les chemins examinés. Vérifier que le fichier s'appelle exactement
+`.env` (pas `.env.txt`, piège classique de l'éditeur Windows : activer
+l'affichage des extensions) et qu'il est à la racine du dépôt, ou indiquer un
+chemin explicite avec `OAO_ENV_FILE=C:\chemin\vers\.env`.
 
 ### Stack locale complète (PostgreSQL réel + modèle interne)
 
