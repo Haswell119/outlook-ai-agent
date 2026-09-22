@@ -3,7 +3,7 @@
 Sortie de `helm template` pour le chart
 `infra/helm/outlook-ai-orchestrator` (source unique de vérité).
 
-- Régénérer : `pnpm k8s:render` (options : `--env dev|prod`, `--namespace`)
+- Régénérer : `npm run k8s:render` (options : `--env dev|prod`, `--namespace`)
 - Namespace : `oao` · release : `oao`
 - Values appliquées : `infra/helm/outlook-ai-orchestrator/values-nkp.yaml`
 - Secrets : **non rendus**. Ces manifests attendent un Secret existant

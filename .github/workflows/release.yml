@@ -19,7 +19,6 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  PNPM_VERSION: "10.33.0"
   NODE_VERSION: "22"
   # Office manifests and the add-in bundle are baked per environment: these
   # repository variables hold the production hosts.
@@ -240,21 +239,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+          cache: npm
 
       - uses: azure/setup-helm@v5
         with:
           version: v3.16.3
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Render the production Office manifests
         env:
@@ -264,13 +259,13 @@ jobs:
           ADDIN_VERSION: ${{ needs.version.outputs.version }}.0
           ORGANIZATION_NAME: Northbridge Capital
         run: |
-          pnpm --filter @oao/shared build
-          pnpm --filter @oao/addin run --if-present manifest:render
-          pnpm --filter @oao/addin run --if-present validate-manifest
+          npm run build -w @oao/shared
+          npm run manifest:render -w @oao/addin --if-present
+          npm run validate-manifest -w @oao/addin --if-present
 
       - name: Render the Helm-free Kubernetes manifests
         run: |
-          pnpm k8s:render --clean
+          npm run k8s:render -- --clean
           tar -czf oao-k8s-manifests-${{ needs.version.outputs.version }}.tar.gz -C infra/k8s rendered
 
       - name: Collect release assets

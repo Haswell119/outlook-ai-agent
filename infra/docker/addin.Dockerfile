@@ -9,6 +9,8 @@
 #     --build-arg AAD_CLIENT_ID=<add-in app registration client id> \
 #     -t oao/addin .
 #
+# Package manager: npm only (shipped with the node:22 image — no Corepack).
+#
 # Everything host-specific (VITE_* and the Office manifests) is baked in at
 # BUILD time: a manifest is a release artifact, immutable like the bundle it
 # points at. One image per environment, therefore — the tags produced by
@@ -21,32 +23,29 @@
 # ---------------------------------------------------------------------------
 ARG NODE_IMAGE=node:22-bookworm-slim
 ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.27-alpine
-ARG PNPM_VERSION=10.33.0
 
 FROM ${NODE_IMAGE} AS base
-ARG PNPM_VERSION
-ENV PNPM_HOME=/pnpm \
-    PATH=/pnpm:$PATH \
-    npm_config_store_dir=/pnpm/store \
-    CI=1
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+ENV CI=1 \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false
 WORKDIR /repo
 
 # ---- deps -------------------------------------------------------------------
+# Manifests first so the install layer survives source edits; all four are
+# copied because npm resolves the workspace graph from the root lockfile.
 FROM base AS deps
-COPY pnpm-lock.yaml .npmrc ./
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm fetch
-COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
+COPY package.json package-lock.json .npmrc ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/orchestrator/package.json apps/orchestrator/
 COPY apps/admin/package.json apps/admin/
 COPY apps/addin/package.json apps/addin/
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm install --frozen-lockfile --filter @oao/addin... --filter @oao/shared
+RUN --mount=type=cache,id=npm-cache,target=/root/.npm,sharing=locked \
+    npm ci --workspace @oao/shared --workspace @oao/addin
 
 # ---- build --------------------------------------------------------------------
 FROM deps AS build
+COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/addin apps/addin
 
@@ -73,14 +72,14 @@ ENV VITE_API_BASE_URL=https://$API_HOST \
     VITE_ONSEND_FAIL_MODE=$VITE_ONSEND_FAIL_MODE \
     VITE_COMPLIANCE_EMAIL=$VITE_COMPLIANCE_EMAIL
 
-RUN pnpm --filter @oao/shared build \
- && pnpm --filter @oao/addin build \
+RUN npm run build -w @oao/shared \
+ && npm run build -w @oao/addin \
  && ADDIN_HOST="https://$ADDIN_HOST" \
     API_HOST="https://$API_HOST" \
     AAD_CLIENT_ID="$AAD_CLIENT_ID" \
     ADDIN_VERSION="$ADDIN_VERSION" \
     ORGANIZATION_NAME="$ORGANIZATION_NAME" \
-    pnpm --filter @oao/addin run --if-present manifest:render
+    npm run manifest:render -w @oao/addin --if-present
 
 # ---- runtime: nginx (unprivileged image = non-root by default) --------------
 FROM ${NGINX_IMAGE} AS runtime

@@ -5,9 +5,11 @@
 > le mode démo local. Les termes techniques (endpoints, variables
 > d'environnement, commandes) restent en anglais.
 >
-> Toutes les commandes `pnpm …` fonctionnent à l'identique sur **Windows,
+> Toutes les commandes `npm …` fonctionnent à l'identique sur **Windows,
 > macOS et Linux** : l'outillage est en Node ESM (`scripts/*.mjs`), il n'y a
-> plus de script bash ni de dépendance à `curl`.
+> plus de script bash ni de dépendance à `curl`. npm est le **seul**
+> gestionnaire de paquets du dépôt : il est livré avec Node 22, Corepack n'est
+> plus nécessaire.
 
 ## Sommaire
 
@@ -33,7 +35,7 @@
 | **Helm seul** | cluster de test, bootstrap | [`../infra/helm/outlook-ai-orchestrator/README.md`](../infra/helm/outlook-ai-orchestrator/README.md) |
 | **YAML seul (sans Helm)** | revue de sécurité hors ligne | [`../infra/k8s/README.md`](../infra/k8s/README.md) |
 | **Docker Compose** | site unique sans Kubernetes, démonstration durable | §8 |
-| **Local (`pnpm dev`)** | développement, démo en 5 minutes | §9 |
+| **Local (`npm run dev`)** | développement, démo en 5 minutes | §9 |
 
 ## 2. Production — NKP + GitOps
 
@@ -144,7 +146,7 @@ Dashboard admin (web, Auth.js) ──OIDC──────────►    �
    appartienne au domaine qui héberge le volet.
 5. **Grant admin consent** pour le tenant.
 6. Ce client ID alimente `AAD_CLIENT_ID` du rendu de manifest
-   (`pnpm manifest:render`, build arg `AAD_CLIENT_ID` de l'image add-in), qui
+   (`npm run manifest:render`, build arg `AAD_CLIENT_ID` de l'image add-in), qui
    écrit le bloc :
 
    ```xml
@@ -200,7 +202,7 @@ Dashboard admin (web, Auth.js) ──OIDC──────────►    �
 | App **API** — client ID | `AAD_CLIENT_ID` · `auth.aad.clientId` · `ORCHESTRATOR_API_CLIENT_ID` (dashboard) |
 | App **API** — client secret | `AAD_CLIENT_SECRET` (Secret, `AAD_CLIENT_SECRET_FILE`) |
 | App **API** — scope exposé | `AAD_REQUIRE_SCOPE=access_as_user` · `auth.aad.requireScope` |
-| App **Add-in** — client ID | build arg `AAD_CLIENT_ID` de l'image add-in / `pnpm manifest:render` |
+| App **Add-in** — client ID | build arg `AAD_CLIENT_ID` de l'image add-in / `npm run manifest:render` |
 | App **Dashboard** — client ID | `AUTH_MICROSOFT_ENTRA_ID_ID` · `admin.entra.clientId` |
 | App **Dashboard** — client secret | `AUTH_MICROSOFT_ENTRA_ID_SECRET` (Secret, `secrets.adminEntraClientSecret`) |
 | Issuer | `AUTH_MICROSOFT_ENTRA_ID_ISSUER` · `admin.entra.issuer` |
@@ -323,7 +325,7 @@ ADDIN_HOST=https://addin.oao.northbridge.example \
 API_HOST=https://api.oao.northbridge.example \
 AAD_CLIENT_ID=<client id de l'app Add-in> \
 ADDIN_VERSION=1.2.3.0 \
-pnpm manifest:render
+npm run manifest:render
 ```
 
 Déploiement à l'organisation :
@@ -392,8 +394,8 @@ LLM_MODEL=<nom du déploiement>
 ### Valider la configuration
 
 ```bash
-pnpm check:llm                # lit .env
-pnpm check:llm ./autre.env
+npm run check:llm                # lit .env
+npm run check:llm -- ./autre.env
 ```
 
 Le script teste `/models`, une complétion réelle, et `/embeddings` en
@@ -418,7 +420,7 @@ export OAO_VERSION=0.1.0
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml ps
-pnpm smoke --url http://127.0.0.1:8080
+npm run smoke -- --url http://127.0.0.1:8080
 ```
 
 Vérifier la signature des images **avant** le premier `up` :
@@ -449,31 +451,31 @@ Pour construire les images localement plutôt que de les tirer :
 
 | Outil | Version | Usage |
 |---|---|---|
-| Node.js | ≥ 20 | runtime des trois apps et de `scripts/*.mjs` |
-| pnpm | 10.33.0 (via corepack) | monorepo |
+| Node.js | ≥ 22 | runtime des trois apps et de `scripts/*.mjs` |
+| npm | ≥ 10.9 (livré avec Node 22) | workspaces du monorepo |
 | Docker Desktop / Engine | récent | PostgreSQL local (optionnel en mode démo) |
 | Git | — | — |
 | mkcert ou OpenSSL | optionnel | certificat HTTPS local si l'outillage Office échoue |
-| helm | ≥ 3.12, optionnel | uniquement pour `pnpm k8s:render` |
+| helm | ≥ 3.12, optionnel | uniquement pour `npm run k8s:render` |
 
 Aucun besoin de bash, WSL, `curl` ou `make` : Windows PowerShell,
 Command Prompt, Terminal macOS et n'importe quel shell Linux suffisent.
 
-```bash
-corepack enable
-corepack prepare pnpm@10.33.0 --activate
-```
+`npm --version` doit afficher `10.9` ou plus ; c'est la version fournie par
+Node 22. Ni Corepack ni aucune installation globale supplémentaire ne sont
+nécessaires — et rien ne réclame de droits administrateur sous Windows.
 
 ### Démo en 5 minutes (aucune dépendance externe)
 
 ```bash
 git clone <repo-url> outlook-ai-agent
 cd outlook-ai-agent
-pnpm setup:dev        # .env, vérifications, install, build @oao/shared
-pnpm certs            # certificat HTTPS local pour le volet
-pnpm dev              # orchestrator :8080 · addin :3000 · admin :3001
-pnpm smoke            # vérifie que tout répond
-pnpm smoke --full     # vérifie que TOUT fonctionne, fonctionnalité par fonctionnalité
+npm install              # installe les 4 workspaces (package-lock.json)
+npm run setup:dev        # .env, vérifications, install, build @oao/shared
+npm run certs            # certificat HTTPS local pour le volet
+npm run dev              # orchestrator :8080 · addin :3000 · admin :3001
+npm run smoke            # vérifie que tout répond
+npm run smoke -- --full  # vérifie que TOUT fonctionne, fonctionnalité par fonctionnalité
 ```
 
 Le mode démo tourne avec `LLM_PROVIDER=mock`, `DATABASE_URL=memory`,
@@ -481,10 +483,10 @@ Le mode démo tourne avec `LLM_PROVIDER=mock`, `DATABASE_URL=memory`,
 
 **Un seul fichier `.env`, à la racine.** Les trois apps le lisent au démarrage
 (orchestrator, `next.config.mjs` du dashboard, `vite.config.ts` de l'add-in) et
-`pnpm check:llm` / `pnpm smoke` aussi. Priorité, de la plus forte à la plus
+`npm run check:llm` / `npm run smoke` aussi. Priorité, de la plus forte à la plus
 faible : variable déjà présente dans le shell ou le conteneur → `apps/<app>/.env`
 (optionnel, pour surcharger localement) → `.env` racine. Après une modification
-du `.env`, relancer `pnpm dev` : les valeurs sont lues une fois au démarrage.
+du `.env`, relancer `npm run dev` : les valeurs sont lues une fois au démarrage.
 L'orchestrator journalise les fichiers chargés (`envFiles`) et sa configuration
 effective (secrets masqués) dans sa première ligne de log. **Si `envFiles` est
 vide**, il n'a trouvé aucun fichier et tourne avec ses valeurs par défaut
@@ -494,21 +496,21 @@ found` liste les chemins examinés. Vérifier que le fichier s'appelle exactemen
 l'affichage des extensions) et qu'il est à la racine du dépôt, ou indiquer un
 chemin explicite avec `OAO_ENV_FILE=C:\chemin\vers\.env`.
 
-### « Est-ce que tout fonctionne ? » — `pnpm smoke --full`
+### « Est-ce que tout fonctionne ? » — `npm run smoke -- --full`
 
-`pnpm smoke` répond à « le service est-il debout et bien câblé ? » en quelques
-secondes. `pnpm smoke --full` répond à la question qui compte vraiment : **est-ce
+`npm run smoke` répond à « le service est-il debout et bien câblé ? » en quelques
+secondes. `npm run smoke -- --full` répond à la question qui compte vraiment : **est-ce
 que chaque fonctionnalité marche de bout en bout, avec votre modèle et votre
 base ?** C'est la commande à lancer après une installation, après un changement
 de `.env` et avant de déclarer que la machine est prête.
 
 ```bash
-pnpm smoke --full                       # stack locale (http://localhost:8080)
-pnpm smoke --full --lang fr             # réponses IA en français
-pnpm smoke --full --reindex             # force la recréation des embeddings
-pnpm smoke --full --json > smoke.json   # rapport exploitable par un script
-pnpm smoke --full --url https://api.oao.northbridge.example --token "$JWT"
-pnpm smoke --help                       # toutes les options
+npm run smoke -- --full                     # stack locale (http://localhost:8080)
+npm run smoke -- --full --lang fr           # réponses IA en français
+npm run smoke -- --full --reindex           # force la recréation des embeddings
+npm run smoke -- --full --json > smoke.json # rapport exploitable par un script
+npm run smoke -- --full --url https://api.oao.northbridge.example --token "$JWT"
+npm run smoke -- --help                     # toutes les options
 ```
 
 Le test indexe 5 e-mails réalistes FR/EN dans la boîte de l'appelant (un fil
@@ -552,15 +554,15 @@ cas le plus fréquent est une base migrée avant l'existence du `.env`, donc ave
 ### Stack locale complète (PostgreSQL réel + modèle interne)
 
 ```bash
-pnpm dev:db                      # PostgreSQL/pgvector, attend le healthcheck
+npm run dev:db                      # PostgreSQL/pgvector, attend le healthcheck
 # .env :
 #   LLM_PROVIDER=openai-compatible
 #   LLM_BASE_URL=http://gpu-node.northbridge.example:8000/v1
 #   DATABASE_URL=postgres://oao:oao@localhost:5432/oao
-pnpm check:llm
-pnpm db:migrate && pnpm db:seed
-pnpm dev
-pnpm smoke --full --reindex      # vérifie l'ensemble, embeddings inclus
+npm run check:llm
+npm run db:migrate && npm run db:seed
+npm run dev
+npm run smoke -- --full --reindex      # vérifie l'ensemble, embeddings inclus
 ```
 
 > **`EMBEDDING_DIMENSIONS` et pgvector.** La colonne `email_index.embedding` est
@@ -569,7 +571,7 @@ pnpm smoke --full --reindex      # vérifie l'ensemble, embeddings inclus
 > par défaut) : un `.env` qui sélectionne ensuite `text-embedding-3-small`
 > (1536) ne correspond plus. En développement (`DB_AUTO_MIGRATE=true`) le
 > démarrage redimensionne la colonne tout seul et écrit un `WARN` — les vecteurs
-> stockés sont perdus, il suffit de réindexer (`pnpm smoke --full --reindex`, ou
+> stockés sont perdus, il suffit de réindexer (`npm run smoke -- --full --reindex`, ou
 > simplement se servir de l'add-in). En production (`DB_AUTO_MIGRATE=false`),
 > rien n'est modifié : `/ready` répond 503 avec le message exact à suivre. Voir
 > [`OPERATIONS.md` §15](OPERATIONS.md#15-dimension-des-embeddings-pgvector).
@@ -578,17 +580,17 @@ pnpm smoke --full --reindex      # vérifie l'ensemble, embeddings inclus
 
 | Commande | Effet |
 |---|---|
-| `pnpm setup:dev` | bootstrap complet (`--no-db`, `--no-install`) |
-| `pnpm dev:db [up\|down\|status\|logs\|reset\|psql]` | PostgreSQL local |
-| `pnpm certs` | certificat HTTPS du volet (`--force`, `--mkcert`, `--openssl`) |
-| `pnpm check:llm` | valide l'endpoint LLM interne |
-| `pnpm smoke` | test de bout en bout (`--url`, `--token`, `--wait`) |
-| `pnpm smoke --full` | **vérification fonctionnelle complète** : indexation → recherche → chat → analyse/cache/triage → synthèse → brouillons → actions → conformité → automatisations → brief → audit (`--lang`, `--reindex`, `--json`, `--admin-token`, `--metrics-token`) |
-| `pnpm manifest:render` | rend les manifests Office depuis `ADDIN_HOST`/`API_HOST`/`AAD_CLIENT_ID` |
-| `pnpm manifest:sideload` | charge le manifest dans Outlook (`--prod`, `--remove`, `--print`) |
-| `pnpm --filter @oao/addin manifest:package[:dev]` | package d'app Teams (zip `manifest.json` + `color.png`/`outline.png`) pour l'entrée « Apps » du nouvel Outlook (§10.2) |
-| `pnpm k8s:render` | régénère `infra/k8s/rendered/` depuis le chart Helm |
-| `pnpm typecheck` / `lint` / `test` / `build` / `e2e` | qualité |
+| `npm run setup:dev` | bootstrap complet (`--no-db`, `--no-install`) |
+| `npm run dev:db -- [up\|down\|status\|logs\|reset\|psql]` | PostgreSQL local |
+| `npm run certs` | certificat HTTPS du volet (`--force`, `--mkcert`, `--openssl`) |
+| `npm run check:llm` | valide l'endpoint LLM interne |
+| `npm run smoke` | test de bout en bout (`--url`, `--token`, `--wait`) |
+| `npm run smoke -- --full` | **vérification fonctionnelle complète** : indexation → recherche → chat → analyse/cache/triage → synthèse → brouillons → actions → conformité → automatisations → brief → audit (`--lang`, `--reindex`, `--json`, `--admin-token`, `--metrics-token`) |
+| `npm run manifest:render` | rend les manifests Office depuis `ADDIN_HOST`/`API_HOST`/`AAD_CLIENT_ID` |
+| `npm run manifest:sideload` | charge le manifest dans Outlook (`--prod`, `--remove`, `--print`) |
+| `npm run manifest:package -w @oao/addin[:dev]` | package d'app Teams (zip `manifest.json` + `color.png`/`outline.png`) pour l'entrée « Apps » du nouvel Outlook (§10.2) |
+| `npm run k8s:render` | régénère `infra/k8s/rendered/` depuis le chart Helm |
+| `npm run typecheck` / `lint` / `test` / `build` / `e2e` | qualité |
 
 Toutes acceptent `--help`.
 
@@ -597,9 +599,9 @@ Toutes acceptent `--help`.
 ### 10.1 Manifest XML — volet depuis un e-mail, volet épinglé, sélection multiple
 
 ```bash
-pnpm manifest:sideload            # détecte l'OS et fait ce qu'il faut
-pnpm manifest:sideload --print    # affiche seulement la procédure OWA
-pnpm manifest:sideload --remove   # annule
+npm run manifest:sideload            # détecte l'OS et fait ce qu'il faut
+npm run manifest:sideload -- --print    # affiche seulement la procédure OWA
+npm run manifest:sideload -- --remove   # annule
 ```
 
 | Plateforme | Ce que fait le script |
@@ -609,7 +611,7 @@ pnpm manifest:sideload --remove   # annule
 | **Linux / New Outlook / OWA** | affiche la procédure *Paramètres → Gérer les compléments → Mes compléments → Ajouter un complément personnalisé → Ajouter à partir d'un fichier* (ou *à partir d'une URL* vers `https://<ADDIN_HOST>/manifest/manifest.xml`) |
 
 Prérequis commun : le serveur qui héberge le volet doit être joignable et son
-certificat TLS reconnu (`pnpm certs` en local, CA interne déployée par GPO en
+certificat TLS reconnu (`npm run certs` en local, CA interne déployée par GPO en
 production). New Outlook pour Windows ne lit **pas** la clé de registre WEF :
 utiliser la procédure web.
 
@@ -641,11 +643,11 @@ qu'il nomme (`color.png` 192×192, `outline.png` 32×32 monochrome).
 
 ```bash
 # production (lit ADDIN_HOST/API_HOST/AAD_CLIENT_ID comme manifest:render)
-pnpm manifest:render
-pnpm --filter @oao/addin manifest:package        # → apps/addin/manifest/oao-addin-teams-app.zip
+npm run manifest:render
+npm run manifest:package -w @oao/addin        # → apps/addin/manifest/oao-addin-teams-app.zip
 
 # développement (https://localhost:3000)
-pnpm --filter @oao/addin manifest:package:dev    # → …/oao-addin-teams-app.dev.zip
+npm run manifest:package:dev -w @oao/addin    # → …/oao-addin-teams-app.dev.zip
 ```
 
 Téléversement en tant qu'**app personnalisée** :
@@ -684,7 +686,7 @@ barre **Apps** à gauche ; un clic ouvre
       `NODE_ENV=production`), `admin.authMode: aad`.
 - [ ] Secrets uniquement dans SOPS ou un coffre (ESO) — `git grep` ne trouve
       aucune valeur sensible ; `features.demoSeed=false`.
-- [ ] `llm.baseUrl` validé par `pnpm check:llm`, CIDR GPU déclaré dans
+- [ ] `llm.baseUrl` validé par `npm run check:llm`, CIDR GPU déclaré dans
       `llm.egress.cidrs`, dimension d'embeddings cohérente avec les migrations.
 - [ ] Migrations appliquées par le hook Helm (`kubectl -n oao get jobs` /
       schéma vérifié).

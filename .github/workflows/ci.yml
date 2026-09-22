@@ -1,8 +1,8 @@
 name: CI
 
 # Manual / on-demand only: the team runs the same gates locally
-# (pnpm typecheck && pnpm test && pnpm build && pnpm e2e) and starts this
-# workflow by hand (Actions → CI → Run workflow) or on a pull request.
+# (npm run typecheck && npm test && npm run build && npm run e2e) and starts
+# this workflow by hand (Actions → CI → Run workflow) or on a pull request.
 on:
   pull_request:
     branches: [main]
@@ -17,7 +17,6 @@ permissions:
   contents: read
 
 env:
-  PNPM_VERSION: "10.33.0"
   NODE_VERSION: "22"
   # Demo-mode defaults: tests never need a real Postgres or LLM.
   LLM_PROVIDER: mock
@@ -61,36 +60,32 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          - { name: shared, filter: "@oao/shared" }
-          - { name: orchestrator, filter: "@oao/orchestrator" }
-          - { name: addin, filter: "@oao/addin" }
-          - { name: admin, filter: "@oao/admin" }
+          - { name: shared, workspace: "@oao/shared" }
+          - { name: orchestrator, workspace: "@oao/orchestrator" }
+          - { name: addin, workspace: "@oao/addin" }
+          - { name: admin, workspace: "@oao/admin" }
     steps:
       - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+          cache: npm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Build @oao/shared
-        run: pnpm --filter @oao/shared build
+        run: npm run build -w @oao/shared
 
       - name: Typecheck
-        run: pnpm --filter ${{ matrix.package.filter }} typecheck
+        run: npm run typecheck -w ${{ matrix.package.workspace }}
 
       - name: Lint
-        run: pnpm --filter ${{ matrix.package.filter }} lint
+        run: npm run lint -w ${{ matrix.package.workspace }}
 
       - name: Test
-        run: pnpm --filter ${{ matrix.package.filter }} test
+        run: npm run test -w ${{ matrix.package.workspace }}
 
       - name: Build
         if: matrix.package.name != 'shared'
@@ -108,7 +103,7 @@ jobs:
           # would try to reach an orchestrator that does not exist on a runner.
           ADMIN_MOCK: "true"
           ADMIN_AUTH_MODE: token
-        run: pnpm --filter ${{ matrix.package.filter }} build
+        run: npm run build -w ${{ matrix.package.workspace }}
 
       - name: Render and validate the Office manifests
         if: matrix.package.name == 'addin'
@@ -117,8 +112,8 @@ jobs:
           API_HOST: https://api.oao.northbridge.example
           ORGANIZATION_NAME: Northbridge Capital
         run: |
-          pnpm --filter @oao/addin run --if-present manifest:render
-          pnpm --filter @oao/addin run --if-present validate-manifest
+          npm run manifest:render -w @oao/addin --if-present
+          npm run validate-manifest -w @oao/addin --if-present
 
       - name: Upload add-in bundle + manifests
         if: matrix.package.name == 'addin'
@@ -140,8 +135,8 @@ jobs:
       fail-fast: false
       matrix:
         app:
-          - { name: addin, filter: "@oao/addin" }
-          - { name: admin, filter: "@oao/admin" }
+          - { name: addin, workspace: "@oao/addin" }
+          - { name: admin, workspace: "@oao/admin" }
     env:
       # Both apps read this: keep the browser cache inside the workspace so
       # actions/cache can pick it up and the e2e runners agree on the path.
@@ -149,29 +144,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+          cache: npm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Build @oao/shared
-        run: pnpm --filter @oao/shared build
+        run: npm run build -w @oao/shared
 
       - name: Cache Playwright browsers
         uses: actions/cache@v6
         with:
           path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install chromium
-        run: pnpm --filter ${{ matrix.app.filter }} exec playwright install --with-deps chromium
+        run: npm exec -w ${{ matrix.app.workspace }} -- playwright install --with-deps chromium
 
       - name: Resolve the chromium binary
         # Both playwright.config.ts default `executablePath` to
@@ -179,7 +170,7 @@ jobs:
         # browser actually installed above instead of guessing.
         run: |
           set -euo pipefail
-          bin=$(pnpm --filter ${{ matrix.app.filter }} exec node -e \
+          bin=$(npm exec -w ${{ matrix.app.workspace }} -- node -e \
             "console.log(require('@playwright/test').chromium.executablePath())")
           echo "resolved chromium: $bin"
           test -x "$bin"
@@ -187,12 +178,12 @@ jobs:
 
       - name: Run e2e
         env:
-          VITE_API_MOCK: "true"
+          VITE_API_MOCK: "false"
           ADMIN_MOCK: "true"
           ADMIN_AUTH_MODE: token
         # `--if-present` keeps the job green for a package that does not
         # expose an `e2e` script (yet).
-        run: pnpm --filter ${{ matrix.app.filter }} run --if-present e2e
+        run: npm run e2e -w ${{ matrix.app.workspace }} --if-present
 
       - name: Upload Playwright report
         if: always()
@@ -222,7 +213,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      # The developer tooling must run without pnpm install, without bash and
+      # The developer tooling must run without `npm install`, without bash and
       # without curl — that is the whole point of scripts/*.mjs.
       - name: Syntax check
         shell: bash

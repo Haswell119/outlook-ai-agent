@@ -207,7 +207,7 @@ encore manquants (`helm get notes oao -n oao`).
 
 ### Variante sans Helm
 
-`pnpm k8s:render` régénère `infra/k8s/rendered/` depuis le chart — voir
+`npm run k8s:render` régénère `infra/k8s/rendered/` depuis le chart — voir
 [`../infra/k8s/README.md`](../infra/k8s/README.md) et ses limites (migrations
 et rollback manuels).
 
@@ -243,7 +243,7 @@ curl -skI https://addin.oao.northbridge.example/taskpane.html | head -5
 curl -sS https://addin.oao.northbridge.example/manifest/manifest.xml | head -5
 
 # Bout en bout (depuis un poste ayant un jeton Entra ID)
-pnpm smoke --url https://api.oao.northbridge.example --token "$JWT" --wait 60
+npm run smoke -- --url https://api.oao.northbridge.example --token "$JWT" --wait 60
 
 # Observabilité
 kubectl -n oao get servicemonitor,prometheusrule
@@ -287,7 +287,7 @@ Checklist fonctionnelle :
 | Pods en `CreateContainerConfigError` | clé manquante dans `oao-secrets` (souvent `POSTGRES_PASSWORD` ou `DATABASE_URL`) | `kubectl -n oao describe pod`, compléter le Secret SOPS/ESO |
 | `oao-migrate` échoue | PostgreSQL pas prêt, `DATABASE_URL` faux, extension `vector` absente | `kubectl -n oao logs job/oao-migrate` (le Job est conservé en cas d'échec) |
 | HelmRelease bloqué en `pending-upgrade` | hook de migration interrompu | `flux suspend hr oao -n oao`, `helm rollback`, corriger, `flux resume` |
-| `/api/v1/ready` en `503` | LLM ou base injoignable → NetworkPolicy | vérifier `llm.egress.cidrs`, `pnpm check:llm` depuis un pod du namespace |
+| `/api/v1/ready` en `503` | LLM ou base injoignable → NetworkPolicy | vérifier `llm.egress.cidrs`, `npm run check:llm` depuis un pod du namespace |
 | Certificat `Ready=False` | ClusterIssuer absent ou CA non autorisée | `kubectl describe certificate -n oao`, `kubectl get clusterissuer` |
 | Outlook refuse le volet | chaîne TLS inconnue du poste, ou CSP | déployer la CA interne par GPO ; vérifier l'absence de `X-Frame-Options` et la présence de `frame-ancestors` |
 | Traefik renvoie `502` sur l'add-in | backend HTTPS non reconnu | annotation `serversscheme: https` sur le Service + `addin.traefik.serversTransport.enabled=true` avec la CA |

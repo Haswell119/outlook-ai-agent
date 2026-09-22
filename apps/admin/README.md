@@ -16,9 +16,9 @@ that runs against a real production build.
 ## Quick start
 
 ```bash
-pnpm install                       # from the repository root
+npm install                       # from the repository root
 cp apps/admin/.env.example apps/admin/.env.local
-pnpm --filter @oao/admin dev       # http://localhost:3001
+npm run dev -w @oao/admin       # http://localhost:3001
 ```
 
 With `ADMIN_MOCK=true` and `ADMIN_AUTH_MODE=token` (the defaults in `.env.example`)
@@ -30,17 +30,17 @@ from the deterministic dataset in `src/lib/mock-data.ts` and you are signed in a
 
 | Script                                      | What it does                                                   |
 | ------------------------------------------- | -------------------------------------------------------------- |
-| `pnpm --filter @oao/admin dev`               | Next dev server on **port 3001**                                |
-| `pnpm --filter @oao/admin build`             | Production build (`output: "standalone"`)                       |
-| `pnpm --filter @oao/admin start`             | Serve the build on port 3001                                    |
-| `pnpm --filter @oao/admin typecheck`         | `tsc --noEmit`                                                  |
-| `pnpm --filter @oao/admin lint`              | Same as `typecheck` (no ESLint config in the repo)              |
-| `pnpm --filter @oao/admin test`              | Vitest — 77 unit tests                                          |
-| `pnpm --filter @oao/admin e2e`               | Playwright — 12 end-to-end tests (needs `build` first)          |
-| `pnpm --filter @oao/admin analyze`           | `ANALYZE=true next build` → bundle treemaps in `.next/analyze/`  |
-| `pnpm --filter @oao/admin screenshots`       | Refreshes `docs/screenshots/*.png` from a running build          |
+| `npm run dev -w @oao/admin`               | Next dev server on **port 3001**                                |
+| `npm run build -w @oao/admin`             | Production build (`output: "standalone"`)                       |
+| `npm run start -w @oao/admin`             | Serve the build on port 3001                                    |
+| `npm run typecheck -w @oao/admin`         | `tsc --noEmit`                                                  |
+| `npm run lint -w @oao/admin`              | Same as `typecheck` (no ESLint config in the repo)              |
+| `npm run test -w @oao/admin`              | Vitest — 77 unit tests                                          |
+| `npm run e2e -w @oao/admin`               | Playwright — 12 end-to-end tests (needs `build` first)          |
+| `npm run analyze -w @oao/admin`           | `ANALYZE=true next build` → bundle treemaps in `.next/analyze/`  |
+| `npm run screenshots -w @oao/admin`       | Refreshes `docs/screenshots/*.png` from a running build          |
 
-Full gate: `pnpm --filter @oao/admin typecheck && pnpm --filter @oao/admin test && pnpm --filter @oao/admin build && pnpm --filter @oao/admin e2e`.
+Full gate: `npm run typecheck -w @oao/admin && npm run test -w @oao/admin && npm run build -w @oao/admin && npm run e2e -w @oao/admin`.
 
 ## Authentication
 
@@ -225,7 +225,7 @@ reaches the browser. `src/env.ts` validates them with zod at startup and fails f
 * Recharts is loaded on demand (`src/components/charts/lazy.tsx`) — without it the
   overview alone would pay ~100 kB gz for charts that are not needed to read the KPIs.
 * **First Load JS per route stays under 200 kB gz** (largest: `/` and `/policy` at
-  182 kB, shared baseline 103 kB). `pnpm --filter @oao/admin analyze` regenerates the
+  182 kB, shared baseline 103 kB). `npm run analyze -w @oao/admin` regenerates the
   treemaps.
 
 ## Tests
@@ -270,7 +270,7 @@ escalation or pausing an automation is visible until the server restarts.
 
 `docs/screenshots/` — `overview`, `system`, `audit-detail`, `policy-test`, `approvals`,
 `automations`, `policy` (`*.png` at 1440 px, `*-1024.png` at 1024 px), captured from a
-production build in mock mode with `pnpm --filter @oao/admin screenshots`.
+production build in mock mode with `npm run screenshots -w @oao/admin`.
 
 ## Docker
 

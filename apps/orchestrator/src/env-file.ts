@@ -7,7 +7,7 @@
  * authoritative. Skipped under `NODE_ENV=test` and when `OAO_SKIP_ENV_FILE=1`.
  *
  * Why: developers configure everything in the single root `.env` (documented
- * in docs/SETUP.md) and `pnpm dev` must see the same values as `pnpm check:llm`.
+ * in docs/SETUP.md) and `npm run dev` must see the same values as `npm run check:llm`.
  */
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";

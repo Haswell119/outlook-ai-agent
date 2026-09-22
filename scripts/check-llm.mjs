@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `pnpm check:llm` — validates the internal LLM endpoint (Northbridge GPU)
+ * `npm run check:llm` — validates the internal LLM endpoint (Northbridge GPU)
  * directly, without going through the orchestrator.
  *
  * Checks, in order: GET /models, POST /chat/completions, POST /embeddings.
@@ -32,7 +32,7 @@ const { flags, positionals } = parseArgs(process.argv.slice(2), {
 helpIfRequested(
   flags,
   `
-Usage: pnpm check:llm [path-to-env-file] [options]
+Usage: npm run check:llm -- [path-to-env-file] [options]
 
 Validates the OpenAI-compatible endpoint configured in .env
 (vLLM / TGI / Ollama / private Azure OpenAI):

@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Outlook AI Orchestrator — Outlook add-in (task pane, compose Compliance Guardian, Smart Alerts on send)",
   "scripts": {
-    "dev": "pnpm build:commands && vite --host localhost --port 3000",
-    "build": "pnpm build:commands && tsc --noEmit -p tsconfig.json && vite build",
+    "dev": "npm run build:commands && vite --host localhost --port 3000",
+    "build": "npm run build:commands && tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview --port 4173 --strictPort",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "tsc --noEmit -p tsconfig.json",
@@ -20,7 +20,7 @@
     "screenshots:states": "node scripts/state-screenshots.mjs",
     "sideload": "echo \"See README.md: sideload manifest/manifest.dev.xml in Outlook (Get Add-ins > My add-ins > Add a custom add-in > Add from file)\"",
     "build:commands": "vite build -c vite.commands.config.ts",
-    "analyze": "ANALYZE=1 pnpm build",
+    "analyze": "ANALYZE=1 npm run build",
     "manifest:render": "node scripts/manifest-template.mjs",
     "manifest:package": "node scripts/package-manifest.mjs",
     "manifest:package:dev": "node scripts/package-manifest.mjs --dev",
@@ -30,7 +30,7 @@
   "dependencies": {
     "@fluentui/react-components": "^9.54.0",
     "@fluentui/react-icons": "^2.0.258",
-    "@oao/shared": "workspace:*",
+    "@oao/shared": "*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zod": "^3.24.0"

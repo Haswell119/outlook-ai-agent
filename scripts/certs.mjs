@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `pnpm certs` — local HTTPS certificate for the add-in.
+ * `npm run certs` — local HTTPS certificate for the add-in.
  *
  * Office Add-ins are only loaded over HTTPS, even on localhost. Three
  * strategies, in order of preference:
@@ -25,7 +25,7 @@ import {
   info,
   ok,
   parseArgs,
-  pnpm,
+  npmRun,
   repoRoot,
   run,
   step,
@@ -39,7 +39,7 @@ const { flags } = parseArgs(process.argv.slice(2), {
 helpIfRequested(
   flags,
   `
-Usage: pnpm certs [options]
+Usage: npm run certs -- [options]
 
 Generates the HTTPS certificate used by the add-in dev server
 (https://localhost:3000) and by the add-in container.
@@ -70,7 +70,7 @@ const hosts = ["localhost", "127.0.0.1", "::1", "addin.localhost"];
 function tryOfficeCerts() {
   if (flags.mkcert || flags.openssl) return false;
   step("office-addin-dev-certs (trusted by Outlook desktop)");
-  const result = pnpm(["--filter", "@oao/addin", "certs"], { check: false });
+  const result = npmRun("certs", { workspace: "@oao/addin", check: false });
   if (result.status !== 0) {
     warn("office-addin-dev-certs failed — falling back");
     return false;
@@ -136,7 +136,7 @@ function tryOpenssl() {
     /* Windows ignores POSIX modes */
   }
   ok(`self-signed certificate written to ${outDir}`);
-  info("Outlook will refuse it: prefer `pnpm certs` without --openssl, or mkcert");
+  info("Outlook will refuse it: prefer `npm run certs` without --openssl, or mkcert");
   return true;
 }
 
@@ -150,6 +150,6 @@ const version = capture("openssl", ["version"]);
 if (version) info(version);
 
 console.log(`
-Next: pnpm dev   (add-in on https://localhost:3000)
-      pnpm manifest:sideload   to load the add-in into Outlook
+Next: npm run dev   (add-in on https://localhost:3000)
+      npm run manifest:sideload   to load the add-in into Outlook
 `);

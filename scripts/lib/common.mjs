@@ -90,8 +90,8 @@ export function helpIfRequested(flags, text) {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Cross-platform `which`. Honours PATHEXT on Windows so `pnpm` resolves to
- * `pnpm.cmd` without the caller having to care.
+ * Cross-platform `which`. Honours PATHEXT on Windows so `npm` resolves to
+ * `npm.cmd` without the caller having to care.
  */
 export function which(command) {
   const pathValue = process.env.PATH ?? "";
@@ -115,7 +115,7 @@ export const has = (command) => which(command) !== null;
 
 /**
  * Run a command synchronously, inheriting stdio.
- * `shell: true` on Windows only, so `.cmd` shims (pnpm, npx) are found — the
+ * `shell: true` on Windows only, so `.cmd` shims (npm, npx) are found — the
  * arguments never go through a shell on POSIX, which keeps quoting sane.
  */
 export function run(command, args = [], { cwd = repoRoot, env, check = true, quiet = false } = {}) {
@@ -153,7 +153,15 @@ export function openPath(target) {
   }
 }
 
-export const pnpm = (args, opts) => run("pnpm", args, opts);
+/**
+ * Run an npm command (`npm` is the only package manager this repository uses —
+ * it ships with Node 22, so nothing has to be enabled first).
+ */
+export const npm = (args, opts) => run("npm", args, opts);
+
+/** `npm run <script> [-w <workspace>]`, the shape every caller here needs. */
+export const npmRun = (script, { workspace, ...opts } = {}) =>
+  npm(["run", script, ...(workspace ? ["-w", workspace] : [])], opts);
 
 /* -------------------------------------------------------------------------- */
 /*  .env handling                                                             */

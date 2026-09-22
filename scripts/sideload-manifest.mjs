@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `pnpm manifest:sideload` — load the add-in manifest into Outlook, on any OS.
+ * `npm run manifest:sideload` — load the add-in manifest into Outlook, on any OS.
  *
  *   Windows  : registers the manifest folder under
  *              HKCU\\Software\\Microsoft\\Office\\16.0\\WEF\\Developer
@@ -39,7 +39,7 @@ const { flags } = parseArgs(process.argv.slice(2), {
 helpIfRequested(
   flags,
   `
-Usage: pnpm manifest:sideload [options]
+Usage: npm run manifest:sideload -- [options]
 
 Options:
   --manifest <path>  manifest to sideload (default
@@ -64,7 +64,7 @@ const manifestPath = flags.manifest
 if (!existsSync(manifestPath)) {
   die(
     `manifest not found: ${manifestPath}\n` +
-      "     Render it first: pnpm --filter @oao/addin manifest:render\n" +
+      "     Render it first: npm run manifest:render -w @oao/addin\n" +
       "     (or pass --manifest <path>)",
   );
 }
@@ -80,7 +80,7 @@ ${style.bold("Outlook on the web / New Outlook (any OS)")}
      — or "Add from URL" with https://<ADDIN_HOST>/manifest/manifest.xml
        when the add-in is already deployed (Helm chart serves it there).
   4. The add-in host must be reachable and its TLS certificate trusted by the
-     browser: run "pnpm certs" once for https://localhost:3000.
+     browser: run "npm run certs" once for https://localhost:3000.
 `;
 
 if (flags.print) {
@@ -134,7 +134,7 @@ if (isWindows) {
   }
   console.log(owaInstructions);
   console.log(
-    `${style.dim("Undo:")} pnpm manifest:sideload --remove\n` +
+    `${style.dim("Undo:")} npm run manifest:sideload -- --remove\n` +
       `${style.dim("Note:")} New Outlook for Windows does NOT read this registry key — use the web procedure above.`,
   );
   process.exit(0);
@@ -167,7 +167,7 @@ if (isMac) {
     info("Grant Terminal full-disk access, or use the web procedure below.");
   }
   console.log(owaInstructions);
-  console.log(`${style.dim("Undo:")} pnpm manifest:sideload --remove`);
+  console.log(`${style.dim("Undo:")} npm run manifest:sideload -- --remove`);
   process.exit(0);
 }
 

@@ -13,7 +13,7 @@ import { ensureVectorDimensions, readVectorColumns } from "../../src/adapters/db
  *   docker run -d --name oao-pgtest -p 5433:5432 \
  *     -e POSTGRES_USER=oao -e POSTGRES_PASSWORD=oao -e POSTGRES_DB=oao_test pgvector/pgvector:pg16
  *   TEST_DATABASE_URL=postgres://oao:oao@localhost:5433/oao_test \
- *     pnpm --filter @oao/orchestrator test
+ *     npm run test -w @oao/orchestrator
  *
  * Without pgvector in the image every case below still runs: the guard reports
  * lexical-only instead of re-dimensioning.

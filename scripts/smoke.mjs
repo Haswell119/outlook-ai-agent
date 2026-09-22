@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `pnpm smoke` — end-to-end smoke test against a running orchestrator.
+ * `npm run smoke` — end-to-end smoke test against a running orchestrator.
  *
  * Two modes:
  *
@@ -13,10 +13,10 @@
  *    and approve an automation, generate the daily brief, then read the audit
  *    trail back. Every response is validated against the shared zod contract.
  *
- *   pnpm smoke
- *   pnpm smoke --full
- *   pnpm smoke --full --reindex --lang fr
- *   pnpm smoke --full --url https://api.oao.northbridge.example --token "$JWT"
+ *   npm run smoke
+ *   npm run smoke -- --full
+ *   npm run smoke -- --full --reindex --lang fr
+ *   npm run smoke -- --full --url https://api.oao.northbridge.example --token "$JWT"
  *
  * Exit code 0 = all checks passed.
  */
@@ -44,7 +44,7 @@ const { flags } = parseArgs(process.argv.slice(2), { booleans: ["help", "h", "qu
 helpIfRequested(
   flags,
   `
-Usage: pnpm smoke [options]
+Usage: npm run smoke -- [options]
 
 Quick mode (default) — is the deployment alive and wired?
   GET  /api/v1/live            liveness probe (Kubernetes)
@@ -390,8 +390,8 @@ async function loadContract() {
   try {
     return await import(dist);
   } catch {
-    say.warn("@oao/shared is not built yet — building it now (pnpm --filter @oao/shared build)");
-    run("pnpm", ["--filter", "@oao/shared", "build"], { quiet: true });
+    say.warn("@oao/shared is not built yet — building it now (npm run build -w @oao/shared)");
+    run("npm", ["run", "build", "-w", "@oao/shared"], { quiet: true });
     return import(dist);
   }
 }
@@ -525,7 +525,7 @@ async function runFull() {
   await measure("POST /actions/approve", async () => {
     expect(proposalId && approvedAction, "no proposal to approve (the previous step failed)");
     const r = decode(
-      await call("/actions/approve", { method: "POST", body: { proposalId, actionIds: [approvedAction.id], comment: "approved by pnpm smoke --full" } }),
+      await call("/actions/approve", { method: "POST", body: { proposalId, actionIds: [approvedAction.id], comment: "approved by npm run smoke -- --full" } }),
       S.ApproveActionsResponseSchema,
       { what: "/actions/approve" },
     );
@@ -539,7 +539,7 @@ async function runFull() {
   await measure("POST /actions/:id/result", async () => {
     expect(reportableActionId ?? approvedAction, "no approved action to report a result for");
     const id = reportableActionId ?? approvedAction.id;
-    const r = decode(await call(`/actions/${encodeURIComponent(id)}/result`, { method: "POST", body: { status: "executed", message: "executed by pnpm smoke --full" } }), S.ActionResultSchema, { what: "/actions/:id/result" });
+    const r = decode(await call(`/actions/${encodeURIComponent(id)}/result`, { method: "POST", body: { status: "executed", message: "executed by npm run smoke -- --full" } }), S.ActionResultSchema, { what: "/actions/:id/result" });
     expect(r.status === "executed", `expected the reported status to be stored as executed, got "${r.status}"`);
     return `${r.type} → ${r.status}, auditId=${r.auditId}`;
   });
@@ -608,7 +608,7 @@ async function runFull() {
 
   await measure("POST /automations/:id/approve", async () => {
     expect(automationId, "no automation to approve");
-    const a = decode(await call(`/automations/${automationId}/approve`, { method: "POST", body: { comment: "approved by pnpm smoke --full" } }), S.AutomationSchema, { what: "/automations/:id/approve" });
+    const a = decode(await call(`/automations/${automationId}/approve`, { method: "POST", body: { comment: "approved by npm run smoke -- --full" } }), S.AutomationSchema, { what: "/automations/:id/approve" });
     expect(a.status === "active", `an approved automation must be active, got "${a.status}"`);
     return `status=${a.status}, risk=${a.riskLevel}, steps=${a.steps.length}`;
   });

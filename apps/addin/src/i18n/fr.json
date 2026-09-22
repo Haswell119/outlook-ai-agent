@@ -270,7 +270,7 @@
     },
     "backendTitle": "Orchestrateur inaccessible",
     "backendBody": "Le complément ne peut pas joindre l'AI Orchestrator : il n'a donc rien à afficher. Il ne basculera pas sur des données d'exemple — l'analyse d'un e-mail d'exemple n'est pas une réponse sur votre boîte.",
-    "backendHint": "Vérifiez que le backend tourne (pnpm dev) et que VITE_API_BASE_URL pointe dessus, puis réessayez.",
+    "backendHint": "Vérifiez que le backend tourne (npm run dev) et que VITE_API_BASE_URL pointe dessus, puis réessayez.",
     "backendDetail": "Contrôle de santé : {message}",
     "cancelled": "La requête a été annulée : vous avez ouvert un autre e-mail."
   },

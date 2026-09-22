@@ -2,7 +2,7 @@
 # Outlook AI Orchestrator — full local stack (PostgreSQL/pgvector +
 # orchestrator api + orchestrator worker + admin + addin), built from source.
 #
-#   pnpm setup:dev            # creates .env from .env.example
+#   npm run setup:dev            # creates .env from .env.example
 #   docker compose up --build
 #
 # Portable across Docker Desktop (Windows/macOS) and Docker Engine (Linux):
@@ -182,7 +182,7 @@ services:
     volumes:
       # A named volume, so the container can generate its own self-signed
       # certificate on first start on every OS. To serve a trusted cert
-      # instead, run `pnpm certs` and swap this for the bind mount below.
+      # instead, run `npm run certs` and swap this for the bind mount below.
       - oao_addin_certs:/etc/nginx/certs
       # - ./apps/addin/certs:/etc/nginx/certs:ro
     read_only: true

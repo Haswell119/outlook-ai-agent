@@ -95,7 +95,7 @@ Détail : [`SETUP.md`](SETUP.md) §3.
 - [ ] Validation exécutée et archivée :
 
       ```bash
-      pnpm check:llm                 # /models + une complétion réelle + /embeddings
+      npm run check:llm              # /models + une complétion réelle + /embeddings
       ```
 
       Verdict OK sur les trois étapes, code de sortie 0.
@@ -239,7 +239,7 @@ Détail : [`SETUP.md`](SETUP.md) §3.
       dans le bundle : aucune requête vers `/api/v1/api/v1/…`.
 - [ ] Manifests servis : `https://<addin-host>/manifest/manifest.xml` et
       `…/manifest.json` répondent 200.
-- [ ] `pnpm --filter @oao/addin validate-manifest` passe sur les fichiers
+- [ ] `npm run validate-manifest -w @oao/addin` passe sur les fichiers
       publiés.
 - [ ] **Déploiement centralisé** via Microsoft 365 admin center → *Integrated
       apps* → *Upload custom apps*, ciblé sur le **groupe pilote** uniquement

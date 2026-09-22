@@ -1,9 +1,9 @@
 /**
  * Builds the **Teams app package** for the unified (JSON) manifest.
  *
- *     pnpm --filter @oao/addin manifest:package          # manifest/manifest.json
- *     pnpm --filter @oao/addin manifest:package --dev     # manifest/manifest.dev.json
- *     pnpm --filter @oao/addin manifest:package --out /tmp/app.zip
+ *     npm run manifest:package -w @oao/addin          # manifest/manifest.json
+ *     npm run manifest:package -w @oao/addin --dev     # manifest/manifest.dev.json
+ *     npm run manifest:package -w @oao/addin --out /tmp/app.zip
  *
  * A unified manifest cannot be uploaded on its own: Outlook / Teams expect a
  * **zip** containing `manifest.json` at the root plus the two icons it names

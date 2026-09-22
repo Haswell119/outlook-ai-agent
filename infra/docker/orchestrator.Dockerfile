@@ -7,53 +7,64 @@
 # Build context = repo root:
 #   docker build -f infra/docker/orchestrator.Dockerfile -t oao/orchestrator .
 #
+# Package manager: npm only (it ships with the node:22 image — no Corepack,
+# no global install). `npm ci` is reproducible: it installs exactly what
+# package-lock.json describes, or fails.
+#
 # Runtime guarantees (relied on by infra/helm):
 #   - non-root (uid/gid 1001)
 #   - read-only root filesystem compatible: only /tmp is written
 #   - secrets accepted as <NAME>_FILE pointing at a mounted file
 # ---------------------------------------------------------------------------
 ARG NODE_IMAGE=node:22-bookworm-slim
-ARG PNPM_VERSION=10.33.0
 
-# ---- base: pnpm via corepack ----------------------------------------------
+# ---- base -------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS base
-ARG PNPM_VERSION
-ENV PNPM_HOME=/pnpm \
-    PATH=/pnpm:$PATH \
-    npm_config_store_dir=/pnpm/store \
-    CI=1
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+ENV CI=1 \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false
 WORKDIR /repo
 
-# ---- deps: warm the pnpm store, then install the orchestrator subgraph -----
+# ---- deps: the full (dev included) tree needed to compile -------------------
 FROM base AS deps
-# Lockfile first: `pnpm fetch` only needs it, so the (cached) download layer is
-# invalidated only when dependencies actually change.
-COPY pnpm-lock.yaml .npmrc ./
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm fetch
-# Every workspace manifest, so --frozen-lockfile can verify the whole graph.
-COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
+# Manifests first: the install layer is invalidated only when a dependency
+# actually changes, not on every source edit. Every workspace manifest is
+# copied because npm resolves the whole workspace graph from the root lockfile.
+COPY package.json package-lock.json .npmrc ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/orchestrator/package.json apps/orchestrator/
 COPY apps/admin/package.json apps/admin/
 COPY apps/addin/package.json apps/addin/
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm install --frozen-lockfile --filter @oao/orchestrator... --filter @oao/shared
+RUN --mount=type=cache,id=npm-cache,target=/root/.npm,sharing=locked \
+    npm ci --workspace @oao/shared --workspace @oao/orchestrator
 
-# ---- build: compile shared then orchestrator, then prune ------------------
+# ---- build: compile shared, then the orchestrator --------------------------
 FROM deps AS build
+COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/orchestrator apps/orchestrator
-RUN pnpm --filter @oao/shared build \
- && pnpm --filter @oao/orchestrator build
-# `pnpm deploy --prod` resolves the workspace:* dependency on @oao/shared into
-# a self-contained, devDependency-free node_modules tree.
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store,sharing=locked \
-    pnpm --filter @oao/orchestrator deploy --prod --legacy /tmp/deploy/orchestrator
+RUN npm run build -w @oao/shared \
+ && npm run build -w @oao/orchestrator
+
+# ---- prod-deps: a clean, devDependency-free tree ---------------------------
+# A second `npm ci` into a pristine directory is smaller *and* more predictable
+# than pruning the build tree in place: no build tool ever reaches the runtime
+# layer. The workspace links it creates (node_modules/@oao/* -> ../../…) are
+# relative, so the layout below resolves unchanged under /app.
+FROM base AS prod-deps
+WORKDIR /app
+COPY package.json package-lock.json .npmrc ./
+COPY packages/shared/package.json packages/shared/
+COPY apps/orchestrator/package.json apps/orchestrator/
+COPY apps/admin/package.json apps/admin/
+COPY apps/addin/package.json apps/addin/
+RUN --mount=type=cache,id=npm-cache,target=/root/.npm,sharing=locked \
+    npm ci --omit=dev --workspace @oao/shared --workspace @oao/orchestrator
 
 # ---- runtime ---------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runtime
+ARG NODE_IMAGE
 ARG VERSION=0.0.0-dev
 ARG REVISION=unknown
 ARG CREATED=unknown
@@ -78,10 +89,13 @@ WORKDIR /app
 RUN groupadd --system --gid 1001 oao \
  && useradd --system --uid 1001 --gid oao --home-dir /app --shell /usr/sbin/nologin oao
 
-# Deployed, pruned workspace (node_modules + package.json).
-COPY --from=build --chown=root:root /tmp/deploy/orchestrator/node_modules ./node_modules
-COPY --from=build --chown=root:root /tmp/deploy/orchestrator/package.json ./package.json
-# Compiled app + SQL migrations (read at runtime by the migration runner).
+# Production dependency tree + the manifests its workspace links point at.
+COPY --from=prod-deps --chown=root:root /app/node_modules ./node_modules
+COPY --from=prod-deps --chown=root:root /app/package.json ./package.json
+COPY --from=prod-deps --chown=root:root /app/packages/shared/package.json ./packages/shared/package.json
+COPY --from=prod-deps --chown=root:root /app/apps/orchestrator/package.json ./apps/orchestrator/package.json
+# Compiled workspaces + SQL migrations (read at runtime by the migration runner).
+COPY --from=build --chown=root:root /repo/packages/shared/dist ./packages/shared/dist
 COPY --from=build --chown=root:root /repo/apps/orchestrator/dist ./apps/orchestrator/dist
 COPY --from=build --chown=root:root /repo/apps/orchestrator/migrations ./apps/orchestrator/migrations
 

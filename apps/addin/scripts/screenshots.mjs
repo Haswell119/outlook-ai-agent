@@ -1,7 +1,7 @@
 /**
  * Screenshots of the task pane in browser-preview mode (mock API) with Playwright.
  *
- * Usage:  pnpm build && pnpm preview &   then   node scripts/screenshots.mjs [baseUrl]
+ * Usage:  npm run build && npm run preview &   then   node scripts/screenshots.mjs [baseUrl]
  * (or just `node scripts/screenshots.mjs` — it starts `vite preview` itself).
  *
  * Every shot starts from a clean browser context so the local analysis cache and

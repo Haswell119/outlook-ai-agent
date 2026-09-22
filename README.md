@@ -42,7 +42,7 @@ deux modèles — [`AI_LOAD.md`](apps/orchestrator/docs/AI_LOAD.md)).
 
 | # | À renseigner | Où |
 |---|---|---|
-| 1 | **Modèle interne** : `LLM_BASE_URL`, `LLM_MODEL`, `LLM_FAST_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `LLM_API_KEY` (si exigée) | `llm.*` du chart · validé par `pnpm check:llm` |
+| 1 | **Modèle interne** : `LLM_BASE_URL`, `LLM_MODEL`, `LLM_FAST_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `LLM_API_KEY` (si exigée) | `llm.*` du chart · validé par `npm run check:llm` |
 | 2 | **Entra ID** : trois app registrations (API avec `access_as_user` + app roles `Admin`/`Compliance`, add-in SSO, dashboard) | [`docs/SETUP.md`](docs/SETUP.md) §3 |
 | 3 | **Noms DNS + TLS** des trois hôtes (`api`, `admin`, `addin`) et CA interne distribuée aux postes | `hosts.*`, `ingress.tls.*`, `addin.tls.*` |
 | 4 | **Secrets** : `AAD_CLIENT_SECRET`, `ADMIN_API_TOKEN` (≥ 24 car.), `METRICS_TOKEN`, `AUTH_SECRET`, `AUTH_MICROSOFT_ENTRA_ID_SECRET`, `POSTGRES_PASSWORD`/`DATABASE_URL` | SOPS ou External Secrets, montés en `<NOM>_FILE` |
@@ -59,7 +59,7 @@ Go-live : dérouler [`docs/PRODUCTION_CHECKLIST.md`](docs/PRODUCTION_CHECKLIST.m
 | **Chaîne d'approvisionnement** | images GHCR signées **cosign keyless**, SBOM SPDX attestée, scan **trivy** bloquant sur `CRITICAL`, chart publié en artefact OCI signé |
 | **Observabilité** | `ServiceMonitor` + 9 règles d'alerte Prometheus + dashboard Grafana livrés avec le chart |
 | **Sécurité** | non-root, rootfs en lecture seule, secrets montés en fichiers (`<NOM>_FILE`), PSA `restricted`, tout le trafic est-ouest fermé par défaut |
-| **Multi-OS** | outillage développeur 100 % Node ESM : les mêmes commandes `pnpm` sur Windows, macOS et Linux — ni bash, ni `curl`, ni WSL |
+| **Multi-OS** | outillage développeur 100 % Node ESM : les mêmes commandes `npm` sur Windows, macOS et Linux — ni bash, ni `curl`, ni WSL |
 
 Déploiement pas-à-pas : [`docs/NKP.md`](docs/NKP.md) ·
 Checklist de go-live : [`docs/PRODUCTION_CHECKLIST.md`](docs/PRODUCTION_CHECKLIST.md).
@@ -105,7 +105,7 @@ outlook-ai-agent/
 │   ├── helm/           # Chart de production (source de vérité du déploiement) + values-nkp.yaml
 │   ├── gitops/         # Flux : sources, HelmRelease par environnement, SOPS, image automation
 │   ├── docker/         # Dockerfiles multi-stage non-root, nginx, init PostgreSQL
-│   └── k8s/            # Manifests GÉNÉRÉS depuis le chart (pnpm k8s:render), pour les clusters sans Helm
+│   └── k8s/            # Manifests GÉNÉRÉS depuis le chart (npm run k8s:render), pour les clusters sans Helm
 ├── scripts/            # Outillage développeur en Node ESM (multi-OS)
 ├── .github/workflows/  # CI, release (images + chart OCI signés), CodeQL
 └── docs/               # Architecture, setup, NKP, runbook, sécurité, actions, API
@@ -119,18 +119,19 @@ macOS et Linux.
 ```bash
 git clone <repo-url> outlook-ai-agent
 cd outlook-ai-agent
-corepack enable && corepack prepare pnpm@10.33.0 --activate
+# npm suffit : il est livré avec Node 22 (npm 10), rien à activer.
 
-pnpm setup:dev      # .env, vérifications, install, build @oao/shared
-pnpm certs          # certificat HTTPS local (Office exige HTTPS)
-pnpm dev            # orchestrator :8080 · addin :3000 · admin :3001
-pnpm smoke          # vérifie que tout répond
+npm install            # installe les 4 workspaces depuis package-lock.json
+npm run setup:dev      # .env, vérifications, install, build @oao/shared
+npm run certs          # certificat HTTPS local (Office exige HTTPS)
+npm run dev            # orchestrator :8080 · addin :3000 · admin :3001
+npm run smoke          # vérifie que tout répond
 ```
 
 Puis charger le volet dans Outlook :
 
 ```bash
-pnpm manifest:sideload      # registre Windows, dossier wef macOS, ou instructions OWA
+npm run manifest:sideload      # registre Windows, dossier wef macOS, ou instructions OWA
 ```
 
 Détails et stack complète (PostgreSQL + modèle interne) :
@@ -140,14 +141,14 @@ Détails et stack complète (PostgreSQL + modèle interne) :
 
 | Commande | Effet |
 |---|---|
-| `pnpm setup:dev` | bootstrap complet de l'environnement de dev |
-| `pnpm dev:db [up\|down\|reset\|psql]` | PostgreSQL/pgvector local |
-| `pnpm check:llm` | valide l'endpoint LLM interne (models, chat, embeddings) |
-| `pnpm smoke` | test de bout en bout contre un orchestrator en marche |
-| `pnpm manifest:render` | rend les manifests Office pour un environnement |
-| `pnpm manifest:sideload` | charge le volet dans Outlook (multi-OS) |
-| `pnpm k8s:render` | régénère `infra/k8s/rendered/` depuis le chart Helm |
-| `pnpm typecheck` · `lint` · `test` · `e2e` · `build` | qualité |
+| `npm run setup:dev` | bootstrap complet de l'environnement de dev |
+| `npm run dev:db -- [up\|down\|reset\|psql]` | PostgreSQL/pgvector local |
+| `npm run check:llm` | valide l'endpoint LLM interne (models, chat, embeddings) |
+| `npm run smoke` | test de bout en bout contre un orchestrator en marche |
+| `npm run manifest:render` | rend les manifests Office pour un environnement |
+| `npm run manifest:sideload` | charge le volet dans Outlook (multi-OS) |
+| `npm run k8s:render` | régénère `infra/k8s/rendered/` depuis le chart Helm |
+| `npm run typecheck` · `lint` · `test` · `e2e` · `build` | qualité |
 
 Toutes acceptent `--help`.
 

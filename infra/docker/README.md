@@ -15,12 +15,25 @@ Publiées par `.github/workflows/release.yml` sur
 
 ## Propriétés communes
 
-- **Multi-stage** : `base` (pnpm via corepack) → `deps` (`pnpm fetch` puis
-  `pnpm install --frozen-lockfile` filtré sur le sous-graphe) → `build` →
-  `runtime`. Le store pnpm est monté en cache BuildKit
-  (`--mount=type=cache,id=pnpm-store`) : il n'entre jamais dans une couche.
-- **Lockfile gelé** : `--frozen-lockfile`. Un `pnpm-lock.yaml` désynchronisé
-  d'un `package.json` fait échouer le build — c'est voulu (reproductibilité).
+- **Gestionnaire de paquets** : `npm` uniquement — il est livré avec l'image
+  `node:22`, donc aucune activation (Corepack ou autre) n'est nécessaire.
+- **Multi-stage** : `base` → `deps` (`npm ci` filtré sur les workspaces utiles
+  via `--workspace @oao/shared --workspace @oao/<app>`) → `build` → `runtime`.
+  Le cache npm est monté en cache BuildKit
+  (`--mount=type=cache,id=npm-cache,target=/root/.npm`) : il n'entre jamais
+  dans une couche.
+- **Lockfile gelé** : `npm ci` installe exactement ce que décrit
+  `package-lock.json`. Un lockfile désynchronisé d'un `package.json` fait
+  échouer le build — c'est voulu (reproductibilité).
+- **Arbre de production propre** : l'orchestrator refait un
+  `npm ci --omit=dev --workspace @oao/shared --workspace @oao/orchestrator`
+  dans un répertoire vierge, de sorte qu'aucun outil de build n'atteint la
+  couche runtime. Les liens de workspace créés par npm
+  (`node_modules/@oao/* -> ../../…`) sont relatifs : l'image ne copie que
+  `node_modules`, les `package.json`, les `dist/` et `migrations/`.
+  Le dashboard, lui, s'appuie sur la sortie `standalone` de Next (elle embarque
+  déjà son propre `node_modules` tracé, avec React 19 sous
+  `apps/admin/node_modules`).
 - **Non-root**, `USER <uid>:<gid>` numérique (exigé par
   `runAsNonRoot: true` côté Kubernetes, qui ne sait pas résoudre un nom).
 - **Compatible `readOnlyRootFilesystem: true`** :
@@ -60,7 +73,7 @@ M365 admin center. Conséquence : **une image add-in par environnement**.
   (variables de dépôt `ADDIN_HOST`, `API_HOST`, `AAD_CLIENT_ID`).
 - Pour un cluster de dev, reconstruire avec les hôtes de dev et pousser sous
   un tag distinct — ou laisser `addin.enabled=false` côté Helm et sideloader
-  l'add-in depuis le serveur de dev local (`pnpm dev`), ce que fait
+  l'add-in depuis le serveur de dev local (`npm run dev`), ce que fait
   `infra/gitops/envs/dev`.
 
 Les manifests rendus sont servis sur

@@ -70,7 +70,7 @@ logger.info({ config: effectiveConfig(cfg), secretsFromFiles, envFiles: LOADED_E
 if (LOADED_ENV_FILES.length === 0 && cfg.NODE_ENV !== "production") {
   logger.warn(
     { lookedAt: candidateEnvFiles() },
-    "no .env file found — running with built-in defaults (LLM on localhost:8000, in-memory or default DB…). Create <repo>/.env (pnpm setup:dev) or set OAO_ENV_FILE=<path>.",
+    "no .env file found — running with built-in defaults (LLM on localhost:8000, in-memory or default DB…). Create <repo>/.env (npm run setup:dev) or set OAO_ENV_FILE=<path>.",
   );
 }
 

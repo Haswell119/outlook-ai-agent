@@ -24,7 +24,7 @@
     "@fastify/rate-limit": "^10.2.1",
     "@fastify/swagger": "^9.4.0",
     "@fastify/swagger-ui": "^5.2.0",
-    "@oao/shared": "workspace:*",
+    "@oao/shared": "*",
     "fastify": "^5.2.0",
     "fastify-plugin": "^5.1.0",
     "jose": "^5.9.6",

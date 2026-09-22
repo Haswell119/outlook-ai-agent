@@ -46,7 +46,7 @@ jobs:
               - "infra/k8s/rendered"
 
       # No custom build: the JS/TS extractor analyses the sources directly, and
-      # a full pnpm build would only slow the scan down.
+      # a full `npm run build` would only slow the scan down.
       - name: Autobuild
         uses: github/codeql-action/autobuild@v4
 

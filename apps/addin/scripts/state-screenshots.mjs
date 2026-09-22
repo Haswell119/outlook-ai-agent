@@ -17,8 +17,8 @@
  *   - `http-error`  → the analyse route answers 500 with a correlation id
  *
  * The pane must have been built with `ADDIN_SIM=1` (that is what emits
- * `sim.html`); `pnpm --filter @oao/addin e2e` does it, or build it directly:
- * `ADDIN_SIM=1 VITE_API_BASE_URL=http://localhost:8080 pnpm --filter @oao/addin build`.
+ * `sim.html`); `npm run e2e -w @oao/addin` does it, or build it directly:
+ * `ADDIN_SIM=1 VITE_API_BASE_URL=http://localhost:8080 npm run build -w @oao/addin`.
  *
  * Env:
  *   E2E_BASE_URL        pane origin              (default http://localhost:4173)

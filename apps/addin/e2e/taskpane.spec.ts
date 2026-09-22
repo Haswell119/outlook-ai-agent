@@ -273,7 +273,7 @@ test.describe("selection (multi-select)", () => {
  * there. The suite now starts a real orchestrator for `sim.spec.ts`, so "not
  * there" has to be stated rather than assumed: the backend origin is blocked at
  * the network layer, which is also what makes these tests deterministic on a
- * developer machine that happens to be running `pnpm dev`.
+ * developer machine that happens to be running `npm run dev`.
  */
 const API_ORIGIN = process.env.E2E_API_URL ?? "http://localhost:8080";
 

@@ -1,8 +1,8 @@
 /**
  * Refreshes `docs/screenshots/*.png` from a production build in mock mode.
  *
- *   pnpm --filter @oao/admin build
- *   ADMIN_MOCK=true ADMIN_AUTH_MODE=token pnpm --filter @oao/admin start &
+ *   npm run build -w @oao/admin
+ *   ADMIN_MOCK=true ADMIN_AUTH_MODE=token npm run start -w @oao/admin &
  *   node apps/admin/scripts/screenshots.mjs [baseURL]
  *
  * Captures each page at 1440 px and at 1024 px (the documented breakpoint).

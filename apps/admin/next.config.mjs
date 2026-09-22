@@ -15,6 +15,17 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
+ * npm workspaces: this app owns its own `next` (and therefore React 19) under
+ * `apps/admin/node_modules`, while the platform-specific `@next/swc-*` binaries
+ * are hoisted to the repository-root `node_modules` — see the `overrides` block
+ * in the root package.json. Next's "repair the lockfile" helper looks for those
+ * binaries next to its own entry in `package-lock.json`, does not find them and
+ * tries to shell out to a package manager it guesses from this directory (which
+ * holds no lockfile). The lockfile is correct, so skip the repair.
+ */
+process.env.NEXT_IGNORE_INCORRECT_LOCKFILE ??= "1";
+
+/**
  * Single root `.env`: Next.js only loads `apps/admin/.env*` (already done by
  * the time this file runs), so keys from the repository-root `.env` are merged
  * here for anything still unset. Shell/container variables always win.
@@ -80,7 +91,7 @@ const nextConfig = {
 };
 
 /**
- * `ANALYZE=true pnpm --filter @oao/admin build` writes the treemaps to
+ * `ANALYZE=true npm run build -w @oao/admin` writes the treemaps to
  * `.next/analyze/`. The dependency is optional at runtime, so a missing
  * package never breaks a normal build.
  */

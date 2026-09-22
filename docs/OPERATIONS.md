@@ -58,7 +58,7 @@ progressif ne peut pas produire deux ordonnanceurs simultanés. Garder
 kubectl -n oao get pods -o wide
 kubectl -n oao describe deploy/oao-api | sed -n '/Conditions/,$p'
 curl -sS https://api.oao.northbridge.example/api/v1/health | jq
-pnpm smoke --url https://api.oao.northbridge.example --token "$JWT"
+npm run smoke -- --url https://api.oao.northbridge.example --token "$JWT"
 ```
 
 Distinguer les deux échecs : `live` KO = bug/blocage du processus ; `ready` KO
@@ -423,7 +423,7 @@ Comportement attendu (dégradation contrôlée, jamais de panne totale) :
 Diagnostic :
 
 ```bash
-pnpm check:llm                       # depuis un poste ayant la même route réseau
+npm run check:llm                       # depuis un poste ayant la même route réseau
 kubectl -n oao exec deploy/oao-api -- node -e "fetch(process.env.LLM_BASE_URL+'/models').then(r=>console.log(r.status)).catch(e=>console.log('KO',e.message))"
 kubectl -n oao get networkpolicy oao-api -o yaml | grep -A5 ipBlock
 ```
@@ -644,7 +644,7 @@ curl -s -X POST -H "Authorization: Bearer $JWT" \
   https://api.oao.northbridge.example/api/v1/mailbox/sync | jq .
 
 # Vérifier de bout en bout que les embeddings sont revenus (mode = hybrid) :
-pnpm smoke --full --reindex --url https://api.oao.northbridge.example --token "$JWT"
+npm run smoke -- --full --reindex --url https://api.oao.northbridge.example --token "$JWT"
 
 # Ce qui reste sans vecteur :
 psql "$DATABASE_URL" -c "SELECT count(*) AS rows, count(embedding) AS with_vector FROM email_index;"

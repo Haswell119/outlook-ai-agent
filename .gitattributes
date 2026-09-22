@@ -38,6 +38,6 @@ Dockerfile  text eol=lf
 *.zip       binary
 
 # Generated files: collapsed in diffs and excluded from language stats.
-pnpm-lock.yaml            linguist-generated=true -diff
+package-lock.json         linguist-generated=true -diff
 infra/k8s/rendered/**     linguist-generated=true
 apps/*/docs/screenshots/* linguist-generated=true

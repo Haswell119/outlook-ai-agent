@@ -1,4 +1,4 @@
-/** CLI entry: `pnpm db:seed` — seeds the demo data set into the configured database. */
+/** CLI entry: `npm run db:seed` — seeds the demo data set into the configured database. */
 import "../../env-file.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";

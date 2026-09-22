@@ -50,7 +50,7 @@ Une fonctionnalité ou un correctif n'est considéré "terminé" que si :
       d'endpoint, de variable d'environnement ou de comportement de repli met
       à jour `docs/API.md`, `docs/ACTIONS.md`, `.env.example` et/ou
       `docs/OPERATIONS.md` en conséquence, dans le même PR.
-- [ ] `pnpm typecheck`, `pnpm lint`, `pnpm test` et `pnpm build` passent
+- [ ] `npm run typecheck`, `npm run lint`, `npm run test` et `npm run build` passent
       localement et en CI pour les packages touchés.
 - [ ] Toute action à risque `medium`/`high` reste **human-in-the-loop** — pas
       d'exécution automatique ajoutée sans validation utilisateur explicite.
@@ -58,11 +58,11 @@ Une fonctionnalité ou un correctif n'est considéré "terminé" que si :
 ## Avant d'ouvrir une PR
 
 ```bash
-pnpm --filter @oao/shared build
-pnpm typecheck
-pnpm lint
-pnpm test
-pnpm build
+npm run build -w @oao/shared
+npm run typecheck
+npm run lint
+npm run test
+npm run build
 ```
 
 ## Changements d'infrastructure
@@ -85,7 +85,7 @@ helm lint infra/helm/outlook-ai-orchestrator -f infra/helm/outlook-ai-orchestrat
 helm template oao infra/helm/outlook-ai-orchestrator -n oao | kubeconform -strict -summary -ignore-missing-schemas -
 
 # Manifests générés (ne jamais les éditer à la main)
-pnpm k8s:render
+npm run k8s:render
 
 # Parité configuration code <-> .env.example / ConfigMap
 grep -oE '^    [A-Z][A-Z0-9_]+:' apps/orchestrator/src/config.ts | tr -d ' :' | sort > /tmp/code.txt
@@ -107,12 +107,21 @@ docker build -f infra/docker/orchestrator.Dockerfile -t oao/orchestrator:dev .
 Règles :
 
 - **Le chart Helm est la source unique de vérité** du déploiement.
-  `infra/k8s/rendered/` est généré par `pnpm k8s:render` : corriger le chart,
+  `infra/k8s/rendered/` est généré par `npm run k8s:render` : corriger le chart,
   jamais la sortie.
 - **`Chart.yaml: appVersion` doit rester égal à `package.json: version`** — la
   CI le vérifie.
+- **npm est le seul gestionnaire de paquets.** `npm ci` / `npm install` à la
+  racine, un unique `package-lock.json`, aucun Corepack (npm 10 est livré avec
+  Node 22 — rien à activer, et rien qui réclame des droits administrateur sous
+  Windows). Ne pas réintroduire de lockfile concurrent.
+- **Ne pas toucher au bloc `overrides` de `package.json` sans lire
+  `docs/ARCHITECTURE.md` §2** : `"next": { "react": "^19.0.0" }` est ce qui
+  garde Next 15 + React 19 dans `apps/admin/node_modules`, à l'écart du
+  React 18 de l'add-in hissé à la racine. Le supprimer casse `next build`
+  (« Minified React error #31 » au prerender).
 - **Pas de bash dans l'outillage** : tout script développeur est un module
-  Node ESM dans `scripts/`, exposé par un alias `pnpm`, et doit fonctionner
+  Node ESM dans `scripts/`, exposé par un alias `npm run …`, et doit fonctionner
   sur Windows, macOS et Linux (la CI l'exécute sur les trois). Pas de `curl`,
   pas de `sleep`, pas de chemin POSIX en dur.
 - **Jamais de secret**, même d'exemple réaliste : les valeurs de démonstration

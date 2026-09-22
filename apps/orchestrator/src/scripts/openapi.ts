@@ -6,7 +6,7 @@ import { buildOpenApiDocument } from "../openapi.js";
 /**
  * Build step: emit `openapi.json` next to the package root so it can be
  * published, diffed in review and fed to client generators.
- * Run by `pnpm --filter @oao/orchestrator build`.
+ * Run by `npm run build -w @oao/orchestrator`.
  */
 const out = process.argv[2] ?? path.resolve(fileURLToPath(new URL("../../", import.meta.url)), "openapi.json");
 const doc = buildOpenApiDocument();

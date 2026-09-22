@@ -16,7 +16,7 @@ The AI model is **hosted internally** (Northbridge GPU, Qwen3 today). The orches
 talks to it through an **OpenAI-compatible HTTP API** (vLLM, Ollama, LM Studio,
 TGI, Azure OpenAI private tenant …). Switching model = changing environment variables.
 
-## 2. Monorepo layout (pnpm workspaces, TypeScript everywhere)
+## 2. Monorepo layout (npm workspaces, TypeScript everywhere)
 
 ```
 outlook-ai-agent/
@@ -33,6 +33,32 @@ outlook-ai-agent/
 ```
 
 Package names: `@oao/shared`, `@oao/orchestrator`, `@oao/addin`, `@oao/admin`.
+
+**Package manager — npm workspaces only.** The root `package.json` declares
+`"workspaces": ["packages/*", "apps/*"]` and `"packageManager": "npm@10.9.7"`;
+npm 10 ships with Node 22, so Corepack (and anything asking for elevation on
+Windows) is out of the picture. A single `package-lock.json` at the root pins
+every workspace, `npm ci` reproduces it byte for byte in CI and in the images,
+and `@oao/shared` is consumed as `"@oao/shared": "*"` — npm links it from
+`node_modules/@oao/shared` to `packages/shared`.
+
+**Two React majors in one tree.** The add-in is on React 18 (Fluent UI v9,
+`@types/react@18`) and the dashboard on React 19 (Next 15). npm hoists one copy
+to the root `node_modules` and nests the other:
+
+| | hoisted at the repository root | nested under the workspace |
+|---|---|---|
+| runtime | `react`/`react-dom` **18** (add-in, Fluent UI, Testing Library) | `apps/admin/node_modules`: `next`, `next-auth`, `styled-jsx`, `react`/`react-dom` **19** |
+| types | `@types/react` **18** | `apps/admin/node_modules/@types/react` **19** |
+
+The nesting is not left to chance: the root `overrides` block declares that
+`next` needs React 19 (`"next": { "react": "^19.0.0", "react-dom": "^19.0.0" }`),
+which makes npm place Next and its React peer set inside `apps/admin`, where
+Next resolves them — including from its own server-side code, which webpack
+never rewrites. `apps/admin/tsconfig.json` pins `paths` *and* `typeRoots` to
+that folder, and `apps/addin/react-resolution.ts` feeds Vite and Vitest an
+alias + `dedupe` list resolved from the add-in's own manifest, so the task-pane
+bundle contains exactly one React 18. Check with `npm ls react -w @oao/addin`.
 
 ## 3. Runtime topology
 
@@ -475,7 +501,7 @@ de redémarrer l'API sans interrompre un cycle de synchronisation.
 
 - **Source unique de vérité** : le chart Helm
   `infra/helm/outlook-ai-orchestrator`. `infra/k8s/rendered/` n'en est qu'une
-  projection générée (`pnpm k8s:render`) pour les environnements sans Helm.
+  projection générée (`npm run k8s:render`) pour les environnements sans Helm.
 - **Trois images**, construites depuis la racine du monorepo, non-root et
   compatibles `readOnlyRootFilesystem` :
   `oao-orchestrator` (API + worker + migrations), `oao-admin`, `oao-addin`.

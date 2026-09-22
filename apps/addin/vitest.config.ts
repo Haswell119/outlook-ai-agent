@@ -1,10 +1,15 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
+import { reactAlias, reactDedupe } from "./react-resolution";
 
 export default defineConfig({
   plugins: [react()],
-  resolve: { alias: { "@": resolve(__dirname, "src") } },
+  resolve: {
+    // Same single-React guarantee as vite.config.ts — see ./react-resolution.ts.
+    alias: { "@": resolve(__dirname, "src"), ...reactAlias },
+    dedupe: reactDedupe,
+  },
   test: {
     environment: "jsdom",
     globals: true,

@@ -171,5 +171,5 @@ Restauration et RPO/RTO : `docs/OPERATIONS.md`.
 ## Alternative sans Helm
 
 `infra/k8s/rendered/` contient la sortie de `helm template` (générée par
-`pnpm k8s:render`) pour les environnements qui n'appliquent que du YAML.
+`npm run k8s:render`) pour les environnements qui n'appliquent que du YAML.
 C'est un artefact **généré** : ne pas l'éditer à la main.

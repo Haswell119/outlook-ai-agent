@@ -94,7 +94,7 @@ export function decideVectorDimensions(input: VectorDimensionInput): VectorDimen
     return {
       action: "redimension",
       usable: true,
-      detail: `re-dimensioning ${mismatched.map((c) => `${c.table}.${c.column} vector(${c.dimensions})`).join(", ")} to vector(${configuredDimensions}); stored embeddings are discarded and will be recomputed at the next indexing (pnpm smoke --full --reindex)`,
+      detail: `re-dimensioning ${mismatched.map((c) => `${c.table}.${c.column} vector(${c.dimensions})`).join(", ")} to vector(${configuredDimensions}); stored embeddings are discarded and will be recomputed at the next indexing (npm run smoke -- --full --reindex)`,
       columnDimensions: reported,
       mismatched,
     };
@@ -256,7 +256,7 @@ export async function ensureVectorDimensions(pool: PgPool, opts: VectorGuardOpti
     const detail = `email_index.embedding re-dimensioned from vector(${decision.columnDimensions}) to vector(${opts.configuredDimensions})`;
     log.warn?.(
       { from: decision.columnDimensions, to: opts.configuredDimensions, embeddingCacheRowsDeleted: cacheDeleted },
-      `${detail}: the stored embeddings were DISCARDED and will be recomputed at the next indexing (re-index the mailbox, e.g. "pnpm smoke --full --reindex")`,
+      `${detail}: the stored embeddings were DISCARDED and will be recomputed at the next indexing (re-index the mailbox, e.g. "npm run smoke -- --full --reindex")`,
     );
     return { pgvector: true, usable: true, configuredDimensions: opts.configuredDimensions, columnDimensions: opts.configuredDimensions, redimensioned: true, detail, action: "redimension" };
   } finally {

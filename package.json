@@ -3,32 +3,42 @@
   "version": "0.1.0",
   "private": true,
   "description": "Outlook AI Orchestrator - secure, human-in-the-loop AI assistant for Outlook (add-in + orchestrator backend + admin dashboard)",
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "npm@10.9.7",
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "npm": ">=10.9"
   },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "build": "pnpm --filter @oao/shared build && pnpm -r --filter \"./apps/**\" build",
-    "dev": "pnpm --filter @oao/shared build && pnpm -r --parallel --filter \"./apps/**\" dev",
-    "test": "pnpm -r test",
-    "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck",
-    "db:migrate": "pnpm --filter @oao/orchestrator db:migrate",
-    "db:seed": "pnpm --filter @oao/orchestrator db:seed",
-    "e2e": "pnpm -r --filter \"./apps/**\" run --if-present e2e",
+    "build": "npm run build -w @oao/shared && npm run build -w @oao/orchestrator -w @oao/addin -w @oao/admin",
+    "dev": "npm run build -w @oao/shared && concurrently -n orch,addin,admin -c blue,green,magenta \"npm:dev -w @oao/orchestrator\" \"npm:dev -w @oao/addin\" \"npm:dev -w @oao/admin\"",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:migrate": "npm run db:migrate -w @oao/orchestrator",
+    "db:seed": "npm run db:seed -w @oao/orchestrator",
+    "e2e": "npm run e2e --workspaces --if-present",
     "setup:dev": "node scripts/setup-dev.mjs",
     "dev:db": "node scripts/dev-db.mjs",
     "certs": "node scripts/certs.mjs",
     "check:llm": "node scripts/check-llm.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "manifest:render": "pnpm --filter @oao/addin manifest:render",
+    "manifest:render": "npm run manifest:render -w @oao/addin",
     "manifest:sideload": "node scripts/sideload-manifest.mjs",
     "k8s:render": "node scripts/render-k8s.mjs"
   },
-  "pnpm": {
-    "overrides": {
-      "postcss": ">=8.5.23",
-      "@fastify/static": ">=10.1.2"
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "overrides": {
+    "postcss": ">=8.5.23",
+    "@fastify/static": ">=10.1.2",
+    "next": {
+      "react": "^19.0.0",
+      "react-dom": "^19.0.0"
     }
   }
 }

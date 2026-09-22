@@ -53,7 +53,7 @@ orchestrator:
 addin:
   # L'image add-in fige les hôtes au build (bundle Vite + manifests Office) :
   # l'image de release pointe vers la prod. En dev on sideload l'add-in depuis
-  # le serveur local (`pnpm dev`, https://localhost:3000), ou on reconstruit
+  # le serveur local (`npm run dev`, https://localhost:3000), ou on reconstruit
   # une image dédiée avec --build-arg ADDIN_HOST/API_HOST (infra/docker/README.md).
   enabled: false
   replicaCount: 1

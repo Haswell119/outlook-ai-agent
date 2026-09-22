@@ -1,5 +1,5 @@
 /**
- * `pnpm --filter @oao/addin e2e`
+ * `npm run e2e -w @oao/addin`
  *
  * Builds what the suite needs, then runs the Playwright specs:
  *
@@ -62,9 +62,10 @@ if (process.env.E2E_SKIP_BUILD !== "1" && builtAt < sourceAt) {
 // The orchestrator is started by Playwright's webServer; it has to be built.
 if (!existsSync(join(orchestrator, "dist", "server.js"))) {
   console.log("[e2e] building the orchestrator (needed by sim.spec.ts)…");
-  const r = spawnSync("pnpm", ["--filter", "@oao/orchestrator", "build"], { cwd: join(root, "..", ".."), stdio: "inherit", shell: false });
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const r = spawnSync(npm, ["run", "build", "-w", "@oao/orchestrator"], { cwd: join(root, "..", ".."), stdio: "inherit", shell: process.platform === "win32" });
   if (r.status !== 0) {
-    console.error("[e2e] could not build the orchestrator — run `pnpm --filter @oao/orchestrator build` first");
+    console.error("[e2e] could not build the orchestrator — run `npm run build -w @oao/orchestrator` first");
     process.exit(r.status ?? 1);
   }
 }

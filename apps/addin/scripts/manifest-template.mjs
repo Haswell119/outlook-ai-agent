@@ -19,7 +19,7 @@
  *   ADDIN_VERSION   1.0.0.0 / 1.0.0 (XML wants four parts, JSON three)
  *   ORGANIZATION_NAME  provider name shown in the admin centre
  *
- * Run: node scripts/manifest-template.mjs     (pnpm --filter @oao/addin manifest:render)
+ * Run: node scripts/manifest-template.mjs     (npm run manifest:render -w @oao/addin)
  */
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -439,7 +439,7 @@ function jsonManifest({ baseUrl, apiUrl, id, displayName, ssoResource, version }
     /**
      * Package-relative, *not* URLs: a unified manifest is uploaded as a Teams
      * app package (zip) that carries the two icons next to manifest.json.
-     * `pnpm manifest:package` generates them from the same vector definition as
+     * `npm run manifest:package` generates them from the same vector definition as
      * public/assets/icon-*.png (color 192x192, outline 32x32 monochrome).
      */
     icons: { outline: "outline.png", color: "color.png" },

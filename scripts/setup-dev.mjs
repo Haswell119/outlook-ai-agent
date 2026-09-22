@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * `pnpm setup:dev` — one-shot developer bootstrap (Windows / macOS / Linux).
+ * `npm run setup:dev` — one-shot developer bootstrap (Windows / macOS / Linux).
  *
  *   1. copy .env.example -> .env when missing
- *   2. check Node / pnpm / Docker
+ *   2. check Node / npm / Docker
  *   3. start the dev PostgreSQL (unless --no-db or DATABASE_URL=memory)
  *   4. install dependencies and build @oao/shared
  *   5. print the next commands
@@ -14,6 +14,7 @@ import { copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  capture,
   die,
   has,
   helpIfRequested,
@@ -21,7 +22,8 @@ import {
   loadEnv,
   ok,
   parseArgs,
-  pnpm,
+  npm,
+  npmRun,
   repoRoot,
   run,
   step,
@@ -36,18 +38,18 @@ const { flags } = parseArgs(process.argv.slice(2), {
 helpIfRequested(
   flags,
   `
-Usage: pnpm setup:dev [options]
+Usage: npm run setup:dev -- [options]
 
 Prepares a local development environment:
   - creates .env from .env.example if it does not exist
-  - verifies Node >= 20 and pnpm
+  - verifies Node >= 20 and npm
   - starts PostgreSQL/pgvector with docker compose (skipped with --no-db
     or when DATABASE_URL=memory)
   - installs dependencies and builds @oao/shared
 
 Options:
   --no-db        do not start the PostgreSQL container
-  --no-install   skip "pnpm install" (only .env + checks)
+  --no-install   skip "npm install" (only .env + checks)
   -h, --help     show this help
 `,
 );
@@ -76,14 +78,12 @@ if (existsSync(envFile)) {
 const env = loadEnv(envFile, { quiet: true });
 const usesMemoryDb = (env.DATABASE_URL ?? "memory").trim() === "memory";
 
-/* -- 3. pnpm --------------------------------------------------------------- */
-if (!has("pnpm")) {
-  die(
-    "pnpm not found. Enable it with:\n" +
-      "     corepack enable && corepack prepare pnpm@10.33.0 --activate",
-  );
+/* -- 3. npm ---------------------------------------------------------------- */
+if (!has("npm")) {
+  die("npm not found. It ships with Node 22 — reinstall Node from https://nodejs.org (LTS).");
 }
-ok("pnpm found");
+const npmVersion = capture("npm", ["--version"]);
+ok(npmVersion ? `npm ${npmVersion}` : "npm found");
 
 /* -- 4. database ----------------------------------------------------------- */
 if (flags["no-db"]) {
@@ -102,9 +102,9 @@ if (flags["no-install"]) {
   info("--no-install: skipping dependency installation");
 } else {
   step("Installing dependencies");
-  pnpm(["install"]);
+  npm(["install"]);
   step("Building @oao/shared (every other package depends on it)");
-  pnpm(["--filter", "@oao/shared", "build"]);
+  npmRun("build", { workspace: "@oao/shared" });
 }
 
 /* -- 6. next steps --------------------------------------------------------- */
@@ -112,18 +112,18 @@ console.log(`
 ${style.bold("Ready.")} Next steps:
 
   ${style.bold("Demo (mock LLM, in-memory database):")}
-    pnpm certs        # local HTTPS certificate for the add-in (once)
-    pnpm dev          # orchestrator :8080 · addin :3000 · admin :3001
-    pnpm smoke        # end-to-end check against the running orchestrator
+    npm run certs        # local HTTPS certificate for the add-in (once)
+    npm run dev          # orchestrator :8080 · addin :3000 · admin :3001
+    npm run smoke        # end-to-end check against the running orchestrator
 
   ${style.bold("Full local stack (real PostgreSQL):")}
-    pnpm dev:db                      # start / status of the container
-    pnpm db:migrate && pnpm db:seed
-    pnpm check:llm                   # validate the internal LLM endpoint
-    pnpm dev
+    npm run dev:db                      # start / status of the container
+    npm run db:migrate && npm run db:seed
+    npm run check:llm                   # validate the internal LLM endpoint
+    npm run dev
 
   ${style.bold("Sideload the add-in into Outlook:")}
-    pnpm manifest:sideload
+    npm run manifest:sideload
 
 Documentation: docs/SETUP.md (production first), docs/NKP.md (Kubernetes).
 `);

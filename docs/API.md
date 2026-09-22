@@ -286,12 +286,12 @@ curl -sS "$API/audit/export?from=2024-01-01T00:00:00Z&source=llm" \
 head -1 audit.csv
 ```
 
-Voir `pnpm smoke` (`scripts/smoke.mjs`) pour un script prêt à l'emploi,
+Voir `npm run smoke` (`scripts/smoke.mjs`) pour un script prêt à l'emploi,
 multi-plateforme, couvrant les probes (`/live`, `/ready`), `/metrics`,
 `/config/features`, analyze/email, compliance/check et chat :
 
 ```bash
-pnpm smoke                                              # instance locale
-pnpm smoke --url https://api.oao.northbridge.example \
+npm run smoke                                              # instance locale
+npm run smoke -- --url https://api.oao.northbridge.example \
            --token "$JWT" --metrics-token "$METRICS_TOKEN" --wait 60
 ```

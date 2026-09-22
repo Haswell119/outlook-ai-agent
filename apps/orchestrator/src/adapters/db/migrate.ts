@@ -93,7 +93,7 @@ export async function migrationsUpToDate(pool: PgPool, migrationsDir = defaultMi
   return { ok: missing.length === 0, missing };
 }
 
-/** CLI entry: `pnpm db:migrate` */
+/** CLI entry: `npm run db:migrate` */
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isMain) {
   const { loadConfig, isMemoryDatabase } = await import("../../config.js");
@@ -112,7 +112,7 @@ if (isMain) {
     /*
      * The migration job is also the place where a *changed* EMBEDDING_DIMENSIONS
      * is applied: `0001_init.sql` only creates the column, it never resizes it.
-     * Running `pnpm db:migrate` is therefore the documented remediation for the
+     * Running `npm run db:migrate` is therefore the documented remediation for the
      * `vector dimension mismatch` that `/ready` reports when DB_AUTO_MIGRATE is
      * off, so the guard here always re-dimensions (autoMigrate: true).
      */
@@ -123,7 +123,7 @@ if (isMain) {
       logger,
     });
     console.log(`Vector store: ${vectors.detail}`);
-    if (vectors.redimensioned) console.warn("WARNING: stored embeddings were discarded — re-index the mailboxes (the add-in re-indexes on use, or run `pnpm smoke --full --reindex`).");
+    if (vectors.redimensioned) console.warn("WARNING: stored embeddings were discarded — re-index the mailboxes (the add-in re-indexes on use, or run `npm run smoke -- --full --reindex`).");
     if (vectors.mismatch) process.exitCode = 1;
   } finally {
     await pool.end();

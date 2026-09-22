@@ -6,9 +6,9 @@ la main (ils divergeaient du chart) : `rendered/` est la **sortie générée**
 de `helm template`, pour les environnements qui n'appliquent que du YAML.
 
 ```bash
-pnpm k8s:render                       # values-nkp.yaml, namespace oao
-pnpm k8s:render --env dev             # + infra/gitops/envs/dev/values.yaml
-pnpm k8s:render --namespace oao-test --release oao-test
+npm run k8s:render                     # values-nkp.yaml, namespace oao
+npm run k8s:render -- --env dev        # + infra/gitops/envs/dev/values.yaml
+npm run k8s:render -- --namespace oao-test --release oao-test
 ```
 
 Le script (`scripts/render-k8s.mjs`) force `secrets.create=false` et
@@ -47,5 +47,5 @@ hors ligne, mais la production NKP passe par
 [`../gitops/`](../gitops/README.md).
 
 > Les fichiers sous `rendered/` sont régénérés : toute modification manuelle
-> sera écrasée au prochain `pnpm k8s:render`. Corriger le chart, pas la
+> sera écrasée au prochain `npm run k8s:render`. Corriger le chart, pas la
 > sortie. Voir aussi `.gitattributes` (`linguist-generated`).

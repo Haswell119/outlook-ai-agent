@@ -94,33 +94,33 @@ The id is `encodeURIComponent`-ed into the path by `Routes.analysisByEmail`. See
 
 Chat, Insights, Automation, Compliance, the Daily brief, the Settings sheet, the Approval dialog, the Thread view and the Selection view are
 `React.lazy` chunks, **prefetched on tab hover/focus** and on idle after the first analysis renders (skipped on `saveData` / 2G).
-`ANALYZE=1 pnpm build` additionally writes a `dist/stats.html` treemap.
+`ANALYZE=1 npm run build` additionally writes a `dist/stats.html` treemap.
 
 ---
 
 ## 2. Scripts
 
 ```bash
-pnpm --filter @oao/addin dev              # https://localhost:3000 (builds commands.js first)
-pnpm --filter @oao/addin build            # typecheck + dist/ (taskpane.html, commands.html, commands.js, assets/)
-pnpm --filter @oao/addin preview          # serves dist/ on http://localhost:4173
-pnpm --filter @oao/addin typecheck        # tsc --noEmit (also used by `lint`)
-pnpm --filter @oao/addin test             # vitest (jsdom + Testing Library) — 151 tests
-pnpm --filter @oao/addin e2e              # Playwright: 16 mock specs + 17 host-simulator specs against a real orchestrator
-pnpm --filter @oao/addin analyze          # build + dist/stats.html bundle treemap
-pnpm --filter @oao/addin manifest:render  # regenerate every manifest from the one template
-pnpm --filter @oao/addin manifest:package # zip manifest.json + color.png/outline.png → Teams app package
-pnpm --filter @oao/addin manifest:package:dev
-pnpm --filter @oao/addin validate-manifest         # office-addin-manifest validate (XML + unified JSON)
-pnpm --filter @oao/addin validate-manifest:dev
-pnpm --filter @oao/addin certs            # office-addin-dev-certs install (trusted localhost cert)
-pnpm --filter @oao/addin icons            # regenerate public/assets/icon-*.png (pure Node)
-pnpm --filter @oao/addin screenshots      # Playwright screenshots of the preview build → docs/screenshots/
-pnpm --filter @oao/addin screenshots:states  # every pane state through the host simulator → docs/screenshots/states/
-ADDIN_SIM=1 pnpm --filter @oao/addin build   # …also emits sim.html (the simulator page) into dist/
+npm run dev -w @oao/addin              # https://localhost:3000 (builds commands.js first)
+npm run build -w @oao/addin            # typecheck + dist/ (taskpane.html, commands.html, commands.js, assets/)
+npm run preview -w @oao/addin          # serves dist/ on http://localhost:4173
+npm run typecheck -w @oao/addin        # tsc --noEmit (also used by `lint`)
+npm run test -w @oao/addin             # vitest (jsdom + Testing Library) — 151 tests
+npm run e2e -w @oao/addin              # Playwright: 16 mock specs + 17 host-simulator specs against a real orchestrator
+npm run analyze -w @oao/addin          # build + dist/stats.html bundle treemap
+npm run manifest:render -w @oao/addin  # regenerate every manifest from the one template
+npm run manifest:package -w @oao/addin # zip manifest.json + color.png/outline.png → Teams app package
+npm run manifest:package:dev -w @oao/addin
+npm run validate-manifest -w @oao/addin         # office-addin-manifest validate (XML + unified JSON)
+npm run validate-manifest:dev -w @oao/addin
+npm run certs -w @oao/addin            # office-addin-dev-certs install (trusted localhost cert)
+npm run icons -w @oao/addin            # regenerate public/assets/icon-*.png (pure Node)
+npm run screenshots -w @oao/addin      # Playwright screenshots of the preview build → docs/screenshots/
+npm run screenshots:states -w @oao/addin  # every pane state through the host simulator → docs/screenshots/states/
+ADDIN_SIM=1 npm run build -w @oao/addin   # …also emits sim.html (the simulator page) into dist/
 ```
 
-`pnpm --filter @oao/addin typecheck && pnpm --filter @oao/addin test && pnpm --filter @oao/addin build && pnpm --filter @oao/addin e2e && pnpm --filter @oao/addin validate-manifest && pnpm --filter @oao/addin validate-manifest:dev`
+`npm run typecheck -w @oao/addin && npm run test -w @oao/addin && npm run build -w @oao/addin && npm run e2e -w @oao/addin && npm run validate-manifest -w @oao/addin && npm run validate-manifest:dev -w @oao/addin`
 is the full gate and is what CI runs. Build it with `VITE_API_BASE_URL` pointing at the orchestrator: the value is baked into the
 bundle **and** into the CSP `connect-src`. `e2e` starts what it needs itself (the orchestrator with the mock model provider and an
 in-memory database, then `vite preview`), so the gate needs neither PostgreSQL nor an API key.
@@ -156,17 +156,17 @@ API_HOST=https://api.example.com \
 AAD_CLIENT_ID=00000000-0000-0000-0000-000000000000 \
 ADDIN_VERSION=1.4.0.0 \
 ORGANIZATION_NAME="Example Capital" \
-pnpm --filter @oao/addin manifest:render
+npm run manifest:render -w @oao/addin
 
 # 2. build the static bundle (the CSP connect-src is baked in here)
 VITE_API_BASE_URL=https://api.example.com \
 VITE_AUTH_MODE=aad \
 VITE_ADMIN_URL=https://admin.example.com \
 ADDIN_VERSION=1.4.0 \
-pnpm --filter @oao/addin build
+npm run build -w @oao/addin
 
 # 3. validate before shipping
-pnpm --filter @oao/addin validate-manifest
+npm run validate-manifest -w @oao/addin
 
 # 4. publish dist/ to the static host and upload the manifest
 ```
@@ -217,8 +217,8 @@ about the day, not about the selection).
 names (`icons.color` = `color.png` 192×192, `icons.outline` = `outline.png` 32×32 monochrome).
 
 ```bash
-pnpm --filter @oao/addin manifest:package        # → manifest/oao-addin-teams-app.zip
-pnpm --filter @oao/addin manifest:package:dev    # → manifest/oao-addin-teams-app.dev.zip (localhost:3000)
+npm run manifest:package -w @oao/addin        # → manifest/oao-addin-teams-app.zip
+npm run manifest:package:dev -w @oao/addin    # → manifest/oao-addin-teams-app.dev.zip (localhost:3000)
 ```
 
 The script (`scripts/package-manifest.mjs`) generates both icons from the same vector definition as `public/assets/icon-*.png`
@@ -250,7 +250,7 @@ personal tab carries `scopes: ["personal"]`, `context: ["personalTab"]` and `hos
 
   The last row is the point: a dev build used to fall back to the mock inside a *real* Outlook host, so the pane summarised — and
   drafted replies from — the built-in **sample** email while the user was reading a real one, with nothing on screen saying so. Now
-  the pane blocks with `BackendUnreachable`: what is broken, the base URL it tried, "check `pnpm dev` and `VITE_API_BASE_URL`", the
+  the pane blocks with `BackendUnreachable`: what is broken, the base URL it tried, "check `npm run dev` and `VITE_API_BASE_URL`", the
   health error and a **Retry**. Whenever the mock client *is* active the header shows a **"Mock data"** pill — in preview mode you
   therefore see both pills, "Preview mode" (no Outlook) and "Mock data" (no backend).
 
@@ -282,10 +282,10 @@ stuck on the previous one"; this one does.
 it.
 
 ```bash
-pnpm --filter @oao/orchestrator build && \
+npm run build -w @oao/orchestrator && \
   ROLE=all LLM_PROVIDER=mock DATABASE_URL=memory AUTH_MODE=dev \
-  CORS_ORIGINS=https://localhost:3000,http://localhost:4173 node apps/orchestrator/dist/server.js   # or: pnpm dev
-pnpm --filter @oao/addin dev
+  CORS_ORIGINS=https://localhost:3000,http://localhost:4173 node apps/orchestrator/dist/server.js   # or: npm run dev
+npm run dev -w @oao/addin
 # → https://localhost:3000/sim.html
 ```
 
@@ -324,7 +324,7 @@ for that reason, they are never referenced by `taskpane.html`, and nothing of th
 ### States
 
 Every state below is a real state of the pane, captured through the simulator against a running orchestrator
-(`pnpm --filter @oao/addin screenshots:states` → `docs/screenshots/states/`).
+(`npm run screenshots:states -w @oao/addin` → `docs/screenshots/states/`).
 
 | State | Screenshot | How to get there | What must be true |
 |---|---|---|---|
@@ -346,8 +346,8 @@ Every state below is a real state of the pane, captured through the simulator ag
 
 ## 6. Sideloading — the three ways to reach the pane
 
-Common step for all three: start the dev server, `pnpm --filter @oao/addin dev` (https://localhost:3000). Trust the certificate with
-`pnpm --filter @oao/addin certs`; without it Vite falls back to `@vitejs/plugin-basic-ssl` and you must accept the self-signed
+Common step for all three: start the dev server, `npm run dev -w @oao/addin` (https://localhost:3000). Trust the certificate with
+`npm run certs -w @oao/addin`; without it Vite falls back to `@vitejs/plugin-basic-ssl` and you must accept the self-signed
 certificate once at https://localhost:3000/taskpane.html, otherwise Outlook shows an empty pane.
 
 ### 6.1 From an opened email (XML manifest)
@@ -383,7 +383,7 @@ certificate once at https://localhost:3000/taskpane.html, otherwise Outlook show
 The classic XML manifest **cannot** declare this entry; only the unified manifest can, and it has to be uploaded as a Teams app
 package.
 
-1. `pnpm --filter @oao/addin manifest:package:dev` → `manifest/oao-addin-teams-app.dev.zip`
+1. `npm run manifest:package:dev -w @oao/addin` → `manifest/oao-addin-teams-app.dev.zip`
    (`manifest.dev.json` + `color.png` + `outline.png`).
 2. Upload it as a **custom app**:
    * just for you — in **Outlook** (new) or **Teams**: *Apps* → *Manage your apps* → *Upload an app* → *Upload a custom app* → pick
@@ -563,7 +563,7 @@ docs/screenshots/states/  every pane state, generated by scripts/state-screensho
 
 ---
 
-## 12. Screenshots (`docs/screenshots/`, regenerate with `pnpm screenshots`)
+## 12. Screenshots (`docs/screenshots/`, regenerate with `npm run screenshots`)
 
 | File | What |
 |---|---|

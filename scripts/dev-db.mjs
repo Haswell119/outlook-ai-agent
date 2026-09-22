@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `pnpm dev:db [up|down|status|reset|psql]` — the local PostgreSQL/pgvector
+ * `npm run dev:db -- [up|down|status|reset|psql]` — the local PostgreSQL/pgvector
  * container used by developers (docker-compose.dev.yml).
  *
  * Replaces the former dev-up/dev-down shell scripts; works identically on
@@ -31,7 +31,7 @@ const { flags, positionals } = parseArgs(process.argv.slice(2), {
 helpIfRequested(
   flags,
   `
-Usage: pnpm dev:db [command] [options]
+Usage: npm run dev:db -- [command] [options]
 
 Commands:
   up       (default) start PostgreSQL/pgvector and wait until it is healthy
@@ -85,7 +85,7 @@ async function waitHealthy() {
     ok(`PostgreSQL ready on localhost:${port} (user ${user}, database ${database})`);
     info(`DATABASE_URL=postgres://${user}:<password>@localhost:${port}/${database}`);
   } else {
-    warn("container still not healthy — inspect it with: pnpm dev:db logs");
+    warn("container still not healthy — inspect it with: npm run dev:db -- logs");
   }
 }
 
@@ -119,7 +119,7 @@ switch (command) {
     compose(["down", "--volumes"], { check: false });
     compose(["up", "-d"]);
     await waitHealthy();
-    info("Re-apply the schema with: pnpm db:migrate && pnpm db:seed");
+    info("Re-apply the schema with: npm run db:migrate && npm run db:seed");
     break;
   }
   case "psql": {

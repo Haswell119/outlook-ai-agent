@@ -1,10 +1,10 @@
 # ---------------------------------------------------------------------------
 # Dev: PostgreSQL/pgvector only. Developers run the three apps themselves with
-# pnpm (hot reload).
+# npm (hot reload).
 #
-#   pnpm dev:db          # up + wait until healthy (wraps this file)
-#   pnpm dev:db reset    # wipe the volume and start again
-#   pnpm dev             # orchestrator :8080 · addin :3000 · admin :3001
+#   npm run dev:db           # up + wait until healthy (wraps this file)
+#   npm run dev:db -- reset  # wipe the volume and start again
+#   npm run dev              # orchestrator :8080 · addin :3000 · admin :3001
 #
 # Named volume only and no host networking, so it behaves the same on Docker
 # Desktop (Windows/macOS) and Docker Engine (Linux).

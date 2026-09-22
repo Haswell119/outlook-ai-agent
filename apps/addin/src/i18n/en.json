@@ -270,7 +270,7 @@
     },
     "backendTitle": "Orchestrator unreachable",
     "backendBody": "The add-in cannot reach the AI Orchestrator, so it has nothing to show. It will not fall back to sample data: an analysis of a sample email is not an answer about your mailbox.",
-    "backendHint": "Check that the backend is running (pnpm dev) and that VITE_API_BASE_URL points at it, then retry.",
+    "backendHint": "Check that the backend is running (npm run dev) and that VITE_API_BASE_URL points at it, then retry.",
     "backendDetail": "Health check: {message}",
     "cancelled": "The request was cancelled because you opened another email."
   },

@@ -6,6 +6,7 @@ import { gzipSync } from "node:zlib";
 import { homedir } from "node:os";
 import { resolve, join, relative } from "node:path";
 import { buildCsp } from "./src/security/csp";
+import { reactAlias, reactDedupe } from "./react-resolution";
 
 /**
  * Single root `.env`: Vite only reads `apps/addin/.env*`, so VITE_* keys from the
@@ -93,7 +94,7 @@ function cspPlugin(options: { apiOrigin?: string; dev: boolean; extraConnect: st
  * them with classic `<script src>` tags and Playwright injects the same files
  * with `page.addInitScript({ path })`. Vite does not bundle a classic script, so
  * this plugin (a) serves them from disk in `vite dev` **and** `vite preview` and
- * (b) copies them next to `sim.html` in `dist/`, which is what `pnpm e2e` runs
+ * (b) copies them next to `sim.html` in `dist/`, which is what `npm run e2e` runs
  * against. They are never referenced by `taskpane.html`, so nothing of the
  * simulator can reach a real Outlook.
  */
@@ -182,7 +183,7 @@ export default defineConfig(async ({ command, isPreview }): Promise<UserConfig> 
   const apiOrigin = process.env.VITE_API_BASE_URL?.trim() || (dev ? "http://localhost:8080" : "https://localhost:8443");
   const extraConnect = [process.env.VITE_TELEMETRY_URL, process.env.VITE_APPINSIGHTS_INGESTION_ORIGIN].filter((v): v is string => !!v);
 
-  // `pnpm dev` always has it; a build needs ADDIN_SIM=1.
+  // `npm run dev` always has it; a build needs ADDIN_SIM=1.
   const withSim = dev || process.env.ADDIN_SIM === "1";
 
   const visualizer: PluginOption[] = [];
@@ -205,7 +206,12 @@ export default defineConfig(async ({ command, isPreview }): Promise<UserConfig> 
       ...visualizer,
       budgetPlugin({ mainBudgetGz: 250 * 1024, totalBudgetGz: 700 * 1024 }),
     ],
-    resolve: { alias: { "@": resolve(__dirname, "src") } },
+    resolve: {
+      // `reactAlias` keeps Fluent UI v9 and the task pane on the single React 18
+      // copy this package owns — see ./react-resolution.ts.
+      alias: { "@": resolve(__dirname, "src"), ...reactAlias },
+      dedupe: reactDedupe,
+    },
     define: {
       __OAO_BUILD__: JSON.stringify({
         version: process.env.ADDIN_VERSION ?? "1.0.0",
@@ -237,8 +243,8 @@ export default defineConfig(async ({ command, isPreview }): Promise<UserConfig> 
           commands: resolve(__dirname, "commands.html"),
           // The Office.js host simulator page (see e2e/office-sim/): a dev and
           // test surface, never part of a manifest. It is **opt-in** so a
-          // production build cannot ship it by accident; `pnpm e2e` and
-          // `pnpm screenshots:states` set ADDIN_SIM=1, and `vite dev` always
+          // production build cannot ship it by accident; `npm run e2e` and
+          // `npm run screenshots:states` set ADDIN_SIM=1, and `vite dev` always
           // serves it (dev serves every HTML file in the project root).
           ...(withSim ? { sim: resolve(__dirname, "sim.html") } : {}),
         },

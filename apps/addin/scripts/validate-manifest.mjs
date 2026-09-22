@@ -21,7 +21,7 @@ const files = process.argv.slice(2);
 if (files.length === 0) files.push("manifest/manifest.xml");
 
 /**
- * Prefer the workspace binary so the script works both through `pnpm run`
+ * Prefer the workspace binary so the script works both through `npm run`
  * (node_modules/.bin on PATH) and when invoked directly with `node`.
  */
 const binName = process.platform === "win32" ? "office-addin-manifest.cmd" : "office-addin-manifest";

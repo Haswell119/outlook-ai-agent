@@ -464,7 +464,7 @@ Ce que produit `.github/workflows/release.yml` pour chaque tag `vX.Y.Z` :
 | Chart Helm OCI | `ghcr.io/<owner>/charts/outlook-ai-orchestrator`, signé cosign |
 | Manifests Office | `manifest.xml` / `manifest.json` rendus pour l'environnement de production, joints à la release |
 
-Dépendances : le `package.json` racine épingle deux `pnpm.overrides`
+Dépendances : le `package.json` racine épingle deux `overrides` npm
 (`postcss >= 8.5.23`, `@fastify/static >= 10.1.2`) pour forcer les versions
 corrigées dans tout l'arbre transitif, et Dependabot surveille npm, GitHub
 Actions et Docker. **Avis résiduel assumé** : `uuid`, tiré transitivement par
@@ -540,9 +540,9 @@ que `keyless:`).
 
 Autres contrôles de la chaîne :
 
-- `pnpm install --frozen-lockfile` partout (CI et images) : un `pnpm-lock.yaml`
-  désynchronisé fait échouer le build plutôt que de résoudre une version
-  imprévue.
+- `npm ci` partout (CI et images) : il installe strictement ce que décrit
+  `package-lock.json`, et un lockfile désynchronisé fait échouer le build
+  plutôt que de résoudre une version imprévue.
 - Dependabot sur npm, GitHub Actions et images de base, groupé par famille.
 - CodeQL (`javascript-typescript` + `actions`, requêtes `security-extended`)
   sur chaque PR et chaque semaine.

@@ -6,5 +6,5 @@ e2e-report/
 playwright-report/
 test-results/
 
-# Generated Teams app packages (pnpm manifest:package)
+# Generated Teams app packages (npm run manifest:package -w @oao/addin)
 manifest/*.zip

@@ -62,7 +62,7 @@ spec:
             service: outlook-ai-orchestrator
           annotations:
             summary: "Taux d'échec des appels LLM > {{ mulf $t.llmErrorRatio 100 }}%"
-            description: "Vérifier le endpoint vLLM/TGI interne (pnpm check:llm) et la saturation GPU."
+            description: "Vérifier le endpoint vLLM/TGI interne (npm run check:llm) et la saturation GPU."
 
         - alert: OaoHttp5xxRateHigh
           expr: |

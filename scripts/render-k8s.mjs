@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * `pnpm k8s:render` — render the Helm chart into plain manifests under
+ * `npm run k8s:render` — render the Helm chart into plain manifests under
  * infra/k8s/rendered/, for environments that only apply YAML (no Helm, no
  * Flux). The Helm chart stays the single source of truth: this output is a
  * generated artefact and must never be hand-edited.
  *
- *   pnpm k8s:render                       # NKP values, namespace oao
- *   pnpm k8s:render --env dev             # infra/gitops/envs/dev/values.yaml
- *   pnpm k8s:render --values my.yaml --namespace oao-test
+ *   npm run k8s:render                       # NKP values, namespace oao
+ *   npm run k8s:render -- --env dev          # infra/gitops/envs/dev/values.yaml
+ *   npm run k8s:render -- --values my.yaml --namespace oao-test
  *
  * Requires the `helm` binary (>= 3.12). Secrets are NOT rendered: the
  * generated manifests reference an existing Secret (secrets.create=false),
@@ -34,7 +34,7 @@ const { flags } = parseArgs(process.argv.slice(2), { booleans: ["help", "h", "cl
 helpIfRequested(
   flags,
   `
-Usage: pnpm k8s:render [options]
+Usage: npm run k8s:render -- [options]
 
 Options:
   --env <dev|prod>     also apply infra/gitops/envs/<env>/values.yaml
@@ -117,7 +117,7 @@ writeFileSync(
 Sortie de \`helm template\` pour le chart
 \`infra/helm/outlook-ai-orchestrator\` (source unique de vérité).
 
-- Régénérer : \`pnpm k8s:render\` (options : \`--env dev|prod\`, \`--namespace\`)
+- Régénérer : \`npm run k8s:render\` (options : \`--env dev|prod\`, \`--namespace\`)
 - Namespace : \`${namespace}\` · release : \`${release}\`
 - Values appliquées : ${valuesFiles.map((f) => `\`${relative(repoRoot, f)}\``).join(", ")}
 - Secrets : **non rendus**. Ces manifests attendent un Secret existant

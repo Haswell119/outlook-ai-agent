@@ -10,7 +10,7 @@
 **/build
 **/coverage
 **/.turbo
-**/.pnpm-store
+**/.npm
 **/*.tsbuildinfo
 **/.vite
 **/test-results

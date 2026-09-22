@@ -11,7 +11,6 @@ coverage/
 .DS_Store
 *.tsbuildinfo
 .turbo/
-.pnpm-store/
 apps/addin/certs/
 *.pem
 *.key

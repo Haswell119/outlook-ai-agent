@@ -19,24 +19,30 @@
       "node"
     ],
     "baseUrl": ".",
-    // `react` / `react-dom` are pinned to *this* package's @types so the
-    // workspace's other apps (which run React 19) cannot leak their newer
-    // @types/react into the Fluent UI v9 typings through pnpm's virtual store.
+    // `react` / `react-dom` are pinned to the React 18 typings this package
+    // depends on, so the admin dashboard's @types/react@19 can never leak into
+    // the Fluent UI v9 typings. npm workspaces hoist whichever copy wins to the
+    // repository-root node_modules and nest the other one, so both locations
+    // are listed: the local copy first, the hoisted one as the fallback.
     "paths": {
       "@/*": [
         "src/*"
       ],
       "react": [
-        "./node_modules/@types/react"
+        "./node_modules/@types/react",
+        "../../node_modules/@types/react"
       ],
-      "react/jsx-runtime": [
-        "./node_modules/@types/react/jsx-runtime"
+      "react/*": [
+        "./node_modules/@types/react/*",
+        "../../node_modules/@types/react/*"
       ],
       "react-dom": [
-        "./node_modules/@types/react-dom"
+        "./node_modules/@types/react-dom",
+        "../../node_modules/@types/react-dom"
       ],
       "react-dom/*": [
-        "./node_modules/@types/react-dom/*"
+        "./node_modules/@types/react-dom/*",
+        "../../node_modules/@types/react-dom/*"
       ]
     }
   },

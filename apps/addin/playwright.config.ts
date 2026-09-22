@@ -71,7 +71,7 @@ export default defineConfig({
    *      database so a run needs no PostgreSQL and no API key;
    *   2. `vite preview` on the built bundle.
    *
-   * `reuseExistingServer` keeps a developer's own `pnpm dev` stack usable.
+   * `reuseExistingServer` keeps a developer's own `npm run dev` stack usable.
    * Set E2E_NO_SERVER=1 when both are already running.
    */
   webServer: process.env.E2E_NO_SERVER
