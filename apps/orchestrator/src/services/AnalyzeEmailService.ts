@@ -11,6 +11,7 @@ import { nowIso } from "../util/ids.js";
 import type { AiCacheService } from "./AiCacheService.js";
 import type { AuditService } from "./AuditService.js";
 import type { RequestContext, ServiceDeps } from "./context.js";
+import type { IndexEmailsService } from "./IndexEmailsService.js";
 import { completeStructured, DEGRADED_CONFIDENCE } from "./llm-helpers.js";
 import type { PolicyService } from "./PolicyService.js";
 
@@ -28,6 +29,10 @@ import type { PolicyService } from "./PolicyService.js";
  *
  * Whatever the path, an `AuditEvent` is written — including for cache hits
  * (`details.cached = true`). The audit trail is non-negotiable.
+ *
+ * Side effect (`INDEX_ON_ANALYZE`, default on): every analysed email is also
+ * indexed, once. Without Microsoft Graph nothing else feeds the index, so the
+ * chat's "all emails" scope would otherwise only ever know the opened email.
  */
 export class AnalyzeEmailService {
   constructor(
@@ -36,6 +41,7 @@ export class AnalyzeEmailService {
     private readonly policy: PolicyService,
     private readonly cache: AiCacheService,
     private readonly metrics?: Metrics,
+    private readonly indexer?: IndexEmailsService,
   ) {}
 
   private get budget() {
@@ -43,6 +49,17 @@ export class AnalyzeEmailService {
   }
 
   async analyze(ctx: RequestContext, req: AnalyzeEmailRequest, opts: { priority?: "interactive" | "background" } = {}): Promise<EmailAnalysis> {
+    const analysis = await this.compute(ctx, req, opts);
+    // After the answer is known, never before: a slow embedding endpoint must
+    // not delay the summary, and an index failure must not fail it.
+    if (this.indexer && this.deps.cfg.INDEX_ON_ANALYZE) {
+      const indexed = await this.indexer.ensureIndexed(ctx, req.email);
+      if (indexed) this.metrics?.autoIndexed?.inc();
+    }
+    return analysis;
+  }
+
+  private async compute(ctx: RequestContext, req: AnalyzeEmailRequest, opts: { priority?: "interactive" | "background" }): Promise<EmailAnalysis> {
     const { user, language, correlationId } = ctx;
     const email = req.email;
     const policy = await this.policy.get();

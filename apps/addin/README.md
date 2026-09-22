@@ -377,6 +377,13 @@ certificate once at https://localhost:3000/taskpane.html, otherwise Outlook show
    * Needs **new Outlook for Windows / Outlook on the web** (Mailbox 1.13). On classic Outlook for Windows/Mac the button is simply
      not enabled for a multi-selection; if the view is reached anyway it says *"Multi-select needs the new Outlook or Outlook on the
      web"* rather than failing.
+4. **Chat scopes**. *This conversation* keeps the opened email as source [1]; *All emails* asks the whole index. **Without
+   Microsoft Graph the index only holds what the pane has shown the orchestrator**: every analysed email is indexed by the
+   orchestrator itself (`INDEX_ON_ANALYZE`), a selection is indexed before its first question, and before a mailbox-wide question
+   the tab sends the cached emails it has not sent yet (tracked per mailbox in `localStorage`, `oao.addin.indexedIds.v1.*`). The
+   status line under the scope chips (`chat-index-status`) says how many emails the question can reach and, when Graph is off,
+   why; every answer carries `retrieval` (`N email(s) found among M indexed`, `chat-retrieval`). *Index recent emails* re-sends
+   everything cached in this browser.
 
 ### 6.3 From the "Apps" rail, with no email at all (unified manifest, Teams app package)
 

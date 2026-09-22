@@ -111,6 +111,8 @@ export interface EmailIndexRepository {
   /** Most recent indexed emails (first chunk only) matching a simple filter. */
   listRecent(userId: string, filter: { fromAddress?: string; fromDomain?: string; subjectContains?: string; hasAttachments?: boolean }, limit: number): Promise<IndexedChunk[]>;
   count(userId: string): Promise<number>;
+  /** Whether at least one chunk of this email is stored for the user (auto-index dedup). */
+  hasEmail(userId: string, emailId: string): Promise<boolean>;
   /** First chunk of every email received in `[fromIso, toIso)` (daily brief input). */
   listReceivedBetween(userId: string, fromIso: string, toIso: string, limit: number): Promise<IndexedChunk[]>;
   /** Retention: delete chunks whose `received_at` (or `indexed_at`) is older than `beforeIso`. */

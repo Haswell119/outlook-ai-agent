@@ -63,6 +63,12 @@ const ConfigObjectSchema = z
     /* --------------------------- AI-load control -------------------------- */
     /** Heuristic triage before any model call (newsletters, notifications, OOO…). */
     TRIAGE_ENABLED: bool(true),
+    /**
+     * Index every email the add-in sends for analysis (once per email). Without
+     * Microsoft Graph this is what fills the "all emails" retrieval scope of
+     * the chat: the mailbox the assistant knows is the mailbox the user browsed.
+     */
+    INDEX_ON_ANALYZE: bool(true),
     /** Content-hash cache for analyses / syntheses / drafts. */
     ANALYSIS_CACHE_ENABLED: bool(true),
     ANALYSIS_CACHE_TTL_HOURS: int(168),

@@ -334,6 +334,7 @@ with no external dependency. Any `FOO_FILE=/path` is read at boot and fills `FOO
 | **`EMBEDDING_DIMENSIONS`** | `1024` | **operator must set** — must equal the `vector(N)` column |
 | `EMBEDDING_BATCH_SIZE` | `64` | texts per `/embeddings` call |
 | `TRIAGE_ENABLED` | `true` | heuristic triage before any model call |
+| `INDEX_ON_ANALYZE` | `true` | every analysed email is indexed once (what fills the chat's "All emails" scope without Graph) |
 | `ANALYSIS_CACHE_ENABLED` / `ANALYSIS_CACHE_TTL_HOURS` | `true` / `168` | content-hash cache |
 | `EMBEDDING_CACHE_ENABLED` / `EMBEDDING_CACHE_TTL_DAYS` | `true` / `365` | vector cache |
 | `DATABASE_URL` | `postgres://oao:oao@localhost:5432/oao` | or `memory` (`DATABASE_URL_FILE`) |
@@ -417,6 +418,20 @@ Deux garde-fous complètent le dispositif :
 
 Côté client, l'add-in ajoute un cache IndexedDB de 24 h et le tier
 `GET /analyze/email/:id` (§5), qui ne touche jamais le modèle.
+
+Le chat suit la même logique : il n'appelle le modèle que s'il a quelque chose
+à lui donner. Sans aucune source retrouvée (index vide ou aucune
+correspondance), la réponse est déterministe (`model: "no-retrieval"`,
+`retrieval.modelCallSkipped: true`) et dit laquelle des deux situations
+s'applique. En portée « Tous les emails » (pas de `conversationId`), l'email
+ouvert n'est plus imposé comme source [1] : les résultats de recherche passent
+d'abord, l'email ouvert est ajouté en dernier, classé sur son recouvrement réel
+avec la question, et le prompt ne le cite plus intégralement — c'est ce qui
+faisait « coller » chaque réponse à l'email affiché. Chaque réponse porte
+`retrieval { scope, mode, indexedEmails, matched }`, que le volet affiche.
+Sans Graph, l'index est alimenté par `INDEX_ON_ANALYZE` (chaque email analysé
+est indexé une fois, `oao_auto_indexed_emails_total`), par la sélection multiple
+et par les emails ouverts dans le navigateur que le volet n'a pas encore envoyés.
 
 Mesure : `oao_model_calls_saved_total{reason}` (triage / cache / precomputed /
 coalesced) rapporté à `oao_llm_calls_total` donne le taux d'évitement réel ;

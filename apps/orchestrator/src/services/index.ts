@@ -43,10 +43,10 @@ export function createServices(deps: ServiceDeps, metrics?: Metrics): Services {
   const audit = new AuditService(deps.repos.audit, deps.cfg.AUDIT_STORE_CONTENT, deps.logger, metrics);
   const policy = new PolicyService(deps.repos.policy, audit, deps.cfg.INTERNAL_DOMAINS);
   const cache = new AiCacheService(deps.repos.analysisCache, { enabled: deps.cfg.ANALYSIS_CACHE_ENABLED, ttlHours: deps.cfg.ANALYSIS_CACHE_TTL_HOURS, logger: deps.logger, metrics });
-  const analyzeEmail = new AnalyzeEmailService(deps, audit, policy, cache, metrics);
+  const indexEmails = new IndexEmailsService(deps, audit);
+  const analyzeEmail = new AnalyzeEmailService(deps, audit, policy, cache, metrics, indexEmails);
   const synthesizeThread = new SynthesizeThreadService(deps, audit, cache);
   const draftReply = new DraftReplyService(deps, audit, cache);
-  const indexEmails = new IndexEmailsService(deps, audit);
   const search = new SearchService(deps, audit, indexEmails);
   const chat = new ChatService(deps, audit, search);
   const escalations = new EscalationService(deps, audit);

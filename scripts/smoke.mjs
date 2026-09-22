@@ -453,8 +453,36 @@ async function runFull() {
     );
     expect(r.answer.trim().length > 0, "chat returned an empty answer");
     expect(r.sources.length >= 1, "chat cited no source (expected at least one from the indexed thread)");
+    expect(r.retrieval && r.retrieval.scope === "mailbox", "chat did not report a mailbox-wide retrieval");
+    expect(r.retrieval.indexedEmails >= mailbox.length, `chat sees ${r.retrieval.indexedEmails} indexed emails, expected at least ${mailbox.length}`);
+    expect(r.retrieval.matched >= 1, "chat retrieval matched no indexed email");
     facts.chatSources = r.sources.length;
-    return `${r.sources.length} source(s) cited, confidence=${r.confidence}, answer="${preview(r.answer, 90)}"`;
+    return `${r.sources.length} source(s) cited, ${r.retrieval.matched}/${r.retrieval.indexedEmails} indexed matched (${r.retrieval.mode}), confidence=${r.confidence}, answer="${preview(r.answer, 90)}"`;
+  });
+
+  await measure("POST /chat with an unrelated email open (mailbox scope must not stick to it)", async () => {
+    const opened = { ...mailbox[0], id: `${RUN}-opened-lunch`, conversationId: `${RUN}-conv-lunch`, subject: "Lunch on Thursday?", body: "Shall we grab lunch on Thursday near the office?", attachments: [] };
+    const r = decode(
+      await call("/chat", { method: "POST", body: { message: "What is the revised budget for project Atlas and by when must it be confirmed?", currentEmail: opened, scope: {}, language: lang } }),
+      S.ChatResponseSchema,
+      { what: "/chat (mailbox scope)" },
+    );
+    expect(r.sources.length >= 1, "chat cited no source");
+    expect(r.sources[0].emailId !== opened.id, `the first cited source is the opened (unrelated) email — the mailbox scope is stuck on it`);
+    expect(!r.evidence || r.evidence.emailId !== opened.id, "the evidence quoted comes from the opened (unrelated) email");
+    return `top source="${preview(r.sources[0].subject, 60)}", ${r.retrieval.matched}/${r.retrieval.indexedEmails} indexed matched`;
+  });
+
+  if (token) skip("POST /chat on a fresh mailbox: honest 'nothing indexed', no model call", "needs AUTH_MODE=dev (a second identity via x-user-email)");
+  else await measure("POST /chat on a fresh mailbox: honest 'nothing indexed', no model call", async () => {
+    const r = decode(
+      await call("/chat", { method: "POST", body: { message: "Anything about Atlas?", scope: {}, language: lang }, headers: { "x-user-email": `${RUN}-nobody@northbridge.example`, "x-user-name": "Nobody" } }),
+      S.ChatResponseSchema,
+      { what: "/chat (fresh mailbox)" },
+    );
+    expect(r.sources.length === 0, "a fresh mailbox cited a source");
+    expect(r.retrieval && r.retrieval.indexedEmails === 0 && r.retrieval.modelCallSkipped === true, `expected indexedEmails=0 and modelCallSkipped=true, got ${preview(JSON.stringify(r.retrieval ?? null), 120)}`);
+    return `answer="${preview(r.answer, 90)}"`;
   });
 
   /* ---------------------------- 6. analyze ----------------------------- */
@@ -466,6 +494,19 @@ async function runFull() {
     expect(a.pendingTasks.length >= 1, "expected at least one pending task on a follow-up asking for a confirmation");
     analysisAuditId = a.auditId;
     return `source=${a.source}, tasks=${a.pendingTasks.length}, risks=${a.risks.length}, actions=${a.suggestedActions.length}, confidence=${a.confidence}`;
+  });
+
+  await measure("POST /analyze/email on a never-indexed email → indexed automatically (INDEX_ON_ANALYZE)", async () => {
+    const before = decode(await call("/mailbox/sync"), S.MailboxSyncStatusSchema, { what: "/mailbox/sync" }).indexedEmails;
+    const fresh = { ...atlas3, id: `${RUN}-auto-index`, conversationId: `${RUN}-conv-room`, internetMessageId: `<${RUN}-room@northbridge.example>`, subject: "Atlas — meeting room booked for Thursday", body: "Hi,\n\nThe Atlas steering meeting is confirmed for Thursday 10:00 in room Geneva. Please bring the revised budget sheet.\n\nThanks", attachments: [] };
+    await call("/analyze/email", { method: "POST", body: { email: fresh, language: lang } });
+    const after = decode(await call("/mailbox/sync"), S.MailboxSyncStatusSchema, { what: "/mailbox/sync" });
+    expect(after.indexedEmails === before + 1, `expected ${before + 1} indexed emails after analysing a new email (INDEX_ON_ANALYZE), got ${after.indexedEmails}`);
+    // Searchable at once, in the mailbox-wide chat scope.
+    const chat = decode(await call("/chat", { method: "POST", body: { message: "When is the Atlas steering meeting and in which room?", scope: {}, language: lang } }), S.ChatResponseSchema, { what: "/chat (auto-indexed email)" });
+    expect(chat.sources.some((x) => x.emailId === fresh.id), `the auto-indexed email was not among the chat sources (${chat.sources.map((x) => x.subject).join(" | ") || "none"})`);
+    facts.indexedEmails = after.indexedEmails;
+    return `indexedEmails ${before} → ${after.indexedEmails}, cited by the chat, sync=${after.enabled ? after.state : "disabled"}`;
   });
 
   await measure("POST /analyze/email again (must hit the cache)", async () => {

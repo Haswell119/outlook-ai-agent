@@ -1354,6 +1354,45 @@
           },
           "model": {
             "type": "string"
+          },
+          "retrieval": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "conversation",
+                  "mailbox"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "hybrid",
+                  "lexical",
+                  "vector",
+                  "none"
+                ]
+              },
+              "indexedEmails": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "matched": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "modelCallSkipped": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "scope",
+              "mode",
+              "indexedEmails",
+              "matched"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [

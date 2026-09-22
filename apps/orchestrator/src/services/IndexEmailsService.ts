@@ -19,6 +19,23 @@ export class IndexEmailsService {
   }
 
   /**
+   * Index the email unless it already is (an email is immutable, so "already
+   * stored" is enough). Never throws: this runs on the analysis path, where a
+   * broken index must not cost the user their summary. Returns `true` when the
+   * email was indexed by this call.
+   */
+  async ensureIndexed(ctx: RequestContext, email: EmailContext): Promise<boolean> {
+    try {
+      if (await this.deps.repos.emailIndex.hasEmail(ctx.user.id, email.id)) return false;
+      const r = await this.index(ctx, [email], { audit: false });
+      return r.indexed > 0;
+    } catch (e) {
+      this.deps.logger.warn({ err: (e as Error).message, emailId: email.id }, "auto-index after analysis failed; the email stays searchable only once indexed explicitly");
+      return false;
+    }
+  }
+
+  /**
    * Index a batch of emails. **Never fails because of the vector store.**
    *
    * Three independent degradations are handled, each of which used to be a 500:

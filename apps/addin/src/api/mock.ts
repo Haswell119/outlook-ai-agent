@@ -183,6 +183,7 @@ export function mockThread(lang: Language, conversationId: string): ThreadSynthe
 export function mockChat(lang: Language, sessionId: string): ChatResponse {
   return {
     sessionId,
+    retrieval: { scope: "mailbox", mode: "hybrid", indexedEmails: 1284, matched: 3 },
     headline: L(lang, "Client approval detected", "Approbation du client détectée"),
     answer: L(
       lang,

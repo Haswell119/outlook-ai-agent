@@ -38,6 +38,8 @@ export class Metrics {
   readonly coalesced: Counter<"kind">;
   readonly triage: Counter<"kind" | "skipped">;
   readonly modelCallsSaved: Counter<"reason">;
+  /** Emails indexed as a side effect of an analysis (`INDEX_ON_ANALYZE`). */
+  readonly autoIndexed: Counter<string>;
 
   readonly syncRuns: Counter<"outcome" | "mode">;
   readonly syncLag: Gauge<"user">;
@@ -90,6 +92,7 @@ export class Metrics {
     this.coalesced = new Counter({ name: `${prefix}coalesced_requests_total`, help: "Requests that joined an identical in-flight request", labelNames: ["kind"] as const, registers: reg });
     this.triage = new Counter({ name: `${prefix}triage_total`, help: "Emails triaged by kind, and whether the model call was skipped", labelNames: ["kind", "skipped"] as const, registers: reg });
     this.modelCallsSaved = new Counter({ name: `${prefix}model_calls_saved_total`, help: "Model calls avoided, by reason (triage, cache, precomputed, coalesced)", labelNames: ["reason"] as const, registers: reg });
+    this.autoIndexed = new Counter({ name: `${prefix}auto_indexed_emails_total`, help: "Emails indexed automatically after an analysis (INDEX_ON_ANALYZE)", registers: reg });
 
     this.syncRuns = new Counter({ name: `${prefix}mailbox_sync_runs_total`, help: "Mailbox sync runs by outcome and auth mode", labelNames: ["outcome", "mode"] as const, registers: reg });
     this.syncLag = new Gauge({ name: `${prefix}mailbox_sync_lag_seconds`, help: "Seconds since the last successful sync, per mailbox", labelNames: ["user"] as const, registers: reg });

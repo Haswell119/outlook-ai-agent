@@ -1,10 +1,11 @@
 import { Button, Input, makeStyles, mergeClasses, Spinner, Text, Tooltip } from "@fluentui/react-components";
 import { CheckmarkCircle20Filled, DatabaseSearch20Regular, Open16Regular, Send20Filled } from "@fluentui/react-icons";
 import type { ChatResponse, EmailContext } from "@oao/shared";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useApp } from "@/app/AppContext";
 import { formatDate, useI18n } from "@/i18n";
 import { loadRecentFromCache } from "@/office/cache";
+import { markIndexed, notYetIndexed } from "@/office/indexed";
 import { openMessage } from "@/office/actions";
 import { AiFooter, EmptyState, colors, useErrorMessage, useToast } from "@/ui";
 
@@ -31,6 +32,8 @@ const useStyles = makeStyles({
   chip: { borderRadius: "12px", fontSize: "11px", padding: "2px 10px", minHeight: "22px", height: "22px" },
   chipActive: { backgroundColor: colors.primary, color: "#fff", border: `1px solid ${colors.primary}` },
   hint: { color: colors.textSecondary, fontSize: "11px" },
+  indexStatus: { color: colors.textSecondary, fontSize: "11px", lineHeight: "14px" },
+  retrieval: { color: colors.textSecondary, fontSize: "11px" },
 });
 
 interface Turn {
@@ -63,13 +66,58 @@ export function ChatTab({ email, fixedScope }: ChatTabProps) {
   const [indexing, setIndexing] = useState(false);
   const [scope, setScope] = useState<"conversation" | "all">(email?.conversationId ? "conversation" : "all");
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
+  /**
+   * What "All emails" can actually search: the size of the user's index, and
+   * whether Microsoft Graph fills it (otherwise only the emails opened in the
+   * pane or selected are in it). `null` until known.
+   */
+  const [indexedCount, setIndexedCount] = useState<number | null>(null);
+  const [graphSync, setGraphSync] = useState<boolean | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   /** The pinned selection is indexed once per session, on the first question. */
   const indexedScope = useRef<string | null>(null);
+  const mailboxWide = !fixedScope && (scope === "all" || !email?.conversationId);
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: "end" });
   }, [turns.length, busy]);
+
+  const refreshIndexStatus = useCallback(async () => {
+    try {
+      const st = await api.mailboxSync();
+      setIndexedCount(st.indexedEmails);
+      setGraphSync(st.enabled);
+    } catch {
+      /* the status line is informative only: no toast, no retry storm */
+    }
+  }, [api]);
+
+  useEffect(() => {
+    if (fixedScope) return;
+    void refreshIndexStatus();
+  }, [fixedScope, refreshIndexStatus]);
+
+  /**
+   * "All emails" can only find what was indexed. Emails analysed in the pane are
+   * indexed by the orchestrator itself; this covers the rest of what this
+   * browser has seen (cached items that were never analysed, e.g. opened while
+   * offline or before an update), once each — the server upsert is idempotent.
+   */
+  const indexBrowsedEmails = async (): Promise<void> => {
+    const pending = notYetIndexed(loadRecentFromCache(200));
+    if (!pending.length) return;
+    setIndexing(true);
+    try {
+      const r = await api.indexEmails({ emails: pending });
+      markIndexed(pending.map((e) => e.id));
+      if (r.warning) toast.warning(t("chat.indexedDegraded", { indexed: r.indexed, skipped: r.skipped, warning: r.warning }));
+    } catch (e) {
+      // Retrieval will be thinner, but the question still goes through.
+      toast.info(errMsg(e));
+    } finally {
+      setIndexing(false);
+    }
+  };
 
   const send = async () => {
     const message = input.trim();
@@ -92,6 +140,7 @@ export function ChatTab({ email, fixedScope }: ChatTabProps) {
           setIndexing(false);
         }
       }
+      if (mailboxWide) await indexBrowsedEmails();
       const res = await api.chat({
         sessionId,
         message,
@@ -104,6 +153,7 @@ export function ChatTab({ email, fixedScope }: ChatTabProps) {
         language: lang,
       });
       setSessionId(res.sessionId);
+      if (res.retrieval) setIndexedCount(res.retrieval.indexedEmails);
       setTurns((prev) => [...prev, { role: "assistant", text: res.answer, at: new Date().toISOString(), response: res }]);
     } catch (e) {
       toast.error(errMsg(e));
@@ -128,9 +178,11 @@ export function ChatTab({ email, fixedScope }: ChatTabProps) {
     setIndexing(true);
     try {
       const r = await api.indexEmails({ emails });
+      markIndexed(emails.map((e) => e.id));
       // Degraded indexing (no embeddings) still makes the emails searchable: say so instead of "success".
       if (r.warning) toast.warning(t("chat.indexedDegraded", { indexed: r.indexed, skipped: r.skipped, warning: r.warning }));
       else toast.success(t("chat.indexed", { indexed: r.indexed, skipped: r.skipped, mode: r.mode }));
+      void refreshIndexStatus();
     } catch (e) {
       toast.error(t("chat.indexFailed", { error: errMsg(e) }));
     } finally {
@@ -209,11 +261,18 @@ export function ChatTab({ email, fixedScope }: ChatTabProps) {
                   </Button>
                 </div>
               )}
+              {turn.response?.retrieval && turn.response.retrieval.scope === "mailbox" && (
+                <Text className={s.retrieval} data-testid="chat-retrieval">
+                  {turn.response.retrieval.matched > 0
+                    ? t("chat.retrievalMeta", { matched: turn.response.retrieval.matched, indexed: turn.response.retrieval.indexedEmails })
+                    : t("chat.retrievalNone", { indexed: turn.response.retrieval.indexedEmails })}
+                </Text>
+              )}
               <AiFooter auditId={turn.response?.auditId} />
             </div>
           ),
         )}
-        {busy && <Spinner size="tiny" label={indexing ? t("selection.indexing") : t("chat.thinking")} labelPosition="after" />}
+        {busy && <Spinner size="tiny" label={indexing ? (fixedScope ? t("selection.indexing") : t("chat.indexingRecent")) : t("chat.thinking")} labelPosition="after" />}
         {/* Announce the answer (and the wait) to assistive technology: a Fluent
             Spinner label alone is not reliably read out. */}
         <div aria-live="polite" aria-atomic="true" className="oao-visually-hidden">
@@ -249,6 +308,14 @@ export function ChatTab({ email, fixedScope }: ChatTabProps) {
             </Tooltip>
           )}
         </div>
+        {/* What "All emails" really covers — the honest answer to "why does it
+            not find my other emails?" when Microsoft Graph is not enabled. */}
+        {mailboxWide && indexedCount !== null && (
+          <Text className={s.indexStatus} data-testid="chat-index-status" data-indexed={indexedCount}>
+            {indexedCount === 0 ? t("chat.indexEmpty") : indexedCount === 1 ? t("chat.indexStatusOne") : t("chat.indexStatus", { count: indexedCount })}
+            {graphSync === false ? ` · ${t("chat.indexNoGraph")}` : ""}
+          </Text>
+        )}
         <div className={s.composerRow}>
           <Input value={input} onChange={(_, d) => setInput(d.value)} onKeyDown={onKey} placeholder={t("chat.placeholder")} style={{ flexGrow: 1 }} aria-label={t("chat.placeholder")} disabled={busy} />
           <Button appearance="primary" icon={<Send20Filled />} onClick={() => void send()} disabled={busy || !input.trim()} aria-label={t("chat.send")} />

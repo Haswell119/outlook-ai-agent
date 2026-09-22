@@ -399,6 +399,38 @@ test.describe("the other surfaces", () => {
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("assistant-card")).toBeVisible({ timeout: 60_000 });
   });
+
+  test("'All emails' answers from the emails browsed earlier, not from the one that is open (no Graph)", async ({ page }) => {
+    // A fresh mailbox: nothing indexed, no Graph. Opening A then B analyses
+    // both, and every analysed email is indexed by the orchestrator itself.
+    await openPane(page, { lang: "en", user: coldUser() });
+    const h = host(page);
+    await expect(summary(page)).toBeVisible({ timeout: 40_000 });
+    await h.open("B");
+    await expect(subjectLine(page)).toContainText("relevé trimestriel");
+    await expect(summary(page)).toBeVisible({ timeout: 40_000 });
+
+    await page.getByTestId("tab-chat").click();
+    await expect(page.getByTestId("chat-tab")).toBeVisible({ timeout: 40_000 });
+    // B is open, so the default scope is its conversation: no mailbox status yet.
+    await expect(page.getByTestId("chat-index-status")).toHaveCount(0);
+    await page.getByRole("button", { name: "All emails" }).click();
+    const status = page.getByTestId("chat-index-status");
+    await expect(status).toContainText("2 emails indexed", { timeout: 20_000 });
+    await expect(status).toContainText("without Microsoft Graph");
+
+    // A question about A, asked while B is open.
+    await page.getByRole("textbox").first().fill("What are the open points before the go-live and the cutover plan?");
+    await page.keyboard.press("Enter");
+    const card = page.getByTestId("assistant-card");
+    await expect(card).toBeVisible({ timeout: 60_000 });
+    await expect(card).toContainText("open points before the 30 September go-live");
+    await expect(page.getByTestId("chat-retrieval")).toContainText("among 2 indexed");
+    // The top source and the quoted evidence are A's, not the open email's
+    // (B may legitimately appear further down: it is indexed too).
+    await expect(card.getByRole("button").first()).toContainText("open points before the 30 September go-live");
+    await expect(card).toContainText("Email: Re: Atlas project — open points");
+  });
 });
 
 test.describe("language", () => {

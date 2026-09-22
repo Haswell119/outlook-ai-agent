@@ -367,6 +367,22 @@ export const ChatResponseSchema = z.object({
   confidence: ConfidenceSchema,
   auditId: z.string(),
   model: z.string().optional(),
+  /**
+   * How the sources were found — the honest answer to "why does it only talk
+   * about the opened email?": `indexedEmails` is the size of the user's index
+   * (without Microsoft Graph, only the emails opened in the pane or selected
+   * are indexed), `matched` how many of them the retrieval returned.
+   */
+  retrieval: z
+    .object({
+      scope: z.enum(["conversation", "mailbox"]),
+      mode: z.enum(["hybrid", "lexical", "vector", "none"]),
+      indexedEmails: z.number().int().nonnegative(),
+      matched: z.number().int().nonnegative(),
+      /** True when the model was not called because nothing could be retrieved. */
+      modelCallSkipped: z.boolean().optional(),
+    })
+    .optional(),
 });
 export type ChatResponse = z.infer<typeof ChatResponseSchema>;
 

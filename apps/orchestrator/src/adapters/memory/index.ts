@@ -240,6 +240,9 @@ export class MemoryEmailIndexRepository implements EmailIndexRepository {
       .slice(0, limit)
       .map(clone);
   }
+  async hasEmail(userId: string, emailId: string): Promise<boolean> {
+    return (this.chunks.get(`${userId}|${emailId}`)?.length ?? 0) > 0;
+  }
   async count(userId: string): Promise<number> {
     let n = 0;
     for (const key of this.chunks.keys()) if (key.startsWith(`${userId}|`)) n++;

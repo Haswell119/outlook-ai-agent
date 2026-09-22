@@ -9,6 +9,44 @@ beforeEach(async () => {
 });
 
 describe("AnalyzeEmailService", () => {
+  it("indexes every analysed email once (INDEX_ON_ANALYZE) so the chat's 'all emails' scope knows it without Graph", async () => {
+    const me = "dev.user@northbridge.example";
+    expect(await c.repos.emailIndex.count(me)).toBe(0);
+    await c.services.analyzeEmail.analyze(ctx(), { email: sampleEmail(), includeThread: false });
+    expect(await c.repos.emailIndex.hasEmail(me, "email-1")).toBe(true);
+    expect(await c.repos.emailIndex.count(me)).toBe(1);
+    // Same email again (cache hit): not re-embedded, not re-indexed.
+    const embedCalls = c.repos.emailIndex.chunks.size;
+    await c.services.analyzeEmail.analyze(ctx(), { email: sampleEmail(), includeThread: false });
+    expect(c.repos.emailIndex.chunks.size).toBe(embedCalls);
+    expect(await c.repos.emailIndex.count(me)).toBe(1);
+    // A triaged email (no model call) is indexed too: it is still part of the mailbox.
+    const newsletter = sampleEmail({ id: "nl-1", conversationId: "conv-nl", subject: "Weekly market newsletter", from: { name: "Market News", address: "noreply@news.example" }, body: "This week in markets… Unsubscribe here: https://news.example/unsub" });
+    const r = await c.services.analyzeEmail.analyze(ctx(), { email: newsletter, includeThread: false });
+    expect(r.source).toBe("heuristic");
+    expect(await c.repos.emailIndex.hasEmail(me, "nl-1")).toBe(true);
+    // Auto-indexing is silent in the audit trail (the analysis event is the record) …
+    expect(c.repos.audit.events.filter((e) => e.type === "emails_indexed")).toHaveLength(0);
+    // … and searchable straight away, in the mailbox-wide chat scope.
+    const chat = await c.services.chat.chat(ctx(), { message: "vendor risk assessment approval", scope: {} });
+    expect(chat.retrieval).toMatchObject({ scope: "mailbox", indexedEmails: 2 });
+    expect(chat.sources.some((x) => x.emailId === "email-1")).toBe(true);
+  });
+
+  it("does not index when INDEX_ON_ANALYZE=false, and an index failure never fails the analysis", async () => {
+    const off = await createTestContainer({ INDEX_ON_ANALYZE: "false" });
+    await off.services.analyzeEmail.analyze(ctx(), { email: sampleEmail(), includeThread: false });
+    expect(await off.repos.emailIndex.count("dev.user@northbridge.example")).toBe(0);
+
+    const broken = await createTestContainer();
+    broken.repos.emailIndex.upsertEmail = async () => {
+      throw new Error("disk full");
+    };
+    const r = await broken.services.analyzeEmail.analyze(ctx(), { email: sampleEmail(), includeThread: false });
+    expect(r.summary).toContain("Sarah Johnson");
+    expect(await broken.repos.emailIndex.count("dev.user@northbridge.example")).toBe(0);
+  });
+
   it("returns a contract-valid analysis with phishing screening and writes an audit event", async () => {
     const r = await c.services.analyzeEmail.analyze(ctx(), { email: sampleEmail(), includeThread: false });
     expect(() => EmailAnalysisSchema.parse(r)).not.toThrow();

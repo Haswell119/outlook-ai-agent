@@ -217,6 +217,11 @@ export class PgEmailIndexRepository implements EmailIndexRepository {
     return rows.map(toChunk);
   }
 
+  async hasEmail(userId: string, emailId: string): Promise<boolean> {
+    const { rows } = await this.pool.query<{ one: number }>(`SELECT 1 AS one FROM email_index WHERE user_id = $1 AND email_id = $2 LIMIT 1`, [userId, emailId]);
+    return rows.length > 0;
+  }
+
   async count(userId: string): Promise<number> {
     const { rows } = await this.pool.query<{ n: string }>(`SELECT count(DISTINCT email_id)::text AS n FROM email_index WHERE user_id = $1`, [userId]);
     return Number(rows[0]?.n ?? 0);

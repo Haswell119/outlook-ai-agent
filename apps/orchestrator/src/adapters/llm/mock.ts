@@ -24,10 +24,13 @@ export class MockLlmProvider implements LlmProvider {
   lastModel: string | undefined;
   /** Use cases seen, in order (test hook for routing / triage assertions). */
   readonly seenUseCases: string[] = [];
+  /** Requests seen, in order (test hook for prompt-content assertions). */
+  readonly requests: LlmRequest[] = [];
 
   async complete(req: LlmRequest): Promise<LlmCompletion> {
     this.calls++;
     this.seenUseCases.push(req.useCase ?? "generic");
+    this.requests.push(req);
     if (this.failing) throw new LlmError("network", "mock provider is configured to fail");
     if (this.nextRawResponse !== undefined) {
       const raw = this.nextRawResponse;

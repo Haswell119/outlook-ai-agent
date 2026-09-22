@@ -210,6 +210,17 @@ Dashboard admin (web, Auth.js) ──OIDC──────────►    �
 
 ## 4. Microsoft Graph et le worker de précalcul
 
+> **Sans Graph (test local, boîte personnelle, pilote sans consentement admin)** :
+> tout fonctionne, mais l'orchestrateur ne connaît que les emails que le volet
+> lui a montrés. Chaque email analysé dans le volet est indexé automatiquement
+> (`INDEX_ON_ANALYZE=true`), une sélection multiple est indexée avant la première
+> question, et le chat en portée « Tous les emails » complète avec les emails
+> ouverts dans ce navigateur qu'il n'a pas encore envoyés. La ligne d'état sous
+> les puces de portée (« *N emails indexés · sans Microsoft Graph, seuls les
+> emails ouverts dans le volet ou sélectionnés sont indexés* ») dit exactement ce
+> que la question peut atteindre ; chaque réponse indique combien d'emails
+> indexés ont correspondu. Avec Graph, le worker indexe la boîte entière.
+
 Deux modes, indépendants :
 
 | Mode | `graph.authMode` | Qui agit | Permissions |
