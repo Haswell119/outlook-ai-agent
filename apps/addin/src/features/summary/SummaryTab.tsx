@@ -9,6 +9,7 @@ import { AiFooter, BulletList, EmptyState, ErrorState, SectionCard, SeverityDot,
 import { LazyActionApprovalDialog, prefetchApproval } from "@/features/lazy";
 import { actionIcon } from "@/features/actions/actionIcons";
 import { runDraftReply } from "@/features/actions/actionRunner";
+import { DecisionCard } from "./DecisionCard";
 import { TriageCard } from "./TriageCard";
 import { isCompactTriage, isDegraded, isEmptyAnalysis, type AnalysisState } from "./useAnalysis";
 
@@ -190,6 +191,9 @@ export function SummaryTab({ email, state }: SummaryTabProps) {
       >
         {summaryText || t("summary.noSummary")}
       </SectionCard>
+
+      {/* Optional: only when a decision engine runs in active mode. */}
+      <DecisionCard decisioning={a.decisioning} />
 
       <SectionCard icon={<CheckboxChecked20Regular />} iconColor={colors.lowText} iconBg={colors.lowBg} title={t("summary.decisions")}>
         <BulletList items={decisions.map((d) => toPlainText(d, 500))} empty={t("summary.noDecisions")} />

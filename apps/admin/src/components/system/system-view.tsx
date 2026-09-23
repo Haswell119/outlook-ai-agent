@@ -4,6 +4,7 @@ import * as React from "react";
 import {
   Activity,
   Cpu,
+  GitBranch,
   Database,
   Gauge,
   HardDriveDownload,
@@ -28,6 +29,14 @@ import {
   formatPercent,
   hitRate,
 } from "@/lib/format";
+import {
+  DECISION_CIRCUIT_VARIANT,
+  DECISION_STATE_VARIANT,
+  fallbackShare,
+  lowConfidenceShare,
+  modelStrategyLabel,
+  threshold,
+} from "@/lib/decisioning";
 
 const REFRESH_MS = 15_000;
 
@@ -38,6 +47,7 @@ const CHECK_LABELS: Record<string, string> = {
   llm: "LLM",
   db: "Database",
   graph: "Microsoft Graph",
+  laya: "Laya (decision engine)",
 };
 
 export function checkLabel(name: string): string {
@@ -144,7 +154,7 @@ export function SystemView({
     }
   };
 
-  const { health, features, llmQueue, cache, sync } = status;
+  const { health, features, llmQueue, cache, sync, decisioning } = status;
   const analysisRate = hitRate(cache.analysisHits, cache.analysisMisses);
   const embeddingRate = hitRate(cache.embeddingHits, cache.embeddingMisses);
 
@@ -276,6 +286,10 @@ export function SystemView({
         </Card>
       </div>
 
+      {decisioning && (
+        <DecisioningCard decisioning={decisioning} language={language} t={t} />
+      )}
+
       <Card className="min-w-0">
         <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
           <CardTitle className="flex items-center gap-2">
@@ -347,5 +361,106 @@ export function SystemView({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Structured-decision engine (Laya). Only rendered when the orchestrator
+ * reports it (optional field). Shows configuration and counters — never the
+ * engine URL, the API key or any email content (the orchestrator does not send
+ * them).
+ */
+function DecisioningCard({
+  decisioning: d,
+  language,
+  t,
+}: {
+  decisioning: NonNullable<SystemStatus["decisioning"]>;
+  language: Language;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  const lowShare = lowConfidenceShare(d);
+  const fbShare = fallbackShare(d);
+  return (
+    <Card className="min-w-0" data-testid="decisioning-card">
+      <CardHeader className="flex-row flex-wrap items-center gap-2 space-y-0">
+        <GitBranch className="h-4 w-4 text-brand" aria-hidden="true" />
+        <CardTitle>{t("system.decision.title")}</CardTitle>
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          <Badge variant={DECISION_STATE_VARIANT[d.state]}>{t(`system.decision.state.${d.state}`)}</Badge>
+          {d.provider !== "disabled" && (
+            <Badge variant={d.mode === "active" ? "info" : "neutral"}>{t(`system.decision.mode.${d.mode}`)}</Badge>
+          )}
+        </span>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {d.provider === "disabled" ? (
+          <p className="rounded-md bg-[#F5F5F5] px-3 py-2 text-xs text-[#616161]">{t("system.decision.disabled")}</p>
+        ) : (
+          <>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              <Metric label={t("system.decision.provider")} value={d.provider} hint={d.detail} />
+              <Metric
+                label={t("system.decision.models")}
+                value={modelStrategyLabel(d)}
+                hint={[d.loadedModels?.join(", "), d.device].filter(Boolean).join(" · ") || undefined}
+              />
+              <Metric
+                label={t("system.decision.versions")}
+                value={d.decisionVersion}
+                hint={d.taxonomyVersion ? `${t("system.decision.taxonomy")} ${d.taxonomyVersion}` : undefined}
+              />
+              <Metric
+                label={t("system.decision.thresholds")}
+                value={`${threshold(d.minConfidence)} · ${threshold(d.folderMinConfidence)}`}
+                hint={t("system.decision.thresholdsHint")}
+              />
+              <Metric
+                label={t("system.decision.decisions")}
+                value={formatNumber(d.stats.decisions, language)}
+                hint={`${formatNumber(d.stats.providerCalls, language)} ${t("system.decision.calls")}`}
+              />
+              <Metric
+                label={t("system.decision.fallbacks")}
+                value={fbShare === null ? t("common.na") : formatPercent(fbShare)}
+                hint={`${formatNumber(d.stats.fallbacks, language)} · ${t(
+                  d.fallbackToLlm ? "system.decision.fallbackLlm" : "system.decision.fallbackRules",
+                )}`}
+              />
+              <Metric
+                label={t("system.decision.lowConfidence")}
+                value={lowShare === null ? t("common.na") : formatPercent(lowShare)}
+                hint={formatNumber(d.stats.lowConfidence, language)}
+              />
+              <Metric
+                label={t("system.decision.latency")}
+                value={formatLatency(d.stats.avgLatencyMs)}
+                hint={`${formatNumber(d.stats.failures, language)} ${t("system.decision.failures")}`}
+              />
+            </div>
+            <p className="flex flex-wrap items-center gap-2 text-sm">
+              <Activity className="h-4 w-4 text-[#616161]" aria-hidden="true" />
+              <span className="text-[#616161]">{t("system.circuit")}:</span>
+              <Badge variant={DECISION_CIRCUIT_VARIANT[d.circuit]}>{t(`system.decision.circuit.${d.circuit}`)}</Badge>
+              <span className="text-xs text-[#616161]">
+                {t("system.decision.queue", {
+                  inFlight: d.stats.inFlight,
+                  pending: d.stats.pending,
+                  concurrency: d.concurrency,
+                })}
+              </span>
+              {d.mode === "shadow" && (
+                <span className="text-xs text-[#616161]">
+                  · {t("system.decision.shadowSample", { rate: threshold(d.shadowSampleRate) })}
+                </span>
+              )}
+            </p>
+            <p className="text-xs text-[#616161]">
+              {t(d.mode === "shadow" ? "system.decision.shadowNote" : "system.decision.activeNote")}
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

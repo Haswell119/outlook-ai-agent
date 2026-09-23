@@ -66,6 +66,7 @@ export function SettingsSheet({ open, onClose }: SettingsSheetProps) {
   const toast = useToast();
 
   const [telemetry, setTelemetry] = useState(() => loadSettings().telemetry);
+  const [diagnostics, setDiagnostics] = useState(() => loadSettings().diagnostics);
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -103,6 +104,11 @@ export function SettingsSheet({ open, onClose }: SettingsSheetProps) {
     },
     [],
   );
+
+  const onDiagnostics = useCallback((next: boolean) => {
+    setDiagnostics(next);
+    saveSettings({ diagnostics: next });
+  }, []);
 
   const onClear = useCallback(async () => {
     await clearCache();
@@ -253,6 +259,13 @@ export function SettingsSheet({ open, onClose }: SettingsSheetProps) {
               </>
             )}
           </div>
+          <Switch
+            checked={diagnostics}
+            onChange={(_, d) => onDiagnostics(!!d.checked)}
+            label={t("settings.diagnosticMode")}
+            data-testid="settings-diagnostics"
+          />
+          <Text className={s.hint}>{t("settings.diagnosticModeHint")}</Text>
           <div className={s.row}>
             <Button appearance="subtle" size="small" onClick={() => void refreshDiagnostics()} disabled={checking}>
               {t("app.refreshStatus")}

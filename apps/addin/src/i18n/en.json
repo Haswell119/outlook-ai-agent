@@ -63,6 +63,41 @@
     "degradedTitle": "AI unavailable — rules only",
     "degradedBody": "The model could not be reached, so this analysis comes from rules alone and is less complete than usual. Retry to ask the model again."
   },
+  "decision": {
+    "title": "Structured decision",
+    "urgency": "Urgency",
+    "businessArea": "Business area",
+    "suggestedFolder": "Suggested folder",
+    "replyExpected": "Reply expected",
+    "actionRequired": "Action required",
+    "yes": "Yes",
+    "no": "No",
+    "level": {
+      "low": "Low",
+      "normal": "Normal",
+      "high": "High",
+      "critical": "Critical"
+    },
+    "confidence": "{pct} confidence",
+    "lowConfidence": "Low confidence: some decisions were not certain enough and were left out. Check the email yourself.",
+    "folderHint": "A suggestion only: nothing is moved without your approval (see Suggested Actions).",
+    "source": "Source",
+    "folderSource": "Folder source",
+    "sourceValue": {
+      "laya": "Local decision engine",
+      "laya_shadow": "Local decision engine (shadow)",
+      "taxonomy": "Taxonomy (single folder)",
+      "llm_fallback": "AI model (fallback)",
+      "heuristic": "Rules (fallback)",
+      "disabled": "Disabled"
+    },
+    "state": "State",
+    "degraded": "Engine unavailable for this email",
+    "fallbackReason": "Fallback reason",
+    "model": "Model",
+    "versions": "Versions",
+    "taxonomy": "taxonomy"
+  },
   "thread": {
     "executiveSummary": "Executive summary",
     "missingDocument": "Missing document: {name}",
@@ -401,7 +436,9 @@
     "queued": "Queued events",
     "models": "Models",
     "featureFlags": "Features",
-    "noneEnabled": "none"
+    "noneEnabled": "none",
+    "diagnosticMode": "Diagnostic mode",
+    "diagnosticModeHint": "Shows where each structured decision came from (decision engine, taxonomy, fallback) under the Summary. For support; off by default."
   },
   "home": {
     "subtitle": "Your mailbox",

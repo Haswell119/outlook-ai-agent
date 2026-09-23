@@ -63,6 +63,41 @@
     "degradedTitle": "IA indisponible — règles uniquement",
     "degradedBody": "Le modèle n'a pas pu être joint : cette analyse provient uniquement de règles et reste moins complète que d'habitude. Réessayez pour interroger le modèle."
   },
+  "decision": {
+    "title": "Décision structurée",
+    "urgency": "Urgence",
+    "businessArea": "Domaine métier",
+    "suggestedFolder": "Dossier suggéré",
+    "replyExpected": "Réponse attendue",
+    "actionRequired": "Action requise",
+    "yes": "Oui",
+    "no": "Non",
+    "level": {
+      "low": "Faible",
+      "normal": "Normale",
+      "high": "Élevée",
+      "critical": "Critique"
+    },
+    "confidence": "confiance {pct}",
+    "lowConfidence": "Confiance faible : certaines décisions n'étaient pas assez sûres et ont été écartées. Vérifiez l'email vous-même.",
+    "folderHint": "Simple suggestion : rien n'est déplacé sans votre validation (voir Actions suggérées).",
+    "source": "Source",
+    "folderSource": "Source du dossier",
+    "sourceValue": {
+      "laya": "Moteur de décision local",
+      "laya_shadow": "Moteur de décision local (shadow)",
+      "taxonomy": "Taxonomie (dossier unique)",
+      "llm_fallback": "Modèle IA (repli)",
+      "heuristic": "Règles (repli)",
+      "disabled": "Désactivé"
+    },
+    "state": "État",
+    "degraded": "Moteur indisponible pour cet email",
+    "fallbackReason": "Raison du repli",
+    "model": "Modèle",
+    "versions": "Versions",
+    "taxonomy": "taxonomie"
+  },
   "thread": {
     "executiveSummary": "Synthèse exécutive",
     "missingDocument": "Document manquant : {name}",
@@ -401,7 +436,9 @@
     "queued": "Événements en attente",
     "models": "Modèles",
     "featureFlags": "Fonctionnalités",
-    "noneEnabled": "aucune"
+    "noneEnabled": "aucune",
+    "diagnosticMode": "Mode diagnostic",
+    "diagnosticModeHint": "Affiche l'origine de chaque décision structurée (moteur de décision, taxonomie, repli) sous le Résumé. Pour le support ; désactivé par défaut."
   },
   "home": {
     "subtitle": "Votre boîte aux lettres",

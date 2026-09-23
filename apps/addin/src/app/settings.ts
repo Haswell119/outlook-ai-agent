@@ -14,9 +14,14 @@ export interface Settings {
   telemetry: boolean;
   /** Collapse the "what's precomputed" explainer once the user dismissed it. */
   hideSourceHint: boolean;
+  /**
+   * Diagnostic mode (support): shows where each structured decision came from
+   * (decision engine, taxonomy, fallback) under the Summary. Off by default.
+   */
+  diagnostics: boolean;
 }
 
-export const DEFAULT_SETTINGS: Settings = { theme: "office", telemetry: true, hideSourceHint: false };
+export const DEFAULT_SETTINGS: Settings = { theme: "office", telemetry: true, hideSourceHint: false, diagnostics: false };
 
 let cache: Settings | null = null;
 const listeners = new Set<(s: Settings) => void>();
@@ -27,6 +32,7 @@ function sanitize(raw: unknown): Settings {
     theme: o.theme === "light" || o.theme === "dark" ? o.theme : "office",
     telemetry: o.telemetry !== false,
     hideSourceHint: o.hideSourceHint === true,
+    diagnostics: o.diagnostics === true,
   };
 }
 
