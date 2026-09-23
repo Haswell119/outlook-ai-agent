@@ -81,6 +81,9 @@ spec:
             - name: WORKERS_ENABLED
               value: "false"
 {{ include "oao.secretEnv" . | indent 12 }}
+{{- with (include "oao.laya.orchestratorEnv" . | trim) }}
+{{ . | indent 12 }}
+{{- end }}
             {{- with .Values.orchestrator.api.extraEnv }}
 {{ toYaml . | indent 12 }}
             {{- end }}
@@ -117,11 +120,17 @@ spec:
             - name: tmp
               mountPath: /tmp
 {{ include "oao.secretVolumeMount" . | indent 12 }}
+{{- with (include "oao.laya.orchestratorVolumeMounts" . | trim) }}
+{{ . | indent 12 }}
+{{- end }}
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi
 {{ include "oao.secretVolume" . | indent 8 }}
+{{- with (include "oao.laya.orchestratorVolumes" . | trim) }}
+{{ . | indent 8 }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

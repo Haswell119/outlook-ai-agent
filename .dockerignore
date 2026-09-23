@@ -17,6 +17,10 @@
 **/playwright-report
 **/blob-report
 
+# --- local Laya virtualenv / model cache and evaluation data ----------------
+.laya
+evaluation
+
 # --- vcs, ci & tooling ------------------------------------------------------
 .git
 .gitignore

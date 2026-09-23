@@ -668,6 +668,166 @@ postgres:
         tag: "2.17.0"
 
 # ---------------------------------------------------------------------------
+# Laya — local structured-decision engine (optional, docs/LAYA.md)
+# ---------------------------------------------------------------------------
+# A separate Deployment + ClusterIP Service (never a sidecar). The
+# orchestrator asks it urgency / business area / folder / reply expected /
+# action required; the LLM keeps the summary, tasks, risks and replies.
+# Disabled by default: nothing is rendered and the orchestrator keeps its
+# historic behaviour (DECISION_PROVIDER=disabled).
+#
+# Roll-out: shadow first (decisions computed, audited and compared, never
+# shown), active only after an evaluation on your own annotated emails.
+laya:
+  enabled: false
+
+  image:
+    # Internal image built from infra/docker/laya/Dockerfile (laya[serve]==0.3.9).
+    repository: registry.internal/ai/laya
+    tag: "0.3.9-oao.1"           # pinned — the chart refuses "latest"
+    digest: ""                   # sha256:… — takes precedence over the tag
+    pullPolicy: IfNotPresent
+    # Pull secrets for the internal registry. Empty = image.pullSecrets.
+    pullSecrets: []
+
+  # shadow | active
+  mode: shadow
+
+  service:
+    port: 8000
+    annotations: {}
+
+  model:
+    # language = english checkpoint for English emails, multilingual otherwise
+    # auto     = let Laya's router pick | fixed = always model.fixedModel
+    strategy: language
+    fixedModel: ""
+    # Load the checkpoints before the pod reports ready (recommended).
+    preload: true
+    # Checkpoints the server loads (and the download step fetches).
+    checkpoints: [english, multilingual]
+    device: ""                   # "" = auto | cpu | cuda
+    # Cap torch intra-op threads (keep <= the CPU limit). "" = torch default.
+    threads: ""
+    logLevel: info
+
+  # Orchestrator-side policy (LAYA_* env of the api and worker pods).
+  decisions:
+    timeoutMs: 5000
+    maxResponseBytes: 1048576
+    minConfidence: "0.75"
+    folderMinConfidence: "0.80"
+    fallbackToLlm: true
+    # One inference at a time per Laya pod; raise with replicaCount.
+    concurrency: 1
+    circuitFailureThreshold: 5
+    circuitCooldownMs: 30000
+    decisionVersion: v1
+    inputMaxChars: 4000
+    shadowSampleRate: "1"
+
+  # Bearer key shared by the orchestrator (mounted as a file, LAYA_API_KEY_FILE)
+  # and Laya (LAYA_API_KEY). Create the Secret before enabling:
+  #   kubectl -n oao create secret generic outlook-ai-laya --from-literal=api-key="$(openssl rand -hex 32)"
+  # Required in active mode; empty = no key (shadow trials only).
+  apiKey:
+    existingSecret: outlook-ai-laya
+    key: api-key
+
+  taxonomy:
+    # ConfigMap you manage (key below). Empty = rendered by the chart from
+    # `inline`, or from files/laya-taxonomy.example.json (shadow trials only:
+    # active mode requires your own taxonomy).
+    existingConfigMap: ""
+    key: laya-taxonomy.json
+    inline: ""
+    mountPath: /etc/oao/laya-taxonomy.json
+
+  # Where the weights come from (the inference pod never downloads):
+  #   pvc   — a PersistentVolumeClaim filled once (weights.download, or copied
+  #           from an internal mirror); mounted read-only by the server
+  #   image — weights baked into an internal image (BAKE_MODELS build arg)
+  weights:
+    source: pvc
+    # Commit of the Hugging Face repo convaiinnovations/laya: the weights are
+    # pinned like the image.
+    revision: 5e7b2b1b8ca2ecdd3f2322d94069c9b6ce7e844b
+    download:
+      # Development / first fill only: an init container downloads the missing
+      # checkpoints into the PVC. Opens egress to `egressCidrs` for the Laya
+      # pod. Keep false in production: the init container then only checks that
+      # the weights are present (and fails with an explicit message if not).
+      enabled: false
+      hfEndpoint: https://huggingface.co   # or an internal mirror
+      egressCidrs: [0.0.0.0/0]
+      egressPorts: [443]
+
+  persistence:
+    enabled: true
+    existingClaim: ""
+    size: 5Gi                    # english + multilingual ≈ 1.5 GiB
+    storageClass: ""
+    accessModes: [ReadWriteOnce]
+    # The server only reads the weights.
+    readOnly: true
+
+  # HF_HUB_OFFLINE=1 / TRANSFORMERS_OFFLINE=1 for the server: no download at
+  # runtime and no egress at all (NetworkPolicy) unless weights.download is on.
+  offline: true
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+
+  # NVIDIA GPU (untested in this repository; build the image with a CUDA
+  # TORCH_INDEX_URL and set model.device=cuda).
+  gpu:
+    enabled: false
+    resourceName: nvidia.com/gpu
+    count: 1
+
+  replicaCount: 1
+
+  # With a ReadWriteOnce PVC every replica must land on the same node: scale
+  # out with a ReadOnlyMany volume or with baked weights.
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+
+  probes:
+    # Loading the checkpoints on CPU takes time: up to 60 x 10 s here.
+    startup: { periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 60 }
+    readiness: { periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 3 }
+    liveness: { periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 3 }
+
+  networkPolicy:
+    enabled: true
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+  extraEnv: []
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile: { type: RuntimeDefault }
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities: { drop: ["ALL"] }
+
+# ---------------------------------------------------------------------------
 # Observability (kube-prometheus-stack, shipped with NKP/Kommander)
 # ---------------------------------------------------------------------------
 metrics:

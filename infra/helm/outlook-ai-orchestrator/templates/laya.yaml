@@ -1,0 +1,337 @@
+{{- include "oao.laya.validate" . -}}
+{{- if .Values.laya.enabled }}
+{{- $l := .Values.laya -}}
+{{- $name := include "oao.laya.fullname" . -}}
+{{- $pvc := include "oao.laya.usesPvc" . -}}
+{{- $rwo := has "ReadWriteOnce" $l.persistence.accessModes -}}
+{{- $egress := or $l.weights.download.enabled (not $l.offline) -}}
+# Laya — local structured-decision engine (docs/LAYA.md). A separate
+# Deployment: the orchestrator calls it over HTTP and keeps working when it is
+# down (circuit breaker + fallback), so nothing here gates the orchestrator.
+{{- if not $l.taxonomy.existingConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oao.laya.taxonomyConfigMap" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "laya") | indent 4 }}
+  annotations:
+    {{- if $l.taxonomy.inline }}
+    oao.io/taxonomy-source: values
+    {{- else }}
+    # Bundled example — fine for shadow trials, refused by the chart in active mode.
+    oao.io/taxonomy-source: example
+    {{- end }}
+data:
+  {{ $l.taxonomy.key }}: |
+{{ include "oao.laya.taxonomyContent" . | indent 4 }}
+---
+{{- end }}
+{{- if and $pvc (not $l.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "oao.laya.claimName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "laya") | indent 4 }}
+  annotations:
+    # Weights survive an uninstall: re-downloading them is the slow part.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+{{ toYaml $l.persistence.accessModes | indent 4 }}
+  {{- with $l.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $l.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "laya") | indent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  {{- if not $l.autoscaling.enabled }}
+  replicas: {{ $l.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    {{- if and $pvc $rwo }}
+    # A ReadWriteOnce volume cannot follow a surge pod to another node.
+    type: Recreate
+    {{- else }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+    {{- end }}
+  selector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "laya") | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "oao.selectorLabels" (list . "laya") | indent 8 }}
+        {{- with $l.podLabels }}
+{{ toYaml . | indent 8 }}
+        {{- end }}
+      {{- with $l.podAnnotations }}
+      annotations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "oao.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with ($l.image.pullSecrets | default .Values.image.pullSecrets) }}
+      imagePullSecrets:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with $l.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+{{ toYaml $l.securityContext | indent 8 }}
+      {{- with $l.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with $l.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with $l.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+      {{- if $pvc }}
+      # Weights present before start: this init container checks the PVC
+      # (offline, exits 3 with an explicit message when a checkpoint is
+      # missing). With weights.download.enabled it fetches what is missing —
+      # once: the next starts find everything in place.
+      initContainers:
+        - name: models
+          image: {{ include "oao.laya.image" . | quote }}
+          imagePullPolicy: {{ $l.image.pullPolicy }}
+          command: ["python", "/opt/laya-tools/download-models.py"]
+          env:
+            - name: HF_HOME
+              value: /models/huggingface
+            - name: LAYA_MODELS
+              value: {{ join "," $l.model.checkpoints | quote }}
+            - name: LAYA_MODEL_REVISION
+              value: {{ $l.weights.revision | quote }}
+            {{- if $l.weights.download.enabled }}
+            - name: HF_ENDPOINT
+              value: {{ $l.weights.download.hfEndpoint | quote }}
+            {{- else }}
+            - name: LAYA_DOWNLOAD_CHECK_ONLY
+              value: "1"
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            {{- end }}
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 2Gi }
+          securityContext:
+{{ toYaml $l.containerSecurityContext | indent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: models
+              mountPath: /models
+              readOnly: {{ not $l.weights.download.enabled }}
+      {{- end }}
+      containers:
+        - name: laya
+          image: {{ include "oao.laya.image" . | quote }}
+          imagePullPolicy: {{ $l.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: LAYA_HOST
+              value: "0.0.0.0"
+            - name: LAYA_PORT
+              value: "8000"
+            - name: LAYA_PRELOAD
+              value: {{ ternary "1" "0" $l.model.preload | quote }}
+            - name: LAYA_MODELS
+              value: {{ join "," $l.model.checkpoints | quote }}
+            {{- with $l.model.device }}
+            - name: LAYA_DEVICE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $l.model.threads }}
+            - name: LAYA_THREADS
+              value: {{ . | quote }}
+            {{- end }}
+            - name: LAYA_LOG_LEVEL
+              value: {{ $l.model.logLevel | quote }}
+            - name: HF_HOME
+              value: /models/huggingface
+            - name: HF_HUB_OFFLINE
+              value: {{ ternary "1" "0" $l.offline | quote }}
+            - name: TRANSFORMERS_OFFLINE
+              value: {{ ternary "1" "0" $l.offline | quote }}
+            - name: HF_HUB_DISABLE_TELEMETRY
+              value: "1"
+            {{- if $l.apiKey.existingSecret }}
+            # laya-serve reads the key from its environment only.
+            - name: LAYA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $l.apiKey.existingSecret }}
+                  key: {{ $l.apiKey.key }}
+            {{- end }}
+            {{- with $l.extraEnv }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          # /health answers once the checkpoints are loaded (LAYA_PRELOAD=1);
+          # inference runs off the event loop, so it stays responsive under load.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+{{ toYaml $l.probes.startup | indent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+{{ toYaml $l.probes.readiness | indent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+{{ toYaml $l.probes.liveness | indent 12 }}
+          resources:
+            {{- $res := deepCopy $l.resources }}
+            {{- if $l.gpu.enabled }}
+            {{- $_ := set $res "limits" (merge (dict $l.gpu.resourceName ($l.gpu.count | toString)) ($res.limits | default dict)) }}
+            {{- end }}
+{{ toYaml $res | indent 12 }}
+          securityContext:
+{{ toYaml $l.containerSecurityContext | indent 12 }}
+          volumeMounts:
+            # HOME and XDG_CACHE_HOME point here; nothing else is written.
+            - name: tmp
+              mountPath: /tmp
+            {{- if $pvc }}
+            - name: models
+              mountPath: /models
+              readOnly: {{ $l.persistence.readOnly }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+        {{- if $pvc }}
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ include "oao.laya.claimName" . }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "laya") | indent 4 }}
+  {{- with $l.service.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ $l.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+{{ include "oao.selectorLabels" (list . "laya") | indent 4 }}
+{{- if $l.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "laya") | indent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}
+  minReplicas: {{ $l.autoscaling.minReplicas }}
+  maxReplicas: {{ $l.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $l.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled $l.networkPolicy.enabled }}
+---
+# Laya receives only from the orchestrator pods, and sends nothing: no egress
+# at all while the weights are local (offline). The download mode (dev / first
+# fill) opens DNS + HTTPS to weights.download.egressCidrs for this pod only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "oao.componentLabels" (list . "laya") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "oao.selectorLabels" (list . "laya") | indent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [{{ include "oao.name" . }}]
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [orchestrator-api, orchestrator-worker]
+      ports:
+        - port: 8000
+          protocol: TCP
+  {{- if $egress }}
+  egress:
+{{ include "oao.netpol.dns" . | indent 4 }}
+    - to:
+        {{- range $l.weights.download.egressCidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        {{- range $l.weights.download.egressPorts }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+  {{- else }}
+  egress: []
+  {{- end }}
+{{- end }}
+{{- end }}

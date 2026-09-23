@@ -59,6 +59,9 @@ spec:
 {{ include "oao.netpol.database" . | indent 4 }}
 {{ include "oao.netpol.llm" . | indent 4 }}
 {{ include "oao.netpol.microsoft" . | indent 4 }}
+{{- with (include "oao.netpol.laya" . | trim) }}
+{{ . | indent 4 }}
+{{- end }}
     {{- with .Values.networkPolicy.extraEgress }}
 {{ toYaml . | indent 4 }}
     {{- end }}
@@ -93,6 +96,9 @@ spec:
 {{ include "oao.netpol.database" . | indent 4 }}
 {{ include "oao.netpol.llm" . | indent 4 }}
 {{ include "oao.netpol.microsoft" . | indent 4 }}
+{{- with (include "oao.netpol.laya" . | trim) }}
+{{ . | indent 4 }}
+{{- end }}
     {{- with .Values.networkPolicy.extraEgress }}
 {{ toYaml . | indent 4 }}
     {{- end }}

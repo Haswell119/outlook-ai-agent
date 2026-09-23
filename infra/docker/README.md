@@ -13,6 +13,9 @@ Publiées par `.github/workflows/release.yml` sur
 `ghcr.io/<owner>/oao-{orchestrator,admin,addin}` avec SBOM (syft), scan
 (trivy, échec sur CRITICAL) et signature **cosign keyless**.
 
+Une quatrième image, **optionnelle et interne**, sert le moteur de décision
+local Laya — voir [§ Image Laya](#image-laya-moteur-de-décision-optionnel).
+
 ## Propriétés communes
 
 - **Gestionnaire de paquets** : `npm` uniquement — il est livré avec l'image
@@ -108,3 +111,35 @@ docker run --rm --read-only --tmpfs /tmp -e DATABASE_URL=memory -e LLM_PROVIDER=
   -p 8080:8080 oao/orchestrator:dev                                            # démarre en rootfs read-only
 trivy image --severity CRITICAL --exit-code 1 oao/orchestrator:dev
 ```
+
+## Image Laya (moteur de décision, optionnel)
+
+`infra/docker/laya/Dockerfile` — contexte de build = ce dossier (pas la racine).
+Référence fonctionnelle : [`docs/LAYA.md`](../../docs/LAYA.md).
+
+```bash
+docker build -t registry.internal/ai/laya:0.3.9-oao.1 infra/docker/laya          # CPU
+docker build --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126 \
+  -t registry.internal/ai/laya:0.3.9-oao.1-cuda infra/docker/laya                  # CUDA (non testé)
+docker build --build-arg BAKE_MODELS=english,multilingual \
+  --build-arg HF_ENDPOINT=https://hf-mirror.internal \
+  -t registry.internal/ai/laya:0.3.9-oao.1-weights infra/docker/laya               # poids embarqués
+```
+
+| Propriété | Valeur |
+|---|---|
+| Base | `python:3.11.16-slim-bookworm`, **épinglée par digest** |
+| Laya | `laya[serve]==0.3.9` (`ARG LAYA_VERSION`) — 0.3.8 n'est pas publiée, cf. `docs/LAYA.md` §19 |
+| Dépendances | toutes épinglées par `constraints.txt` ; PyTorch `2.14.0` depuis l'index CPU par défaut (`ARG TORCH_INDEX_URL`), `pip check` au build |
+| Utilisateur | `10001:10001`, rootfs en lecture seule compatible (écrit `/tmp` seulement) |
+| Poids | aucun par défaut ; `/models` (HF_HOME `/models/huggingface`) monté depuis un volume/PVC, ou `BAKE_MODELS` |
+| Réseau | `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` : le serveur ne télécharge jamais ; seul `/opt/laya-tools/download-models.py` le fait, explicitement |
+| Secret | aucun dans l'image ; `LAYA_API_KEY` injectée à l'exécution |
+| Sonde | `HEALTHCHECK` Python stdlib sur `/health` (start period 300 s) |
+| Commande | `CMD ["laya-serve"]`, port 8000 |
+
+Construite en CI (`docker-build`, sans push, **sans poids**) ; non publiée par
+`release.yml` : c'est une image interne, à pousser sur le registre du cluster.
+En local : `docker compose --profile laya up --build` (service `laya-models`
+pour le premier téléchargement, puis `laya` hors ligne) ; GPU :
+`-f docker-compose.gpu.yml` (non testé).

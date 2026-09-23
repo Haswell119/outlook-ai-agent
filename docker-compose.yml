@@ -20,6 +20,13 @@ x-orchestrator-image: &orchestrator-build
     context: .
     dockerfile: infra/docker/orchestrator.Dockerfile
 
+# Local structured-decision engine (profile `laya`, docs/LAYA.md). One image
+# for the one-off model download and for the server; pinned in the Dockerfile.
+x-laya-image: &laya-build
+  image: oao/laya:0.3.9-oao.1
+  build:
+    context: infra/docker/laya
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -73,6 +80,9 @@ services:
       PORT: "8080"
       # The container must listen on all interfaces whatever .env says for local dev.
       HOST: 0.0.0.0
+      # Structured-decision engine: used only when .env sets DECISION_PROVIDER=laya
+      # (start with LAYA_MODE=shadow). In-network name of the `laya` service below.
+      LAYA_BASE_URL: http://laya:8000
     ports:
       - "${ORCHESTRATOR_PORT:-8080}:8080"
     depends_on:
@@ -80,6 +90,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      # Only with `--profile laya`; ignored otherwise (the historic quickstart is unchanged).
+      laya:
+        condition: service_healthy
+        required: false
     # Same posture as the Kubernetes deployment: read-only rootfs + tmpfs.
     read_only: true
     tmpfs: [/tmp]
@@ -112,6 +126,7 @@ services:
       DB_AUTO_MIGRATE: "false"
       ROLE: worker
       PORT: "8080"
+      LAYA_BASE_URL: http://laya:8000
     depends_on:
       orchestrator:
         condition: service_healthy
@@ -199,6 +214,71 @@ services:
     networks: [oao]
 
   # ---------------------------------------------------------------------------
+  # Optional: Laya, the local structured-decision engine (docs/LAYA.md).
+  #   docker compose --profile laya up --build
+  # then set DECISION_PROVIDER=laya (and LAYA_MODE=shadow to start) in .env.
+  #
+  # `laya-models` is the only step allowed to download: it fetches the pinned
+  # checkpoints once into the named volume (first start in development, a
+  # no-op afterwards). `laya` itself runs offline (HF_HUB_OFFLINE=1) and never
+  # downloads. GPU: add -f docker-compose.gpu.yml (untested, see docs/LAYA.md).
+  # ---------------------------------------------------------------------------
+  laya-models:
+    <<: *laya-build
+    profiles: ["laya"]
+    command: ["python", "/opt/laya-tools/download-models.py"]
+    environment:
+      LAYA_MODELS: ${LAYA_MODELS:-english,multilingual}
+      # Commit of the Hugging Face repo convaiinnovations/laya (weights are pinned too).
+      LAYA_MODEL_REVISION: ${LAYA_MODEL_REVISION:-5e7b2b1b8ca2ecdd3f2322d94069c9b6ce7e844b}
+      # An internal mirror in a closed network; the public hub otherwise.
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+    volumes:
+      - oao_laya_models:/models
+    read_only: true
+    tmpfs: [/tmp]
+    restart: "no"
+    networks: [oao]
+
+  laya:
+    <<: *laya-build
+    profiles: ["laya"]
+    restart: unless-stopped
+    environment:
+      LAYA_MODELS: ${LAYA_MODELS:-english,multilingual}
+      # Empty = auto (CPU here; the GPU override sets cuda).
+      LAYA_DEVICE: ${LAYA_DEVICE:-}
+      # Cap torch threads to the physical cores you give the container (empty = torch default).
+      LAYA_THREADS: ${LAYA_THREADS:-}
+      # Same value as the orchestrator's LAYA_API_KEY (.env); empty = no bearer check (local only).
+      LAYA_API_KEY: ${LAYA_API_KEY:-}
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    # Loopback only: the orchestrator uses the compose network; this is for
+    # `npm run check:laya` and an orchestrator run from the host (npm run dev).
+    ports:
+      - "127.0.0.1:${LAYA_HOST_PORT:-8000}:8000"
+    volumes:
+      - oao_laya_models:/models
+    depends_on:
+      laya-models:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      # Loading two checkpoints on CPU takes a while.
+      start_period: 300s
+    networks: [oao]
+
+  # ---------------------------------------------------------------------------
   # Optional: local model serving, for a machine with no access to the
   # internal GPU endpoint. Not needed in normal operation — point LLM_BASE_URL
   # at the internal vLLM endpoint instead. Enable with:
@@ -226,3 +306,5 @@ volumes:
   oao_postgres_data:
   oao_addin_certs:
   oao_ollama_data:
+  # Laya checkpoints (Hugging Face cache layout under /models/huggingface).
+  oao_laya_models:

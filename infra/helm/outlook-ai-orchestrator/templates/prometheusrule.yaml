@@ -121,4 +121,45 @@ spec:
           annotations:
             summary: "PostgreSQL injoignable depuis l'orchestrator"
             description: "Audit non persisté : incident compliance. Voir docs/OPERATIONS.md §base de données."
+{{- if .Values.laya.enabled }}
+
+        # --- Laya (moteur de décision local) — docs/LAYA.md §exploitation.
+        # Laya indisponible ne rend jamais l'orchestrateur indisponible : les
+        # analyses repassent par le LLM (ou les règles). Warning, pas critical.
+        - alert: OaoLayaCircuitOpen
+          expr: max(oao_laya_circuit_state{namespace="{{ $ns }}"}) == 2
+          for: 10m
+          labels:
+            severity: warning
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "Circuit breaker Laya ouvert depuis 10 min"
+            description: "Le moteur de décision local ne répond plus (réseau, timeouts, 5xx, 422 poids manquants, 401 clé) : les décisions structurées retombent sur le LLM. Vérifier le pod {{ include "oao.laya.fullname" . }} et `npm run check:laya`."
+
+        - alert: OaoLayaErrorRateHigh
+          expr: |
+            sum(rate(oao_laya_requests_total{namespace="{{ $ns }}", outcome!~"ok|aborted"}[15m]))
+              / clamp_min(sum(rate(oao_laya_requests_total{namespace="{{ $ns }}"}[15m])), 0.001)
+              > 0.2
+          for: 15m
+          labels:
+            severity: warning
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "Plus de 20 % d'appels Laya en échec"
+            description: "Répartition par cause : oao_laya_requests_total{outcome}. queue_timeout = Laya saturé (augmenter laya.replicaCount et LAYA_CONCURRENCY ensemble)."
+
+        - alert: OaoLayaLowConfidenceRateHigh
+          expr: |
+            sum(rate(oao_laya_low_confidence_total{namespace="{{ $ns }}", question="businessArea"}[1h]))
+              / clamp_min(sum(rate(oao_laya_decisions_total{namespace="{{ $ns }}", question="businessArea"}[1h])), 0.001)
+              > 0.5
+          for: 2h
+          labels:
+            severity: info
+            service: outlook-ai-orchestrator
+          annotations:
+            summary: "Plus de la moitié des domaines métier Laya sous le seuil de confiance"
+            description: "Taxonomie ou seuils à revoir (docs/LAYA.md §calibration) — en mode actif le LLM reprend la main et le coût modèle remonte. Mesuré aussi en shadow."
+{{- end }}
 {{- end }}

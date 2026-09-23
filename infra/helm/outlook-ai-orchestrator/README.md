@@ -156,10 +156,52 @@ par `apps/orchestrator/src/metrics.ts` :
 `oao_cache_hits_total{cache}`, `oao_cache_misses_total{cache}`,
 `oao_mailbox_sync_lag_seconds{user}`,
 `oao_mailbox_sync_runs_total{outcome,mode}`, `oao_audit_events_total{type}`,
-`oao_db_up`, `oao_build_info{version,role}`.
+`oao_db_up`, `oao_build_info{version,role}` ; et, si Laya est activé,
+`oao_laya_requests_total{outcome}`, `oao_laya_request_duration_seconds{outcome}`,
+`oao_laya_circuit_state`, `oao_laya_fallbacks_total{reason}`,
+`oao_laya_low_confidence_total{question}`, `oao_laya_decisions_total{question,choice}`,
+`oao_laya_shadow_comparisons_total{question,result}`,
+`oao_laya_model_calls_saved_total{reason}`.
 
 Le catalogue complet (files, tokens, triage, appels évités, briefs) est dans
 `docs/OPERATIONS.md` §3.
+
+## Laya — moteur de décision local (optionnel)
+
+`laya.enabled: false` par défaut : rien n'est rendu et la ConfigMap de
+l'orchestrateur est identique à celle d'avant (même checksum, aucun redémarrage).
+Référence fonctionnelle : [`docs/LAYA.md`](../../../docs/LAYA.md).
+
+| Valeur | Défaut | Rôle |
+|---|---|---|
+| `laya.enabled` | `false` | Deployment `-laya` + Service + (PVC, ConfigMap de taxonomie, NetworkPolicy) + variables `DECISION_PROVIDER`/`LAYA_*` de l'orchestrateur |
+| `laya.image.repository` / `tag` / `digest` | `registry.internal/ai/laya` / `0.3.9-oao.1` / — | image interne (`infra/docker/laya`) ; `latest` refusé ; le digest prime |
+| `laya.image.pullSecrets` | `[]` (= `image.pullSecrets`) | registre interne |
+| `laya.mode` | `shadow` | `shadow` \| `active` (active exige `apiKey.existingSecret` et une taxonomie fournie) |
+| `laya.service.port` | `8000` | Service ClusterIP |
+| `laya.model.strategy` / `fixedModel` | `language` / — | `language` \| `auto` \| `fixed` |
+| `laya.model.preload` / `checkpoints` | `true` / `[english, multilingual]` | checkpoints chargés avant readiness |
+| `laya.model.device` / `threads` / `logLevel` | — / — / `info` | `cuda` pour un GPU ; threads ≤ limite CPU |
+| `laya.decisions.*` | cf. `values.yaml` | `LAYA_TIMEOUT_MS`, seuils (`0.75` / `0.80`, **non calibrés**), repli LLM, concurrence, circuit, version, échantillon shadow |
+| `laya.apiKey.existingSecret` / `key` | `outlook-ai-laya` / `api-key` | clé partagée : `LAYA_API_KEY` côté Laya, fichier `LAYA_API_KEY_FILE` côté orchestrateur |
+| `laya.taxonomy.existingConfigMap` / `key` / `inline` / `mountPath` | — / `laya-taxonomy.json` / — / `/etc/oao/laya-taxonomy.json` | vide = ConfigMap rendue depuis `inline` ou l'exemple `files/laya-taxonomy.example.json` |
+| `laya.weights.source` | `pvc` | `pvc` (défaut) \| `image` (poids embarqués) |
+| `laya.weights.revision` | `5e7b2b1b…` | commit Hugging Face épinglé des poids |
+| `laya.weights.download.enabled` / `hfEndpoint` / `egressCidrs` / `egressPorts` | `false` / `https://huggingface.co` / `[0.0.0.0/0]` / `[443]` | premier remplissage du PVC par l'init container ; ouvre la sortie **de ce pod seulement** — développement ou miroir interne, puis `false` |
+| `laya.persistence.*` | `enabled: true`, `size: 5Gi`, `accessModes: [ReadWriteOnce]`, `readOnly: true` | PVC des poids (conservé à la désinstallation) ; RWO ⇒ `strategy: Recreate` |
+| `laya.offline` | `true` | `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, NetworkPolicy `egress: []` |
+| `laya.resources` | `500m/2Gi` → `4/8Gi` | |
+| `laya.gpu.enabled` / `resourceName` / `count` | `false` / `nvidia.com/gpu` / `1` | ajoute la ressource GPU aux limites (non testé) |
+| `laya.replicaCount` / `autoscaling.*` | `1` / désactivé | monter avec `laya.decisions.concurrency` ; RWO ⇒ même nœud |
+| `laya.probes.*` | startup 60×10 s | `/health` (chargement des checkpoints) |
+| `laya.networkPolicy.enabled` | `true` | entrée depuis `orchestrator-api` / `orchestrator-worker` uniquement |
+
+Garde-fous au rendu (`helm template` échoue) : mode inconnu, `active` sans clé ou
+sans taxonomie fournie, tag `latest`, `strategy=fixed` sans `fixedModel`,
+`weights.source=pvc` sans persistance. Alertes ajoutées au `PrometheusRule` quand
+Laya est activé : `OaoLayaCircuitOpen`, `OaoLayaErrorRateHigh`,
+`OaoLayaLowConfidenceRateHigh`. Laya n'expose pas de `/metrics` : ses métriques
+(`oao_laya_*`) sont celles de l'orchestrateur.
 
 ## Sauvegardes
 

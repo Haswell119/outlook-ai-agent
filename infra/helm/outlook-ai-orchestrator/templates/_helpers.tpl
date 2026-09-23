@@ -336,6 +336,10 @@ checksum/config: {{ include "oao.config.data" . | sha256sum }}
 {{- if not (or .Values.secrets.existingSecret .Values.externalSecrets.enabled) }}
 checksum/secrets: {{ include "oao.secretData" . | sha256sum }}
 {{- end }}
+{{- if .Values.laya.enabled }}
+{{- /* A taxonomy managed outside the chart cannot be hashed here: restart the pods after changing it. */}}
+checksum/laya: {{ printf "%s%s" (include "oao.laya.config.data" .) (ternary "" (include "oao.laya.taxonomyContent" .) (not (empty .Values.laya.taxonomy.existingConfigMap))) | sha256sum }}
+{{- end }}
 {{- end -}}
 
 {{/* ------------------------------------------------------------------ */}}
@@ -376,4 +380,166 @@ podAntiAffinity:
 
 {{- define "oao.tls.addinSecretName" -}}
 {{- .Values.addin.tls.secretName | default (printf "%s-addin-tls" (include "oao.fullname" .)) -}}
+{{- end -}}
+
+{{/* ------------------------------------------------------------------ */}}
+{{/*  Laya — local structured-decision engine (optional)                 */}}
+{{/* ------------------------------------------------------------------ */}}
+{{- define "oao.laya.fullname" -}}
+{{- printf "%s-laya" (include "oao.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/* Pinned image: repository:tag, or repository@digest when a digest is set. Never `latest`. */}}
+{{- define "oao.laya.image" -}}
+{{- $img := .Values.laya.image -}}
+{{- if $img.digest -}}
+{{- printf "%s@%s" $img.repository $img.digest -}}
+{{- else -}}
+{{- printf "%s:%s" $img.repository $img.tag -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "oao.laya.baseUrl" -}}
+{{- printf "http://%s:%v" (include "oao.laya.fullname" .) .Values.laya.service.port -}}
+{{- end -}}
+
+{{- define "oao.laya.taxonomyConfigMap" -}}
+{{- .Values.laya.taxonomy.existingConfigMap | default (printf "%s-taxonomy" (include "oao.laya.fullname" .)) -}}
+{{- end -}}
+
+{{/* Taxonomy JSON rendered by the chart: laya.taxonomy.inline, else the bundled example. */}}
+{{- define "oao.laya.taxonomyContent" -}}
+{{- if .Values.laya.taxonomy.inline -}}
+{{- .Values.laya.taxonomy.inline -}}
+{{- else -}}
+{{- .Files.Get "files/laya-taxonomy.example.json" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "oao.laya.usesPvc" -}}
+{{- if and .Values.laya.enabled (eq .Values.laya.weights.source "pvc") .Values.laya.persistence.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{- define "oao.laya.claimName" -}}
+{{- .Values.laya.persistence.existingClaim | default (printf "%s-models" (include "oao.laya.fullname" .)) -}}
+{{- end -}}
+
+{{/* Fail early on combinations the orchestrator would refuse at boot. */}}
+{{- define "oao.laya.validate" -}}
+{{- $l := .Values.laya -}}
+{{- if $l.enabled -}}
+{{- if not (has $l.mode (list "shadow" "active")) -}}
+{{- fail (printf "laya.mode must be shadow or active (got %q)" $l.mode) -}}
+{{- end -}}
+{{- if not (has $l.model.strategy (list "language" "auto" "fixed")) -}}
+{{- fail (printf "laya.model.strategy must be language, auto or fixed (got %q)" $l.model.strategy) -}}
+{{- end -}}
+{{- if and (eq $l.model.strategy "fixed") (not $l.model.fixedModel) -}}
+{{- fail "laya.model.strategy=fixed requires laya.model.fixedModel" -}}
+{{- end -}}
+{{- if not (has $l.weights.source (list "pvc" "image")) -}}
+{{- fail (printf "laya.weights.source must be pvc or image (got %q)" $l.weights.source) -}}
+{{- end -}}
+{{- if and (eq $l.weights.source "pvc") (not $l.persistence.enabled) -}}
+{{- fail "laya.weights.source=pvc requires laya.persistence.enabled=true (or bake the weights: laya.weights.source=image)" -}}
+{{- end -}}
+{{- if or (not $l.image.repository) (and (not $l.image.tag) (not $l.image.digest)) (eq (toString $l.image.tag) "latest") -}}
+{{- fail "laya.image needs a repository and a pinned tag or digest (never \"latest\")" -}}
+{{- end -}}
+{{- if eq $l.mode "active" -}}
+{{- if not $l.apiKey.existingSecret -}}
+{{- fail "laya.mode=active requires laya.apiKey.existingSecret (the bearer key shared by the orchestrator and Laya)" -}}
+{{- end -}}
+{{- if not (or $l.taxonomy.existingConfigMap $l.taxonomy.inline) -}}
+{{- fail "laya.mode=active requires your own taxonomy (laya.taxonomy.existingConfigMap or laya.taxonomy.inline): the bundled example is for shadow trials only" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+  Orchestrator env for the decision engine (ConfigMap data). Kept out of
+  oao.config.data on purpose: the migration Job reuses that block and must
+  not need the taxonomy or the key. Empty when laya.enabled=false, so the
+  historic ConfigMap is unchanged (DECISION_PROVIDER defaults to disabled).
+*/}}
+{{- define "oao.laya.config.data" -}}
+{{- if .Values.laya.enabled -}}
+{{- $l := .Values.laya -}}
+{{- $d := $l.decisions -}}
+DECISION_PROVIDER: "laya"
+LAYA_MODE: {{ $l.mode | quote }}
+LAYA_BASE_URL: {{ include "oao.laya.baseUrl" . | quote }}
+LAYA_TIMEOUT_MS: {{ $d.timeoutMs | int64 | quote }}
+LAYA_MAX_RESPONSE_BYTES: {{ $d.maxResponseBytes | int64 | quote }}
+LAYA_MIN_CONFIDENCE: {{ $d.minConfidence | quote }}
+LAYA_FOLDER_MIN_CONFIDENCE: {{ $d.folderMinConfidence | quote }}
+LAYA_FALLBACK_TO_LLM: {{ $d.fallbackToLlm | quote }}
+LAYA_CONCURRENCY: {{ $d.concurrency | int64 | quote }}
+LAYA_CIRCUIT_FAILURE_THRESHOLD: {{ $d.circuitFailureThreshold | int64 | quote }}
+LAYA_CIRCUIT_COOLDOWN_MS: {{ $d.circuitCooldownMs | int64 | quote }}
+LAYA_TAXONOMY_FILE: {{ $l.taxonomy.mountPath | quote }}
+LAYA_DECISION_VERSION: {{ $d.decisionVersion | quote }}
+LAYA_INPUT_MAX_CHARS: {{ $d.inputMaxChars | int64 | quote }}
+LAYA_MODEL_STRATEGY: {{ $l.model.strategy | quote }}
+{{- with $l.model.fixedModel }}
+LAYA_FIXED_MODEL: {{ . | quote }}
+{{- end }}
+LAYA_SHADOW_SAMPLE_RATE: {{ $d.shadowSampleRate | quote }}
+{{- end -}}
+{{- end -}}
+
+{{/* LAYA_API_KEY_FILE for the orchestrator pods (the existing <NAME>_FILE mechanism). */}}
+{{- define "oao.laya.orchestratorEnv" -}}
+{{- if and .Values.laya.enabled .Values.laya.apiKey.existingSecret }}
+- name: LAYA_API_KEY_FILE
+  value: "/run/secrets/laya/LAYA_API_KEY"
+{{- end }}
+{{- end -}}
+
+{{- define "oao.laya.orchestratorVolumeMounts" -}}
+{{- if .Values.laya.enabled }}
+- name: laya-taxonomy
+  mountPath: {{ .Values.laya.taxonomy.mountPath | quote }}
+  subPath: {{ .Values.laya.taxonomy.key | quote }}
+  readOnly: true
+{{- if .Values.laya.apiKey.existingSecret }}
+- name: laya-api-key
+  mountPath: /run/secrets/laya
+  readOnly: true
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{- define "oao.laya.orchestratorVolumes" -}}
+{{- if .Values.laya.enabled }}
+- name: laya-taxonomy
+  configMap:
+    name: {{ include "oao.laya.taxonomyConfigMap" . }}
+    items:
+      - key: {{ .Values.laya.taxonomy.key | quote }}
+        path: {{ .Values.laya.taxonomy.key | quote }}
+{{- if .Values.laya.apiKey.existingSecret }}
+- name: laya-api-key
+  secret:
+    secretName: {{ .Values.laya.apiKey.existingSecret }}
+    defaultMode: 0400
+    items:
+      - key: {{ .Values.laya.apiKey.key | quote }}
+        path: LAYA_API_KEY
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/* Egress from the orchestrator pods to the Laya Service port. */}}
+{{- define "oao.netpol.laya" -}}
+{{- if .Values.laya.enabled }}
+- to:
+    - podSelector:
+        matchLabels:
+{{ include "oao.selectorLabels" (list . "laya") | indent 10 }}
+  ports:
+    - port: {{ .Values.laya.service.port }}
+      protocol: TCP
+{{- end }}
 {{- end -}}

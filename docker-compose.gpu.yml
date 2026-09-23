@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# Optional GPU override for the Laya decision engine — NOT TESTED in this
+# repository (no GPU in CI). CUDA stays optional: without this file Laya runs
+# on CPU.
+#
+#   docker compose --profile laya \
+#     -f docker-compose.yml -f docker-compose.gpu.yml \
+#     up --build
+#
+# Needs an NVIDIA driver recent enough for the chosen CUDA build and the
+# NVIDIA Container Toolkit on the host. torch 2.14.0 is published for
+# cu126, cu130 and cu132; pick the one your driver supports with LAYA_TORCH_INDEX_URL.
+# ---------------------------------------------------------------------------
+services:
+  laya-models:
+    image: oao/laya:0.3.9-oao.1-cuda
+    build:
+      context: infra/docker/laya
+      args:
+        TORCH_INDEX_URL: ${LAYA_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu126}
+
+  laya:
+    image: oao/laya:0.3.9-oao.1-cuda
+    build:
+      context: infra/docker/laya
+      args:
+        TORCH_INDEX_URL: ${LAYA_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu126}
+    environment:
+      LAYA_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

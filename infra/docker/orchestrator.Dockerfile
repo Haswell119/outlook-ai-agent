@@ -98,6 +98,9 @@ COPY --from=prod-deps --chown=root:root /app/apps/orchestrator/package.json ./ap
 COPY --from=build --chown=root:root /repo/packages/shared/dist ./packages/shared/dist
 COPY --from=build --chown=root:root /repo/apps/orchestrator/dist ./apps/orchestrator/dist
 COPY --from=build --chown=root:root /repo/apps/orchestrator/migrations ./apps/orchestrator/migrations
+# Example decision taxonomy, used only when LAYA_TAXONOMY_FILE is empty (dev /
+# shadow trials). Production mounts its own file (Helm ConfigMap).
+COPY --from=build --chown=root:root /repo/apps/orchestrator/config ./apps/orchestrator/config
 
 USER 1001:1001
 EXPOSE 8080

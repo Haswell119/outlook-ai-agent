@@ -11,3 +11,6 @@ metadata:
   {{- end }}
 data:
 {{ include "oao.config.data" . | indent 2 }}
+{{- with include "oao.laya.config.data" . }}
+{{ . | indent 2 }}
+{{- end }}

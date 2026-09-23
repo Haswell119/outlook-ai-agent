@@ -175,3 +175,24 @@ auth:
 secrets:
   create: true
   mountAsFiles: true
+
+# --- Laya : moteur de décision local (optionnel, docs/LAYA.md §NKP) ----------
+# Désactivé par défaut. Mise en service : image interne + Secret
+# outlook-ai-laya + poids sur le PVC, puis enabled=true en mode shadow ;
+# le mode actif seulement après évaluation sur des emails annotés.
+laya:
+  enabled: false
+  mode: shadow
+  image:
+    repository: registry.internal/ai/laya
+    tag: "0.3.9-oao.1"
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: nutanix-volume
+  # Production hors ligne : aucun téléchargement au runtime, aucune sortie réseau.
+  offline: true
+  weights:
+    source: pvc
+    download:
+      enabled: false

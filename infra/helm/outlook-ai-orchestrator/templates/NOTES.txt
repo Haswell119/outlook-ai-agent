@@ -9,6 +9,14 @@ Vérifications (checklist complète : docs/NKP.md §vérification) :
   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "oao.fullname" . }}-api
   kubectl -n {{ .Release.Namespace }} get pods,svc,ingress,networkpolicy
   kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/component=orchestrator-worker --tail=50
+{{- if .Values.laya.enabled }}
+
+Laya — moteur de décision local, mode {{ .Values.laya.mode }} (docs/LAYA.md) :
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "oao.laya.fullname" . }} --timeout=15m
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "oao.laya.fullname" . }} -c models   # présence des poids
+  Statut côté orchestrator : https://{{ .Values.hosts.admin }}/system (carte « Moteur de décision »)
+  Laya indisponible ne rend pas l'orchestrator indisponible : /ready ne dépend pas de Laya.
+{{- end }}
 
 {{- $problems := list }}
 {{- if and .Values.postgres.enabled (not .Values.secrets.postgresPassword) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
@@ -58,6 +66,20 @@ Vérifications (checklist complète : docs/NKP.md §vérification) :
 {{- end }}
 {{- if and .Values.addin.enabled (eq .Values.addin.tls.mode "selfSigned") }}
 {{- $problems = append $problems "addin.tls.mode=selfSigned : certificat auto-signé, Outlook refusera de charger le volet. Utiliser certManager ou secret en production." }}
+{{- end }}
+{{- if .Values.laya.enabled }}
+{{- if not .Values.laya.apiKey.existingSecret }}
+{{- $problems = append $problems "laya.apiKey.existingSecret est vide : Laya accepte toute requête du namespace (acceptable pour un essai shadow uniquement ; le mode actif l'exige)." }}
+{{- end }}
+{{- if and (not .Values.laya.taxonomy.existingConfigMap) (not .Values.laya.taxonomy.inline) }}
+{{- $problems = append $problems "laya : taxonomie d'EXEMPLE (files/laya-taxonomy.example.json) — à remplacer par la vôtre avant tout passage en mode actif (docs/LAYA.md §taxonomie)." }}
+{{- end }}
+{{- if .Values.laya.weights.download.enabled }}
+{{- $problems = append $problems "laya.weights.download.enabled=true : le pod Laya peut sortir vers laya.weights.download.egressCidrs pour télécharger les poids. Profil de développement / premier remplissage uniquement — repasser à false ensuite." }}
+{{- end }}
+{{- if not .Values.laya.offline }}
+{{- $problems = append $problems "laya.offline=false : le serveur Laya peut contacter Hugging Face au démarrage. En production : poids locaux et laya.offline=true." }}
+{{- end }}
 {{- end }}
 {{- if $problems }}
 
