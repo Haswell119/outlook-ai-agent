@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { decideApi } from "@/api";
 import { hostSurface, isPreviewMode, isTabHost } from "@/office/env";
 import { detectSurfaceSync, resolveSurface } from "@/office/host";
-import { addMailboxListener, isMailboxEventSupported, mailboxListenerCount, resetMailboxListeners } from "@/office/events";
+import { addMailboxListener, isMailboxEventRegistered, isMailboxEventSupported, mailboxListenerCount, primeMailboxEvents, resetMailboxListeners } from "@/office/events";
 import {
   EMPTY_SELECTION,
   isItemLoadSupported,
@@ -336,7 +336,7 @@ describe("mailbox event handler lifecycle", () => {
     return { addHandlerAsync, removeHandlerAsync };
   }
 
-  it("adds one Office handler for many listeners and removes it once", async () => {
+  it("adds one Office handler for many listeners and never removes it", async () => {
     const { addHandlerAsync, removeHandlerAsync } = eventOffice();
     expect(isMailboxEventSupported("ItemChanged")).toBe(true);
 
@@ -353,26 +353,58 @@ describe("mailbox event handler lifecycle", () => {
     expect(b).toHaveBeenCalledTimes(1);
 
     offA();
-    expect(removeHandlerAsync).not.toHaveBeenCalled(); // b is still listening
     offB();
-    expect(removeHandlerAsync).toHaveBeenCalledTimes(1);
+    offB(); // twice (React StrictMode) is harmless
     expect(mailboxListenerCount("ItemChanged")).toBe(0);
-
-    // Unsubscribing twice (React StrictMode) must not remove anything again.
-    offB();
-    expect(removeHandlerAsync).toHaveBeenCalledTimes(1);
+    // Removing it would race inside Office.js (remove drops every handler of
+    // the type, asynchronously) and could leave the pane with none at all.
+    expect(removeHandlerAsync).not.toHaveBeenCalled();
+    expect(isMailboxEventRegistered("ItemChanged")).toBe(true);
   });
 
-  it("re-registers after the last listener left, and keeps the two event types apart", () => {
+  it("StrictMode mount/unmount/mount keeps exactly one Office handler, and it still reaches the live listener", () => {
     const { addHandlerAsync, removeHandlerAsync } = eventOffice();
-    addMailboxListener("ItemChanged", vi.fn())();
+    const first = vi.fn();
+    const second = vi.fn();
+    addMailboxListener("ItemChanged", first)(); // mount + cleanup
+    addMailboxListener("ItemChanged", second); // re-mount
     expect(addHandlerAsync).toHaveBeenCalledTimes(1);
-    expect(removeHandlerAsync).toHaveBeenCalledTimes(1);
+    expect(removeHandlerAsync).not.toHaveBeenCalled();
+    addHandlerAsync.mock.calls[0]![1]!();
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
 
-    addMailboxListener("ItemChanged", vi.fn());
-    addMailboxListener("SelectedItemsChanged", vi.fn());
-    expect(addHandlerAsync).toHaveBeenCalledTimes(3);
-    expect(addHandlerAsync.mock.calls.map((c) => c[0])).toEqual(["olkItemChanged", "olkItemChanged", "olkSelectedItemsChanged"]);
+  it("primeMailboxEvents registers both events before any listener, once", () => {
+    const { addHandlerAsync } = eventOffice();
+    primeMailboxEvents();
+    primeMailboxEvents();
+    expect(addHandlerAsync.mock.calls.map((c) => c[0])).toEqual(["olkItemChanged", "olkSelectedItemsChanged"]);
+    const l = vi.fn();
+    addMailboxListener("ItemChanged", l);
+    expect(addHandlerAsync).toHaveBeenCalledTimes(2);
+    addHandlerAsync.mock.calls[0]![1]!();
+    expect(l).toHaveBeenCalledOnce();
+  });
+
+  it("retries a failed registration", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const addHandlerAsync = vi.fn((_type: unknown, _handler: () => void, cb: (r: unknown) => void) => {
+        calls++;
+        cb(calls === 1 ? { status: "failed", error: { message: "busy", code: 9000 } } : ok(undefined));
+      });
+      setOffice(officeStub({ sets: ["1.5", "1.13"], mailbox: { addHandlerAsync } }));
+      addMailboxListener("ItemChanged", vi.fn());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(isMailboxEventRegistered("ItemChanged")).toBe(false);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(addHandlerAsync).toHaveBeenCalledTimes(2);
+      expect(isMailboxEventRegistered("ItemChanged")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a throwing listener does not stop the others", () => {

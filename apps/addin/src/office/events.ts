@@ -5,9 +5,16 @@
  * Why this module exists: a pinned task pane is long-lived. It survives every
  * click in the message list, so an `addHandlerAsync` that is registered per
  * React mount (or per feature) leaks a handler on every re-render and ends up
- * re-running the analysis N times for one item switch. Here the Office handler
- * is added when the **first** listener subscribes and removed when the **last**
- * one unsubscribes; everything in between is pure JavaScript fan-out.
+ * re-running the analysis N times for one item switch.
+ *
+ * The Office handler is registered **once**, as early as possible
+ * (`primeMailboxEvents()` right after `Office.onReady`, as Microsoft
+ * documents), and is **never removed**: listeners come and go in JavaScript
+ * only. Removing and re-adding it — which React's StrictMode does on every
+ * mount in development — races inside Office.js (`removeHandlerAsync` drops
+ * *every* handler of the type, asynchronously) and could leave the pane with
+ * no handler at all, i.e. stuck on the first email. A failed registration is
+ * retried.
  *
  * Events used:
  *   - `ItemChanged` (Mailbox **1.5**) — the user selected another message while
@@ -54,7 +61,6 @@ function eventType(event: MailboxEvent): unknown {
 
 type Mailbox = {
   addHandlerAsync?: (type: unknown, handler: (args?: unknown) => void, cb: (r: Office.AsyncResult<void>) => void) => void;
-  removeHandlerAsync?: (type: unknown, cb: (r: Office.AsyncResult<void>) => void) => void;
 };
 
 function mailbox(): Mailbox | undefined {
@@ -65,11 +71,9 @@ function mailbox(): Mailbox | undefined {
   }
 }
 
-/**
- * Subscribe to a mailbox event. Returns an unsubscribe function that is safe to
- * call twice (React 18 StrictMode mounts effects twice in development).
- */
-export function addMailboxListener(event: MailboxEvent, listener: Listener): () => void {
+const RETRY_DELAYS_MS = [500, 2000, 5000];
+
+function registration(event: MailboxEvent): Registration {
   let reg = registry.get(event);
   if (!reg) {
     const created: Registration = {
@@ -89,36 +93,55 @@ export function addMailboxListener(event: MailboxEvent, listener: Listener): () 
     reg = created;
     registry.set(event, created);
   }
-  const registration = reg;
-  registration.listeners.add(listener);
+  return reg;
+}
 
-  if (!registration.added && isMailboxEventSupported(event)) {
-    // Flip the flag *before* awaiting so a second subscriber in the same tick
-    // cannot register a second Office handler.
-    registration.added = true;
-    const type = eventType(event);
-    const box = mailbox();
-    if (type === undefined || !box?.addHandlerAsync) {
-      registration.added = false;
-    } else {
-      void asyncResult<void>((cb) => box.addHandlerAsync!(type, registration.handler, cb)).catch(() => {
-        registration.added = false;
-      });
-    }
-  }
+/** Register the single Office handler for `event` (idempotent, retried on failure). */
+function ensureRegistered(event: MailboxEvent, attempt = 0): void {
+  const reg = registration(event);
+  if (reg.added || !isMailboxEventSupported(event)) return;
+  const type = eventType(event);
+  const box = mailbox();
+  if (type === undefined || !box?.addHandlerAsync) return;
+  // Flip the flag *before* awaiting so a second caller in the same tick
+  // cannot register a second Office handler.
+  reg.added = true;
+  void asyncResult<void>((cb) => box.addHandlerAsync!(type, reg.handler, cb)).catch(() => {
+    reg.added = false;
+    const delay = RETRY_DELAYS_MS[attempt];
+    if (delay !== undefined) setTimeout(() => ensureRegistered(event, attempt + 1), delay);
+  });
+}
 
+/**
+ * Register every mailbox event handler now, before any React component
+ * mounts. Called from the entry point once Office is ready.
+ */
+export function primeMailboxEvents(): void {
+  ensureRegistered("ItemChanged");
+  ensureRegistered("SelectedItemsChanged");
+}
+
+/**
+ * Subscribe to a mailbox event. Returns an unsubscribe function that is safe to
+ * call twice (React 18 StrictMode mounts effects twice in development). It only
+ * detaches the JavaScript listener: the Office handler stays registered.
+ */
+export function addMailboxListener(event: MailboxEvent, listener: Listener): () => void {
+  const reg = registration(event);
+  reg.listeners.add(listener);
+  ensureRegistered(event);
   let done = false;
   return () => {
     if (done) return;
     done = true;
-    registration.listeners.delete(listener);
-    if (registration.listeners.size > 0 || !registration.added) return;
-    registration.added = false;
-    const type = eventType(event);
-    const box = mailbox();
-    if (type === undefined || !box?.removeHandlerAsync) return;
-    void asyncResult<void>((cb) => box.removeHandlerAsync!(type, cb)).catch(() => undefined);
+    reg.listeners.delete(listener);
   };
+}
+
+/** Whether the Office handler for `event` is registered (diagnostics / tests). */
+export function isMailboxEventRegistered(event: MailboxEvent): boolean {
+  return registry.get(event)?.added ?? false;
 }
 
 /** Number of JS listeners currently attached (diagnostics / tests). */

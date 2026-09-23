@@ -4,7 +4,8 @@ import type { FeatureFlags } from "@oao/shared";
 import { initApi, getApi, setLanguageGetter, type OaoApi } from "@/api";
 import { I18nProvider, useI18n } from "@/i18n";
 import { isPreviewMode, queryParam } from "@/office/env";
-import { currentItemId } from "@/office/readItem";
+import { currentConversationId, currentItemId } from "@/office/readItem";
+import { newSelectionWatch, pollHostSelection } from "@/office/itemWatch";
 import { detectSurfaceSync, resolveSurface, type AppSurface } from "@/office/host";
 import { addMailboxListener } from "@/office/events";
 import { startObservationFlusher } from "@/office/observe";
@@ -45,6 +46,9 @@ function LanguageBridge() {
   return null;
 }
 
+/** How often a visible pane checks that it still shows the selected message. */
+export const ITEM_POLL_MS = 1000;
+
 /** Surfaces the shell can render (see `office/host.ts` for how they are picked). */
 export type AppMode = AppSurface;
 
@@ -81,9 +85,11 @@ export function App({ mode }: AppProps) {
    */
   const [itemId, setItemId] = useState<string>(() => (mode ? "" : currentItemId()));
   const resolvedMode = mode ?? surface;
-  // Mirrored in a ref so the safety net can compare without re-subscribing.
+  // Mirrored in refs so the safety nets can compare without re-subscribing.
   const itemIdRef = useRef(itemId);
   itemIdRef.current = itemId;
+  const surfaceRef = useRef(resolvedMode);
+  surfaceRef.current = resolvedMode;
 
   useEffect(() => {
     if (mode) return; // forced by a test / screenshot
@@ -94,7 +100,7 @@ export function App({ mode }: AppProps) {
       });
     };
     refresh();
-    const onChange = (event: "item" | "selection" | "visibility" | "focus") => () => {
+    const onChange = (event: "item" | "selection" | "visibility" | "focus" | "poll" | "selectionPoll") => () => {
       if (!alive) return;
       const next = currentItemId();
       setItemId(next);
@@ -106,7 +112,13 @@ export function App({ mode }: AppProps) {
     // (see office/events.ts) — a pinned pane must not leak a handler per item.
     // Registered unconditionally: the pane does not know whether the user
     // pinned it, and on a host without Mailbox 1.5 the subscription is a no-op.
-    const offItem = addMailboxListener("ItemChanged", onChange("item"));
+    const onItemChanged = onChange("item");
+    const offItem = addMailboxListener("ItemChanged", () => {
+      onItemChanged();
+      // The event may come with a stale `mailbox.item` (office-js#5827):
+      // check the list selection right away instead of at the next poll.
+      window.setTimeout(() => void tick(), 300);
+    });
     const offSelection = addMailboxListener("SelectedItemsChanged", onChange("selection"));
 
     /**
@@ -129,10 +141,40 @@ export function App({ mode }: AppProps) {
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", onFocus);
 
+    /**
+     * Second safety net, for the switch that raises nothing at all: while the
+     * pane is visible, compare what the host holds (cheap, synchronous) and
+     * what the message list has selected (`getSelectedItemsAsync`, see
+     * `office/itemWatch.ts`) with what is rendered. Compose, brief and the
+     * Apps-rail tab are not item-bound and are left alone.
+     */
+    const watch = newSelectionWatch();
+    let polling = false;
+    const tick = async () => {
+      if (!alive || polling || document.visibilityState !== "visible") return;
+      const current = surfaceRef.current;
+      if (current !== "read" && current !== "home") return;
+      polling = true;
+      try {
+        if (currentItemId() !== itemIdRef.current) {
+          onChange("poll")();
+          return;
+        }
+        if (await pollHostSelection(watch, { itemId: itemIdRef.current, conversationId: currentConversationId() })) onChange("selectionPoll")();
+      } catch {
+        /* a failed poll is retried at the next tick */
+      } finally {
+        polling = false;
+      }
+    };
+    void tick(); // first observation of the list selection = the baseline
+    const timer = window.setInterval(() => void tick(), ITEM_POLL_MS);
+
     return () => {
       alive = false;
       offItem();
       offSelection();
+      window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onFocus);
     };

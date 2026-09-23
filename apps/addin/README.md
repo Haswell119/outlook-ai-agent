@@ -269,6 +269,27 @@ personal tab carries `scopes: ["personal"]`, `context: ["personalTab"]` and `hos
 
 ---
 
+### Following the selected message (pinned pane)
+
+Switching email with the pane open must never leave the previous email on screen. Four layers make sure of it:
+
+1. **One Office handler per event, registered at start-up and never removed.** `primeMailboxEvents()` runs right after
+   `Office.onReady`, before React (as Microsoft documents). Components only attach JavaScript listeners. Removing and re-adding
+   the Office handler, which React's StrictMode does on every mount in `npm run dev`, races inside Office.js
+   (`removeHandlerAsync` drops every handler of the type, asynchronously) and could leave the pane with none. A failed
+   registration is retried.
+2. **`ItemChanged`** re-keys everything item-bound on the new `mailbox.item.itemId`.
+3. **`visibilitychange` / `focus`** re-check the host item when the pane is shown again.
+4. **A once-a-second check while the pane is visible** (`office/itemWatch.ts`). It compares the host item with what is rendered,
+   then asks `getSelectedItemsAsync` what the message list has selected. It acts only when **that selection changed**. A whole
+   collapsed conversation selected by Outlook on the web counts as one message; a real multi-selection is left to the selection
+   view. When `mailbox.item` did not follow (known Outlook bugs), the selected message is loaded by id
+   (`loadItemByIdAsync`, then `unloadAsync`, serialised because Outlook allows one loaded item at a time) until the host catches
+   up. It is disabled in a message popped out into its own window, whose pane belongs to its message.
+
+Note: Microsoft documents pinnable task panes as unavailable on **Outlook.com** consumer mailboxes. There, keep the pane open
+with the pin icon when Outlook offers it; the checks above still follow the selection as long as the pane stays open.
+
 ### Test without Outlook: the host simulator
 
 Outlook is where the pane is used and the hardest place to debug it. `e2e/office-sim/` is therefore a **fake Office.js host**, built
@@ -295,6 +316,7 @@ The page is the **real task pane** with a control bar on top — one button per 
 |---|---|---|
 | `openItem("A".."G")` | `A` … `G` | selects that message and raises `ItemChanged` (as a pinned pane gets it) |
 | `openItem(id, { silent: true })` | `open B silently` | swaps the item **without** the event — the case the `visibilitychange` / `focus` safety net catches |
+| `setHostBug("stuckItem")` | — | a broken host: `openItem` then only moves the list selection (`getSelectedItemsAsync`); `mailbox.item` and `ItemChanged` stay on the previous message (office-js#5827 / #5965). `setHostBug(null)` restores it |
 | `closeItem()` | `close` | `item = null` + `ItemChanged` (message closed) |
 | `reloadPane()` | `reload pane` | Outlook re-creating the pane iframe (`location.reload()`, same item kept in `sessionStorage`) |
 | `select([...])` | `select 3` / `select 2` | a multi-selection: `getSelectedItemsAsync` + `SelectedItemsChanged` |

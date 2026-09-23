@@ -519,7 +519,20 @@
     return state.readItem;
   }
 
+  function refFor(fx) {
+    return { itemId: fx.itemId, conversationId: fx.conversationId, subject: fx.subject, itemType: "message", itemMode: "read" };
+  }
+
   function selectedRefs() {
+    // "stuck" host: the list selection moved, the host item did not.
+    if (state.listKeys && state.listKeys.length) {
+      return state.listKeys
+        .map(function (k) {
+          return fixtureFor(k);
+        })
+        .filter(Boolean)
+        .map(refFor);
+    }
     if (state.surface === "selection") {
       return state.selection
         .map(function (k) {
@@ -818,6 +831,15 @@
     openItem: function (key, opts) {
       var fx = fixtureFor(key);
       if (!fx) throw new Error("Unknown fixture: " + key);
+      if (state.hostBug === "stuckItem") {
+        // Outlook bug mode: the message list selects `key`, but neither
+        // `mailbox.item` nor `ItemChanged` follow (office-js#5827 / #5965).
+        state.listKeys = [fx.key];
+        writeStored(state);
+        log("sim.openItem", fx.key + " (stuck host: list only)");
+        return fx.itemId;
+      }
+      state.listKeys = null;
       state.surface = "read";
       state.itemKey = fx.key;
       state.selection = [];
@@ -828,6 +850,16 @@
       log("sim.openItem", fx.key + (opts && opts.silent ? " (silent)" : ""));
       if (!(opts && opts.silent)) fireMailboxEvent("ItemChanged");
       return fx.itemId;
+    },
+    /**
+     * Simulate a broken host. `"stuckItem"`: `openItem` only moves the list
+     * selection (`getSelectedItemsAsync`); `mailbox.item` and `ItemChanged`
+     * stay on the previous message. `null` restores a well-behaved host.
+     */
+    setHostBug: function (bug) {
+      state.hostBug = bug || null;
+      if (!bug) state.listKeys = null;
+      log("sim.setHostBug", String(bug));
     },
     /** Close the opened message: `item` becomes null and `ItemChanged` fires. */
     closeItem: function (opts) {

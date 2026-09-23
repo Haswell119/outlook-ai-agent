@@ -83,6 +83,7 @@ interface OaoSimControls {
   closeItem: () => void;
   reloadPane: () => void;
   select: (keys: string[]) => void;
+  setHostBug: (bug: "stuckItem" | null) => void;
   compose: (draft: string) => void;
   setLatency: (ms: number) => number;
   failNext: (api: string) => void;
@@ -102,6 +103,7 @@ const host = (page: Page) => ({
   close: () => page.evaluate(() => window.__oaoSim.closeItem()),
   reload: () => page.evaluate(() => window.__oaoSim.reloadPane()),
   select: (keys: string[]) => page.evaluate((k) => window.__oaoSim.select(k), keys),
+  hostBug: (bug: "stuckItem" | null) => page.evaluate((b) => window.__oaoSim.setHostBug(b), bug),
   compose: (draft: string) => page.evaluate((d) => window.__oaoSim.compose(d), draft),
   latency: (ms: number) => page.evaluate((m) => window.__oaoSim.setLatency(m), ms),
   state: () => page.evaluate(() => window.__oaoSim.state()),
@@ -152,6 +154,32 @@ test.describe("switching between messages (the pinned pane)", () => {
     await expect(summary(page)).toBeVisible({ timeout: 40_000 });
     await expect(subjectLine(page)).toContainText("relevé trimestriel");
     await expect(summary(page)).not.toContainText("open points");
+  });
+
+  test("a host that raises nothing and keeps the old mailbox.item: the pane still follows the list", async ({ page }) => {
+    await openPane(page, { lang: "en" });
+    const h = host(page);
+    await expect(summary(page)).toBeVisible({ timeout: 40_000 });
+    await expect(subjectLine(page)).toContainText("Atlas project — open points");
+
+    // Outlook's known bugs: the user clicks B in the list, but neither
+    // ItemChanged nor Office.context.mailbox.item follow. No focus either.
+    await h.hostBug("stuckItem");
+    await h.open("B");
+    await expect(subjectLine(page)).toContainText("relevé trimestriel", { timeout: 10_000 });
+    await expect(summary(page)).toBeVisible({ timeout: 40_000 });
+    await expect(summary(page)).toContainText("relevé trimestriel");
+    await expect(page.getByText("Atlas project — open points", { exact: false })).toHaveCount(0);
+    // B was read by id (loadItemByIdAsync), and unloaded.
+    expect((await h.calls("loadItemByIdAsync")).length).toBeGreaterThan(0);
+
+    // And on to a third message, still without any event.
+    await h.open("E");
+    await expect(subjectLine(page)).toContainText("RE : Atlas — relevé trimestriel", { timeout: 10_000 });
+    // E is a short acknowledgement: triaged, no model call — and nothing left from B.
+    await expect(page.getByTestId("triage-card")).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId("triage-card")).toContainText("RE : Atlas — relevé trimestriel");
+    await expect(page.getByText("TR : Atlas", { exact: false })).toHaveCount(0);
   });
 
   test("an item swapped without ItemChanged is recovered when the pane is focused", async ({ page }) => {

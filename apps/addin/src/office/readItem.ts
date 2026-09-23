@@ -40,6 +40,25 @@ export function currentItemId(): string {
     // Browser preview has a fixed sample item, so its id is stable too.
     return previewItem().id;
   }
+  const o = activeOverride();
+  return o ? o.id : hostItemId();
+}
+
+/** Conversation of the message the pane is about (override-aware), `""` when unknown. */
+export function currentConversationId(): string {
+  if (!isOfficeAvailable()) return previewItem().conversationId ?? "";
+  const o = activeOverride();
+  if (o) return o.conversationId;
+  try {
+    const item = officeGlobal()?.context?.mailbox?.item as unknown as { conversationId?: unknown } | null | undefined;
+    return typeof item?.conversationId === "string" ? item.conversationId : "";
+  } catch {
+    return "";
+  }
+}
+
+/** `Office.context.mailbox.item.itemId`, exactly as the host reports it (`""` = no item). */
+export function hostItemId(): string {
   try {
     const item = officeGlobal()?.context?.mailbox?.item as unknown as { itemId?: unknown } | null | undefined;
     const id = item?.itemId;
@@ -47,6 +66,106 @@ export function currentItemId(): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * EWS ids come back base64 or base64url depending on the API and the host;
+ * compare them in one canonical form.
+ */
+export function normalizeItemId(id: string | undefined | null): string {
+  return (id ?? "").trim().replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
+}
+
+export function sameItemId(a: string | undefined | null, b: string | undefined | null): boolean {
+  const na = normalizeItemId(a);
+  return na !== "" && na === normalizeItemId(b);
+}
+
+/* ---------------------------------------------------------------------------
+ * Selection override.
+ *
+ * Outlook is supposed to swap `Office.context.mailbox.item` and raise
+ * `ItemChanged` when the user selects another message while the pane stays
+ * open. Known host bugs break both halves (the event is not raised for some
+ * messages; or it is, but `mailbox.item` still points at the first message —
+ * OfficeDev/office-js#5827, #5965). When the pane learns from
+ * `getSelectedItemsAsync` that the list selection moved to a message the host
+ * item did not follow, it records that message here: `currentItemId()` /
+ * `currentItemSubject()` report it and `readCurrentItem()` loads it by id
+ * (`loadItemByIdAsync`). The override clears itself as soon as the host item
+ * changes, i.e. when Outlook catches up.
+ * ------------------------------------------------------------------------- */
+
+interface SelectionOverride {
+  id: string;
+  subject: string;
+  conversationId: string;
+  /** Host item id when the override was set; any change means Outlook caught up. */
+  baseId: string;
+}
+
+let override: SelectionOverride | null = null;
+
+export function setSelectedItemOverride(ref: { itemId: string; subject?: string; conversationId?: string } | null): void {
+  override = ref ? { id: ref.itemId, subject: ref.subject ?? "", conversationId: ref.conversationId ?? "", baseId: hostItemId() } : null;
+}
+
+function activeOverride(): SelectionOverride | null {
+  if (!override) return null;
+  const host = hostItemId();
+  if (normalizeItemId(host) !== normalizeItemId(override.baseId) || sameItemId(host, override.id)) {
+    override = null;
+  }
+  return override;
+}
+
+/** True when the pane shows a message the host item has not followed (diagnostics / tests). */
+export function hasSelectedItemOverride(): boolean {
+  return activeOverride() !== null;
+}
+
+/** True when whole messages can be loaded from their id (Mailbox 1.15). */
+export function isItemLoadSupported(): boolean {
+  try {
+    const mailbox = officeGlobal()?.context?.mailbox as unknown as { loadItemByIdAsync?: unknown } | undefined;
+    return isOfficeAvailable() && isSetSupported("Mailbox", "1.15") && typeof mailbox?.loadItemByIdAsync === "function";
+  } catch {
+    return false;
+  }
+}
+
+/** One `loadItemByIdAsync` at a time: Outlook requires `unloadAsync` before the next load. */
+let loadChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Load a message by its EWS id and map it, then unload it. Serialised across
+ * the whole pane (the selection view loads its messages through here too).
+ * Returns `null` when the host cannot load it.
+ */
+export function loadMessageById(itemId: string): Promise<EmailContext | null> {
+  const run = async (): Promise<EmailContext | null> => {
+    if (!isItemLoadSupported()) return null;
+    const mailbox = officeGlobal()!.context.mailbox as unknown as {
+      loadItemByIdAsync: (id: string, cb: (r: Office.AsyncResult<Office.MessageRead>) => void) => void;
+    };
+    let loaded: (Office.MessageRead & { unloadAsync?: (cb: (r: Office.AsyncResult<void>) => void) => void }) | undefined;
+    try {
+      loaded = (await asyncResult<Office.MessageRead>((cb) => mailbox.loadItemByIdAsync(itemId, cb))) as typeof loaded;
+      if (!loaded) return null;
+      const email = await readMessageItem(loaded, itemId);
+      return email.id ? email : { ...email, id: itemId };
+    } catch {
+      return null;
+    } finally {
+      if (loaded && typeof loaded.unloadAsync === "function") {
+        const item = loaded;
+        await asyncResult<void>((cb) => item.unloadAsync!(cb)).catch(() => undefined);
+      }
+    }
+  };
+  const p = loadChain.then(run, run);
+  loadChain = p.catch(() => undefined);
+  return p;
 }
 
 /**
@@ -59,6 +178,8 @@ export function currentItemId(): string {
  */
 export function currentItemSubject(): string {
   if (!isOfficeAvailable()) return previewItem().subject;
+  const o = activeOverride();
+  if (o) return o.subject;
   try {
     const item = officeGlobal()?.context?.mailbox?.item as unknown as { subject?: unknown } | null | undefined;
     return typeof item?.subject === "string" ? item.subject : "";
@@ -85,6 +206,15 @@ export async function readCurrentItem(): Promise<EmailContext> {
     const sample = previewItem();
     cacheItem(sample);
     return sample;
+  }
+  const o = activeOverride();
+  if (o) {
+    // The list selection moved but `mailbox.item` did not follow: read the
+    // selected message by id. If that fails, the host item is still the wrong
+    // message, so it must not be shown in its place.
+    const loaded = await loadMessageById(o.id);
+    if (loaded) return loaded;
+    throw new NoItemError();
   }
   const item = officeGlobal()!.context.mailbox.item as unknown as Office.MessageRead | null;
   // The message was closed (or the selection became a multi-selection) while we

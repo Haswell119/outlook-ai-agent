@@ -22,7 +22,7 @@
 import type { EmailContext, ThreadContext } from "@oao/shared";
 import { hashParts } from "@/util/hash";
 import { asyncResult, isOfficeAvailable, isSetSupported, officeGlobal, queryParam } from "./env";
-import { readMessageItem } from "./readItem";
+import { isItemLoadSupported, loadMessageById } from "./readItem";
 import { cacheItem } from "./cache";
 import { sampleEmail, sampleNewsletter, sampleThread } from "./sample";
 
@@ -82,15 +82,8 @@ export function isMultiSelectSupported(): boolean {
   }
 }
 
-/** True when whole messages can be loaded from their id. */
-export function isItemLoadSupported(): boolean {
-  try {
-    const mailbox = officeGlobal()?.context?.mailbox as unknown as { loadItemByIdAsync?: unknown } | undefined;
-    return isOfficeAvailable() && isSetSupported("Mailbox", "1.15") && typeof mailbox?.loadItemByIdAsync === "function";
-  } catch {
-    return false;
-  }
-}
+/** True when whole messages can be loaded from their id (re-exported from `readItem`). */
+export { isItemLoadSupported };
 
 /**
  * Browser-preview test hook: `?selection=3` fakes a three-message selection so
@@ -156,20 +149,10 @@ function shallowItem(ref: SelectedItemRef): EmailContext {
   };
 }
 
-async function loadFullItem(itemId: string): Promise<EmailContext | null> {
-  if (!isItemLoadSupported()) return null;
-  const mailbox = officeGlobal()!.context.mailbox as unknown as {
-    loadItemByIdAsync: (id: string, cb: (r: Office.AsyncResult<Office.MessageRead>) => void) => void;
-  };
-  try {
-    const loaded = await asyncResult<Office.MessageRead>((cb) => mailbox.loadItemByIdAsync(itemId, cb));
-    if (!loaded) return null;
-    const email = await readMessageItem(loaded, itemId);
-    return email.id ? email : { ...email, id: itemId };
-  } catch {
-    // A single unreadable item must not sink the whole selection.
-    return null;
-  }
+/** One message by id, loaded then unloaded (Outlook allows one loaded item at a time). */
+function loadFullItem(itemId: string): Promise<EmailContext | null> {
+  // A single unreadable item must not sink the whole selection: `null` = degrade to the descriptor.
+  return loadMessageById(itemId);
 }
 
 /**
