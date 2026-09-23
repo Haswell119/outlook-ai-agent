@@ -88,6 +88,18 @@ bundle contains exactly one React 18. Check with `npm ls react -w @oao/addin`.
    messages. Minimal scopes: `Mail.Read` (phase 1), then `Mail.ReadWrite`,
    `Tasks.ReadWrite`, `Calendars.ReadWrite`.
 
+**Optional structured-decision engine (Laya, [`docs/LAYA.md`](LAYA.md)).** With
+`DECISION_PROVIDER=laya` the orchestrator also calls a local `laya-serve`
+(separate Deployment, `POST /v1/systemone`, offline, CPU) for five closed
+decisions — urgency, business area, suggested folder, reply expected, action
+required — before (active mode) or next to (shadow mode) the LLM. Disabled by
+default; the orchestrator never depends on it to be ready.
+
+```
+AI Orchestrator ──HTTP (bearer)──► laya-serve :8000 (english / multilingual checkpoints, /models read-only)
+       └─ circuit breaker + bounded queue; failure / low confidence ⇒ historic LLM prompt
+```
+
 **Actions have an execution target** (`client` | `server` | `none`, see contract):
 
 | Action                | Target | How                                                   | Risk |
@@ -119,12 +131,17 @@ apps/orchestrator/src/
 │   ├── risk/                    # risk scoring, governance matrix (action → risk → approval)
 │   ├── compliance/              # rules engine (external recipient, labels, patterns, phishing heuristics)
 │   ├── automation/              # routine detection (pattern mining over UserActionEvents), simulation
-│   └── prompts/                 # prompt builders + JSON output schemas (FR/EN)
-├── ports/                       # interfaces: LlmProvider, EmbeddingProvider, AuditRepository, EmailIndexRepository,
-│                                #   GraphClient, PolicyRepository, AutomationRepository, ActionRepository, EscalationRepository
+│   ├── decisions/               # structured decisions: taxonomy (zod), compact state, questions, response
+│   │                            #   mapper, confidence policy, routing, shadow comparison, evaluation metrics
+│   └── prompts/                 # prompt builders + JSON output schemas (FR/EN), incl. the reduced narrative prompt
+├── ports/                       # interfaces: LlmProvider, EmbeddingProvider, DecisionProvider, AuditRepository,
+│                                #   EmailIndexRepository, GraphClient, PolicyRepository, AutomationRepository,
+│                                #   ActionRepository, EscalationRepository
 ├── adapters/
 │   ├── llm/openai-compatible.ts # /v1/chat/completions (+ JSON mode), /v1/embeddings ; retries, timeouts
 │   ├── llm/mock.ts              # deterministic provider for tests/demo (LLM_PROVIDER=mock)
+│   ├── decision/                # DecisionProvider: laya-http (fetch, zod, typed errors), mock, disabled,
+│   │                            #   resilient (bounded queue + dedicated circuit breaker)
 │   ├── db/                      # pg pool, migrations runner (plain SQL files in /migrations), repositories
 │   ├── graph/                   # Microsoft Graph client with OBO (msal-node), disabled when GRAPH_ENABLED=false
 │   └── notify/                  # webhook notifier
@@ -150,6 +167,12 @@ Rules:
   actions return `pending_client` with a client instruction.
 - Bilingual: detect the email language (FR/EN), answer in the user's language
   (`Accept-Language` or `language` field), prompts include the target language.
+- Structured decisions (`services/EmailDecisionService.ts`, optional): depends on the
+  `DecisionProvider` port only; builds a compact state (no addresses, no ids, no
+  attachment content), asks hierarchically (area, then folder within the area),
+  gates every answer on its confidence and never throws — an engine failure is a
+  result the analysis falls back from. When disabled, responses, cache keys and
+  audit rows are byte-identical to the historic ones. See [`LAYA.md`](LAYA.md).
 
 ## 5. Add-in internals
 
@@ -375,6 +398,17 @@ with no external dependency. Any `FOO_FILE=/path` is read at boot and fills `FOO
 | `NOTIFY_WEBHOOK_URL` | — | internal webhook for the `notify` action |
 | `DEFAULT_LANGUAGE` | `fr` | `fr` \| `en` |
 | `INTERNAL_DOMAINS` | `northbridge.example` | overrides `DEFAULT_POLICY.internalDomains` |
+| `DECISION_PROVIDER` | `disabled` | `disabled` \| `mock` \| `laya` — structured-decision engine ([`LAYA.md`](LAYA.md)) |
+| `LAYA_MODE` | `shadow` | `shadow` (measured, never shown) \| `active` |
+| `LAYA_BASE_URL` / `LAYA_API_KEY` | `http://laya:8000` / — | engine URL; bearer (`LAYA_API_KEY_FILE`), required in active mode in production |
+| `LAYA_TIMEOUT_MS` / `LAYA_MAX_RESPONSE_BYTES` | `5000` / `1 MiB` | per-call budget |
+| `LAYA_MIN_CONFIDENCE` / `LAYA_FOLDER_MIN_CONFIDENCE` | `0.75` / `0.80` | confidence gates — **not calibrated**, choose them on annotated data |
+| `LAYA_FALLBACK_TO_LLM` | `true` | engine failure → historic LLM prompt (else rules only) |
+| `LAYA_CONCURRENCY` / `LAYA_CIRCUIT_FAILURE_THRESHOLD` / `LAYA_CIRCUIT_COOLDOWN_MS` | `1` / `5` / `30000` | bounded queue + dedicated circuit breaker |
+| `LAYA_TAXONOMY_FILE` | bundled example | versioned areas/folders JSON — required in active mode in production |
+| `LAYA_DECISION_VERSION` / `LAYA_INPUT_MAX_CHARS` | `v1` / `4000` | cache-busting version; state size cap |
+| `LAYA_MODEL_STRATEGY` / `LAYA_FIXED_MODEL` | `language` / — | `language` \| `auto` \| `fixed` |
+| `LAYA_SHADOW_SAMPLE_RATE` | `1` | share of analyses consulted in shadow mode |
 
 ### 8.2 Add-in — build-time variables
 
@@ -507,6 +541,10 @@ de redémarrer l'API sans interrompre un cycle de synchronisation.
       │  └────────┬─────────┘
       │           │           ┌────────────────────────────┐
       ├───────────┴──────────►│ LLM interne (vLLM, Qwen3)  │ (CIDR déclaré)
+      │                       └────────────────────────────┘
+      │                       ┌────────────────────────────┐
+      ├──────────────────────►│ oao-laya ×1 (optionnel)    │ laya-serve 8000, hors ligne,
+      │                       │ PVC poids (lecture seule)  │ aucune sortie réseau
       │                       └────────────────────────────┘
   ┌───▼──────────────────┐
   │ oao-postgres (STS)   │  PVC nutanix-volume 20Gi

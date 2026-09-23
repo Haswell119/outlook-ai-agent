@@ -24,6 +24,7 @@
 13. [Rétention et purge de l'audit](#13-rétention-et-purge-de-laudit)
 14. [Incidents fréquents](#14-incidents-fréquents)
 15. [Dimension des embeddings (pgvector)](#15-dimension-des-embeddings-pgvector)
+16. [Moteur de décision Laya (optionnel)](#16-moteur-de-décision-laya-optionnel)
 
 ---
 
@@ -38,6 +39,7 @@
 | Base | `statefulset/oao-postgres` | audit, policies, index pgvector | **arrêt total** : rien n'est audité, donc rien ne doit tourner |
 | Migrations | `job/oao-migrate` (hook Helm) | schéma | un upgrade ne démarre pas |
 | Sauvegarde | `cronjob/oao-backup` | `pg_dump` quotidien | perte de données en cas de sinistre |
+| Laya (optionnel) | `deploy/oao-laya` + PVC `oao-laya-models` | décisions structurées (urgence, domaine, dossier…) | repli automatique sur le LLM ; **aucune** indisponibilité de l'API (§16) |
 
 Le worker s'élit leader via un **advisory lock PostgreSQL** : un redémarrage
 progressif ne peut pas produire deux ordonnanceurs simultanés. Garder
@@ -62,7 +64,9 @@ npm run smoke -- --url https://api.oao.northbridge.example --token "$JWT"
 ```
 
 Distinguer les deux échecs : `live` KO = bug/blocage du processus ; `ready` KO
-= dépendance externe. Un pod qui boucle en `CrashLoopBackOff` alors que
+= dépendance externe. Laya n'intervient jamais dans `ready` : quand il est
+activé, `/api/v1/health` ajoute un check `laya` (dégradé si injoignable ; le
+statut global n'est dégradé qu'en mode `active`). Un pod qui boucle en `CrashLoopBackOff` alors que
 `ready` seul échouait signale une liveness mal réglée, pas une panne.
 
 ## 3. Métriques
@@ -161,6 +165,9 @@ Règles livrées par le chart (`PrometheusRule oao`, seuils dans
 | `OaoMailboxSyncLag` | retard de sync > 60 min | warning | §12 |
 | `OaoWorkerAbsent` | aucune cible `-worker` UP 15 min | warning | pas de brief ni de rétention : redémarrer le worker |
 | `OaoDatabaseUnreachable` | `oao_db_up == 0` pendant 5 min | critical | **incident compliance** : plus rien n'est audité, §14 |
+| `OaoLayaCircuitOpen` *(si Laya activé)* | `oao_laya_circuit_state == 2` pendant 10 min | warning | §16 — décisions repliées sur le LLM |
+| `OaoLayaErrorRateHigh` *(si Laya activé)* | > 20 % d'appels Laya en échec sur 15 min | warning | `oao_laya_requests_total{outcome}` : clé, poids, saturation |
+| `OaoLayaLowConfidenceRateHigh` *(si Laya activé)* | > 50 % des domaines sous le seuil sur 2 h | info | taxonomie ou seuils à revoir ([`LAYA.md`](LAYA.md) §7) |
 
 Toute alerte `critical` doit joindre l'astreinte ; `OaoDatabaseUnreachable` et
 `OaoApiDown` justifient l'ouverture d'un incident formel (traçabilité).
@@ -321,6 +328,7 @@ l'expansion en ligne) quand l'occupation dépasse 70 %.
 | `ADMIN_API_TOKEN` | idem | 90 jours ou départ | changer, redémarrer API **et** dashboard ensemble |
 | `METRICS_TOKEN` | idem | 90 jours | redémarrer l'API ; Prometheus relit le Secret automatiquement |
 | `LLM_API_KEY` | idem | selon l'équipe GPU | souvent vide en interne |
+| `outlook-ai-laya` (`api-key`) | Secret dédié (Laya ↔ orchestrateur) | 90 jours | modifier le Secret puis `rollout restart deploy/oao-laya deploy/oao-api deploy/oao-worker` **ensemble** (sinon 401 → circuit ouvert → repli LLM, sans panne) |
 | `POSTGRES_PASSWORD` / `DATABASE_URL` | idem | selon politique DB | `ALTER ROLE … PASSWORD` puis mise à jour du Secret, puis rollout |
 | Certificats TLS | cert-manager | automatique (`renewBefore: 360h`) | `kubectl -n oao get certificate` |
 
@@ -666,3 +674,49 @@ pas rattrapable est renvoyée comme `500 database_error` avec un
 `correlationId` — le message du driver reste dans les logs, jamais dans la
 réponse.
 
+## 16. Moteur de décision Laya (optionnel)
+
+Référence complète : [`docs/LAYA.md`](LAYA.md). Laya est **optionnel et
+remplaçable** : son absence ou sa panne dégrade les décisions structurées, jamais
+le service (circuit breaker dédié + repli sur le prompt LLM historique ; `/ready`
+n'en dépend pas).
+
+État d'un coup d'œil :
+
+```bash
+kubectl -n oao get deploy,pod,pvc -l app.kubernetes.io/component=laya
+kubectl -n oao logs deploy/oao-laya -c models          # présence des poids (init container)
+curl -sS https://api.oao.northbridge.example/api/v1/health | jq '.checks.laya'
+# Dashboard : Système → carte « Moteur de décision » (mode, circuit, taux de repli, latence)
+```
+
+| Symptôme | Cause probable | Action |
+|---|---|---|
+| Pod `oao-laya` en `Init:Error`, log `missing checkpoint(s)` (code 3) | PVC vide ou incomplet | remplir le PVC ([`LAYA.md`](LAYA.md) §11) : `laya.weights.download.enabled=true` le temps d'un démarrage (miroir interne), puis `false` |
+| `oao_laya_requests_total{outcome="unauthorized"}` | clé différente entre Laya et l'orchestrateur | redémarrer les trois Deployments après toute modification du Secret `outlook-ai-laya` |
+| `outcome="model_error"` (HTTP 422) | checkpoint absent du cache hors ligne, erreur de chargement | logs `kubectl -n oao logs deploy/oao-laya` ; vérifier `laya.model.checkpoints` et le PVC |
+| `outcome="queue_timeout"`, latence p95 en hausse | Laya saturé (une inférence à la fois par pod) | augmenter `laya.replicaCount` **et** `LAYA_CONCURRENCY` (RWO : même nœud, ou poids embarqués) ; ou `LAYA_SHADOW_SAMPLE_RATE` < 1 en shadow |
+| `outcome="timeout"` | CPU insuffisant, premier chargement | `laya.model.threads` ≤ CPU limit, `LAYA_TIMEOUT_MS`, ressources |
+| `outcome="network"` | NetworkPolicy, Service, pod non prêt | `kubectl -n oao get networkpolicy oao-laya oao-api -o yaml` |
+| Beaucoup de `low_confidence` | seuils non adaptés au modèle / taxonomie floue | évaluer (`npm run eval:laya`) avant de toucher aux seuils ; ne jamais les baisser « pour voir » en active |
+
+Retour arrière (du plus léger au plus complet) :
+
+1. `laya.mode: shadow` — réponses historiques, Laya toujours mesuré ;
+2. `laya.enabled: false` — comportement historique octet pour octet (réponses,
+   clés de cache, audit), le Deployment Laya disparaît, le PVC est conservé ;
+3. supprimer le PVC `oao-laya-models` si Laya est abandonné.
+
+Changer de modèle ou de poids : [`LAYA.md`](LAYA.md) §17 — toujours incrémenter
+`LAYA_DECISION_VERSION` et repasser par le mode shadow.
+
+Requêtes utiles :
+
+```promql
+sum by (outcome) (rate(oao_laya_requests_total[15m]))
+histogram_quantile(0.95, sum by (le) (rate(oao_laya_request_duration_seconds_bucket[10m])))
+sum by (reason) (rate(oao_laya_fallbacks_total[1h]))                 # mode active
+sum by (question, result) (rate(oao_laya_shadow_comparisons_total[1d])) # mode shadow
+sum by (question) (rate(oao_laya_low_confidence_total[1h]))
+max(oao_laya_circuit_state)
+```

@@ -284,6 +284,39 @@ Détail : [`SETUP.md`](SETUP.md) §3.
 
 ---
 
+## 11 bis. Moteur de décision Laya (seulement si `laya.enabled`)
+
+> Laya est **optionnel** : un go-live sans lui est le cas nominal
+> (`laya.enabled: false`). Ces cases ne s'appliquent que si l'on décide de
+> l'activer. Référence : [`LAYA.md`](LAYA.md).
+
+- [ ] Image interne construite depuis `infra/docker/laya/Dockerfile`, tag
+      épinglé (`0.3.9-oao.N`, jamais `latest`), poussée sur le registre interne,
+      scannée ; `laya.image.pullSecrets` si nécessaire.
+- [ ] Secret `outlook-ai-laya` (clé `api-key`) créé, rotation planifiée
+      ([`OPERATIONS.md`](OPERATIONS.md) §8).
+- [ ] Poids présents **avant** démarrage (PVC rempli depuis un miroir interne, ou
+      image avec poids embarqués) ; commit des poids noté
+      (`laya.weights.revision`) ; `laya.weights.download.enabled: false` et
+      `laya.offline: true` en production ; NetworkPolicy `oao-laya` avec
+      `egress: []` constatée.
+- [ ] Taxonomie métier validée par les utilisateurs (≤ 10 options par question
+      de préférence), versionnée, fournie par ConfigMap
+      (`laya.taxonomy.existingConfigMap`).
+- [ ] **Mode shadow** d'abord, sur une durée définie (≥ 2 semaines), avec suivi de
+      `oao_laya_shadow_comparisons_total`, `oao_laya_low_confidence_total`,
+      latence et `OaoLaya*`.
+- [ ] Jeu interne **annoté** (≥ 300 emails représentatifs, hors Git), évaluation
+      `npm run eval:laya` archivée : exactitude acceptée, couverture, confusions,
+      stabilité, latence. **Les seuils par défaut ne sont pas une preuve de
+      calibration** : seuils retenus justifiés par le balayage.
+- [ ] Erreurs mesurées et acceptées **avant** activation (qui a validé, quels
+      taux) ; rappel écrit que l'utilisateur valide chaque déplacement proposé.
+- [ ] Passage en `laya.mode: active` décidé et daté ; retour arrière testé
+      (`laya.mode: shadow`, puis `laya.enabled: false`).
+
+---
+
 ## 12. Plan de rollback
 
 À écrire **avant** le go-live, pas pendant l'incident.
@@ -310,6 +343,8 @@ Détail : [`SETUP.md`](SETUP.md) §3.
       sans valeur ajoutée IA — acceptable pour isoler une panne, **jamais**
       comme état durable (les analyses produites seraient trompeuses).
       `graph.enabled: false` coupe le précalcul sans casser le volet.
+      Si Laya est activé : `laya.mode: shadow` puis `laya.enabled: false`
+      rétablit le comportement historique à l'identique.
 - [ ] Retrait du manifest : Integrated apps → l'app → *Remove*, effet sous
       quelques heures côté clients. Prévoir la communication associée.
 - [ ] Critère de déclenchement du rollback écrit et chiffré (par exemple :

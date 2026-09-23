@@ -69,6 +69,22 @@ Rules given to the model: max 5 actions, only allowed action types (unknown type
 schema, never fail the whole answer), never suggest sending or deleting. The service adds the phishing
 screening (`domain/compliance/phishing.ts`) and rule-based actions (escalate on phishing, flag when attachments).
 
+## 1b. Narrative analysis — `narrative.ts` (`useCase: email_narrative`)
+
+Used only when the local decision engine (Laya, `DECISION_PROVIDER=laya`, `LAYA_MODE=active`,
+[`docs/LAYA.md`](../../../docs/LAYA.md)) produced decisions that passed the confidence gate.
+The decisions are given to the model as system data, in a `### SYSTEM DECISIONS` block placed
+**before** the email (urgency, business area, suggested folder, reply expected, action required;
+"not determined (do not infer it)" for the others), and the model produces the generative fields
+only — summary, decisions, pending tasks, risks, non-filing suggested actions, quick replies.
+Output schema `EmailNarrativeLlmSchema`: no `classification`, `urgency`, `folder` or
+`replyExpected`; filing actions (`categorize`, `classify_email`, `move_to_folder`, `archive`) are
+dropped if the model adds them anyway. An email that forges its own `### SYSTEM DECISIONS` /
+`### END EMAIL` lines is neutralised like the other delimiters (`format.ts`).
+
+Otherwise (engine disabled, shadow mode, failure, low confidence) the historic prompt (§1) is used
+unchanged — same text, same cache key.
+
 ## 2. Thread synthesis — `thread.ts` (`useCase: thread_synthesis`)
 
 Input: a `ThreadContext`. Output (`ThreadSynthesisLlmSchema`): `executiveSummary`, `missingDocuments`

@@ -215,6 +215,30 @@ concurrence n'ajoute pas de débit, elle allonge la latence de tout le monde.
 État exposé dans `SystemStatus.llmQueue` (`GET /api/v1/admin/system`) et en
 Prometheus (`oao_llm_queue_depth`, `oao_llm_circuit_open`).
 
+### Moteur de décision local (Laya, optionnel)
+
+Avec `DECISION_PROVIDER=laya` en mode `active` ([`docs/LAYA.md`](../../../docs/LAYA.md)),
+les décisions fermées (urgence, domaine, dossier, réponse attendue, action
+requise) sont demandées à un petit modèle local sur CPU **avant** le LLM. Quand
+elles passent le seuil de confiance, le LLM reçoit un **prompt narratif réduit**
+(les décisions lui sont données, il ne produit ni classification ni urgence ni
+dossier) ; sinon il reçoit le prompt historique. Laya **ne supprime pas** d'appel
+LLM par email : il en réduit la sortie et le travail, et déplace les décisions
+fermées hors du GPU.
+
+Garde-fous propres, indépendants de ceux du LLM : file bornée
+(`LAYA_CONCURRENCY`, attente ≤ `LAYA_TIMEOUT_MS`), circuit breaker dédié
+(`LAYA_CIRCUIT_FAILURE_THRESHOLD` / `LAYA_CIRCUIT_COOLDOWN_MS`). Le triage, le
+cache et le coalescing évitent aussi les appels à Laya
+(`oao_laya_model_calls_saved_total{reason="triage|cache|coalesced"}`), et la
+hiérarchie évite la seconde question (`single_folder`, `other_area`,
+`no_folders`, `area_not_accepted`).
+
+Mesuré (4 vCPU, jeu synthétique, indicatif) : ~1,2 s p50 / ~3,2 s p95 par email,
+une inférence à la fois par pod ; avec les checkpoints publiés et les seuils par
+défaut, la plupart des décisions retombent sous le seuil — le gain réel est à
+mesurer en shadow sur vos emails avant de compter dessus.
+
 ---
 
 ## 8. Dimensionnement pour ~50 utilisateurs
@@ -302,6 +326,9 @@ fraction du coût, et libère le gros modèle pour la prose.
 | `EMBEDDING_BATCH_SIZE` | `64` | Textes par appel `/embeddings` |
 | `EMBEDDING_CACHE_ENABLED` | `true` | Ré-indexation quasi gratuite |
 | `DAILY_BRIEF_ENABLED` / `DAILY_BRIEF_HOUR` | `true` / `7` | 1 petit appel par utilisateur et par jour |
+| `DECISION_PROVIDER` / `LAYA_MODE` | `disabled` / `shadow` | `active` : décisions fermées hors GPU, prompt LLM réduit quand elles sont sûres |
+| `LAYA_MIN_CONFIDENCE` / `LAYA_FOLDER_MIN_CONFIDENCE` | `0.75` / `0.80` | Plus bas = plus de prompts réduits, plus d'erreurs acceptées (à fixer sur données annotées) |
+| `LAYA_SHADOW_SAMPLE_RATE` | `1` | Part des analyses mesurées en shadow (coût CPU Laya seulement) |
 
 ---
 
@@ -338,6 +365,11 @@ sum(rate(oao_llm_calls_total{outcome="ok"}[1h]))
 
 # Attente en file, par voie
 histogram_quantile(0.95, sum by (le, priority) (rate(oao_llm_queue_wait_seconds_bucket[5m])))
+
+# Laya (si activé) : appels évités, part des décisions sous le seuil, latence
+sum by (reason) (oao_laya_model_calls_saved_total)
+sum by (question) (rate(oao_laya_low_confidence_total[1h]))
+histogram_quantile(0.95, sum by (le) (rate(oao_laya_request_duration_seconds_bucket[5m])))
 ```
 
 Et dans l'audit, chaque ligne porte `details.analysisSource`, `details.cached`,

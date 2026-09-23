@@ -17,6 +17,7 @@
 7. [Checklist de vérification](#7-checklist-de-vérification)
 8. [Jour 2](#8-jour-2)
 9. [Dépannage](#9-dépannage)
+10. [Moteur de décision Laya (optionnel)](#10-moteur-de-décision-laya-optionnel)
 
 ---
 
@@ -36,6 +37,7 @@ Un seul chart Helm — `infra/helm/outlook-ai-orchestrator` — produit :
 | Ingress ×3 | `api.`, `admin.`, `addin.` via Traefik | TLS cert-manager |
 | NetworkPolicy ×8 | default-deny + flux explicites | — |
 | ServiceMonitor / PrometheusRule / ConfigMap Grafana | observabilité kube-prometheus-stack | — |
+| *(optionnel, `laya.enabled`)* Deployment `oao-laya` + Service + PVC `oao-laya-models` | moteur de décision local Laya (§10) | 1 réplique, 500m/2Gi → 4 CPU/8Gi, PVC 5Gi `nutanix-volume` |
 
 Total en régime nominal : ~4,3 CPU et ~7 Gi de `requests`, 20Gi de stockage
 persistant (+50Gi pour les sauvegardes). Prévoir la marge HPA : ~7 CPU en
@@ -294,3 +296,54 @@ Checklist fonctionnelle :
 | Aucune cible dans Prometheus | labels du ServiceMonitor non sélectionnés | aligner `metrics.serviceMonitor.labels` sur le `serviceMonitorSelector` du Prometheus de Kommander |
 | `/metrics` renvoie `200` sans jeton | `METRICS_TOKEN` vide | renseigner le secret, `rollout restart` |
 | Volume PVC `Pending` | mauvaise StorageClass | `kubectl get sc`, ajuster `postgres.persistence.storageClass` |
+
+## 10. Moteur de décision Laya (optionnel)
+
+Référence : [`LAYA.md`](LAYA.md) (§10 Helm, §11 poids hors ligne). Désactivé par
+défaut ; à activer **en mode shadow** d'abord.
+
+1. **Image interne** (registre du cluster ; jamais `latest`) :
+   ```bash
+   docker build -t registry.internal/ai/laya:0.3.9-oao.1 infra/docker/laya
+   docker push registry.internal/ai/laya:0.3.9-oao.1
+   ```
+   Variante hermétique avec poids embarqués : `--build-arg BAKE_MODELS=english,multilingual`
+   (+ `HF_ENDPOINT` d'un miroir interne), puis `laya.weights.source: image`.
+2. **Secret de la clé partagée** :
+   ```bash
+   kubectl -n oao create secret generic outlook-ai-laya --from-literal=api-key="$(openssl rand -hex 32)"
+   ```
+3. **Taxonomie** (obligatoire en mode actif) : ConfigMap à vous, clé
+   `laya-taxonomy.json`, référencée par `laya.taxonomy.existingConfigMap` (ou le
+   JSON dans `laya.taxonomy.inline`). Sans elle, le chart rend l'exemple et
+   refuse `laya.mode=active`.
+4. **Poids** (PVC `oao-laya-models`, `nutanix-volume`, 5Gi) : premier démarrage avec
+   `laya.weights.download.enabled=true` et `laya.weights.download.hfEndpoint`
+   pointant vers le miroir interne (ouvre DNS + 443 pour ce pod seulement), puis
+   repasser à `false`. Sans téléchargement, l'init container `models` échoue
+   avec un message explicite tant que les poids sont absents.
+5. **Activation** dans l'overlay d'environnement :
+   ```yaml
+   laya:
+     enabled: true
+     mode: shadow
+     image: { repository: registry.internal/ai/laya, tag: "0.3.9-oao.1", pullSecrets: [] }
+   ```
+6. **Vérifications** :
+   ```bash
+   kubectl -n oao rollout status deploy/oao-laya --timeout=15m
+   kubectl -n oao logs deploy/oao-laya -c models
+   kubectl -n oao get networkpolicy oao-laya -o yaml | grep -A2 egress    # egress: []
+   curl -sS https://api.oao.northbridge.example/api/v1/health | jq '.checks.laya'
+   ```
+   - [ ] `oao-laya` prêt, `/api/v1/ready` inchangé (`200`) même si Laya est arrêté ;
+   - [ ] carte « Moteur de décision » du dashboard : mode `shadow`, circuit fermé ;
+   - [ ] métriques `oao_laya_*` visibles dans Prometheus ;
+   - [ ] aucune sortie réseau depuis le pod Laya (hors téléchargement explicite).
+7. **Mode actif** : seulement après évaluation sur un jeu interne annoté
+   ([`LAYA.md`](LAYA.md) §14) ; `laya.mode: active` exige la clé et votre
+   taxonomie (refus au rendu sinon).
+
+Dépannage : [`OPERATIONS.md`](OPERATIONS.md) §16. Retour arrière :
+`laya.mode: shadow`, puis `laya.enabled: false` (comportement historique à
+l'identique ; le PVC est conservé).

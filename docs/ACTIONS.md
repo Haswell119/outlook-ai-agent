@@ -20,7 +20,7 @@
 | `categorize` | `client` | `{ category }` | low | `item.categories.addAsync([category])` |
 | `classify_email` | `client` | `{ category, confidence }` | low | `item.categories.addAsync([category])` (variante de `categorize` issue de la classification automatique — `EmailAnalysis.classification`) |
 | `archive` | `server` (Graph move → dossier Archive), repli `client` | `{ }` | low | Instruction d'ouvrir la boîte de dialogue "Déplacer" (`ui.displayDialogAsync` ou équivalent) — l'utilisateur confirme le déplacement |
-| `move_to_folder` | `server` (Graph `move`), repli `client` | `{ folderName }` | low | Idem `archive`, dossier cible pré-rempli |
+| `move_to_folder` | `server` (Graph `move`), repli `client` | `{ folderName }` — ou, suggéré par le moteur de décision Laya (mode `active`) : `{ folder, folderId, businessArea, confidence, source: "laya", suggested: true, requiresConfirmation: true, selectedByDefault: false, rule: "laya_folder_suggestion" }` | low | Idem `archive`, dossier cible pré-rempli. Une suggestion Laya n'est **jamais** présélectionnée ni exécutée sans validation ; un chemin de taxonomie (`Operations/NAV`) n'est pas un identifiant Graph : il reste une consigne côté client ([`LAYA.md`](LAYA.md)) |
 | `flag` | `client` | `{ flagStatus? }` | low | `item.flag.setAsync({ flagStatus })` |
 | `apply_label` | `client` (si `item.sensitivityLabel` dispo), sinon instruction | `{ label }` | low | Instruction d'appliquer manuellement le label de sensibilité (l'API Office.js de labellisation n'est pas garantie sur tous les hosts) |
 | `notify` | `server` (audit + webhook), sinon `none` | `{ recipient?, message }` | low | — (informationnel : `NOTIFY_WEBHOOK_URL`, pas d'action côté client) |

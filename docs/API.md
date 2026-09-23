@@ -19,7 +19,7 @@
 |---|---|---|---|---|
 | GET | `/api/v1/live` | public (pas d'auth) | — | `200 { status, version, role, uptimeSeconds }` — liveness : ne touche **aucune** dépendance |
 | GET | `/api/v1/ready` | public | — | `200 { status: "ok", version }` / `503 { status: "unready", detail }` — readiness : base joignable **et** migrations appliquées |
-| GET | `/api/v1/health` | public | — | `HealthSchema` (`ok`/`degraded`/`down` + détail par dépendance) |
+| GET | `/api/v1/health` | public | — | `HealthSchema` (`ok`/`degraded`/`down` + détail par dépendance ; check `laya` présent seulement si `DECISION_PROVIDER≠disabled`, sans URL ni clé) |
 | GET | `/metrics` | public si `METRICS_TOKEN` vide, sinon `Authorization: Bearer <METRICS_TOKEN>` (ou `x-metrics-token`) | — | exposition Prometheus (`text/plain`). `404` si `METRICS_ENABLED=false`. **Hors** préfixe `/api/v1` pour être ciblable séparément par NetworkPolicy / ServiceMonitor |
 | GET | `/api/v1/config/features` | public | — | `FeatureFlagsSchema` |
 | GET | `/api/v1/me` | `user` | — | `UserIdentitySchema` |
@@ -28,7 +28,7 @@
 
 | Méthode | Route | Rôle requis | Requête (schéma) | Réponse (schéma) |
 |---|---|---|---|---|
-| POST | `/api/v1/analyze/email` | `user` | `AnalyzeEmailRequestSchema` | `EmailAnalysisSchema` — **seul** appel qui peut atteindre le GPU |
+| POST | `/api/v1/analyze/email` | `user` | `AnalyzeEmailRequestSchema` | `EmailAnalysisSchema` — **seul** appel qui peut atteindre le GPU. Champ **optionnel** `decisioning` (décisions structurées Laya, mode `active` uniquement ; absent sinon — les clients doivent fonctionner sans, cf. ci-dessous) |
 | GET | `/api/v1/analyze/email/:emailId` | `user` | — | `EmailAnalysisSchema` — analyse **précalculée ou en cache**, jamais d'appel modèle. `404` = rien de calculé pour cet email (comportement normal sur un email neuf ou si `PRECOMPUTE_ENABLED=false`) : le client retombe sur le POST |
 | POST | `/api/v1/analyze/thread` | `user` | `AnalyzeThreadRequestSchema` | `ThreadSynthesisSchema` |
 | POST | `/api/v1/draft/reply` | `user` | `DraftReplyRequestSchema` | `DraftReplySchema` |
@@ -91,7 +91,7 @@
 | GET | `/api/v1/admin/policy` | `admin`/`compliance` | — | `PolicySchema` |
 | PUT | `/api/v1/admin/policy` | `admin` | `PolicySchema` (partiel accepté) | `PolicySchema` |
 | GET | `/api/v1/admin/users` | `admin` | — | `z.array(AdminUserSchema)` |
-| GET | `/api/v1/admin/system` | `admin` | query : `{ userId? }` | `SystemStatusSchema` — file LLM (pending/running/concurrency/circuit), compteurs de cache analyse et embeddings, état de sync, uptime, feature flags |
+| GET | `/api/v1/admin/system` | `admin` | query : `{ userId? }` | `SystemStatusSchema` — file LLM (pending/running/concurrency/circuit), compteurs de cache analyse et embeddings, état de sync, uptime, feature flags ; champ optionnel `decisioning` (fournisseur, mode, état, circuit, stratégie de modèle, versions, seuils, compteurs — jamais l'URL ni la clé) |
 
 Toute erreur suit `ApiErrorSchema` avec un code parmi : `validation_error`
 (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict`
@@ -295,3 +295,32 @@ npm run smoke                                              # instance locale
 npm run smoke -- --url https://api.oao.northbridge.example \
            --token "$JWT" --metrics-token "$METRICS_TOKEN" --wait 60
 ```
+
+## Champ optionnel `decisioning` (moteur de décision Laya)
+
+Ajouté à `EmailAnalysisSchema` sans rien retirer : absent quand
+`DECISION_PROVIDER=disabled` (défaut) ou en mode `shadow`. Présent en mode
+`active`, avec uniquement les décisions qui ont passé le seuil de confiance
+([`LAYA.md`](LAYA.md)) :
+
+```jsonc
+"decisioning": {
+  "source": "laya",                    // laya | taxonomy | llm_fallback | heuristic | laya_shadow | disabled
+  "mode": "active",
+  "urgency": { "level": "high", "confidence": 0.91 },
+  "businessArea": { "id": "operations", "label": "Opérations", "confidence": 0.88 },
+  "suggestedFolder": { "id": "nav", "displayName": "Operations/NAV", "outlookFolder": "Operations/NAV", "confidence": 0.84, "source": "laya" },
+  "replyExpected": { "value": true, "confidence": 0.8 },
+  "actionRequired": { "value": true, "confidence": 0.77 },
+  "lowConfidence": false,              // au moins une réponse écartée par le seuil
+  "degraded": false,                   // le moteur a échoué pour cet email
+  "fallbackReason": "low_confidence",  // facultatif, identifiant technique, jamais de contenu
+  "model": "multilingual",
+  "taxonomyVersion": "v1",
+  "decisionVersion": "v1"
+}
+```
+
+Un dossier suggéré n'est jamais exécuté : il peut donner lieu à une action
+`move_to_folder` **proposée** (`requiresConfirmation: true`, non présélectionnée)
+dans `suggestedActions`, qui suit le circuit habituel d'approbation.

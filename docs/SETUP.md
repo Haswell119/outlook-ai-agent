@@ -418,6 +418,23 @@ En Kubernetes, le CIDR du nœud GPU doit figurer dans `llm.egress.cidrs` :
 les NetworkPolicies sont en **default-deny**, un endpoint non déclaré est
 silencieusement injoignable.
 
+### Moteur de décision local Laya (optionnel)
+
+Désactivé par défaut (`DECISION_PROVIDER=disabled`) : rien à faire pour le
+quickstart. Pour l'essayer en local :
+
+```bash
+# .env : DECISION_PROVIDER=laya, LAYA_MODE=shadow (LAYA_API_KEY facultative en local)
+docker compose --profile laya up --build     # télécharge une fois les poids (~1,5 Gio), puis hors ligne
+npm run check:laya                            # /health + une décision de test
+npm run smoke:laya                            # intégration de bout en bout, faux moteur, aucun modèle
+```
+
+Avec `npm run dev` (orchestrateur sur l'hôte) : `docker compose --profile laya up laya`
+puis `LAYA_BASE_URL=http://localhost:8000` dans `.env`. Démonstration sans modèle :
+`DECISION_PROVIDER=mock`. Tout le reste (modes, taxonomie, seuils, évaluation
+avant activation) : [`LAYA.md`](LAYA.md).
+
 ## 8. Déploiement Docker
 
 Chemin de secours pour un site unique sans Kubernetes. Aucune HA, pas de HPA,
@@ -621,9 +638,12 @@ recharger Outlook avec Ctrl+F5.
 | `npm run dev:db -- [up\|down\|status\|logs\|reset\|psql]` | PostgreSQL local |
 | `npm run certs` | certificat HTTPS du volet (`--force`, `--mkcert`, `--openssl`) |
 | `npm run check:llm` | valide l'endpoint LLM interne |
+| `npm run check:laya` | valide un moteur Laya : `/health` + une décision de test (`--url`, `--lang`, `--model`) |
 | `npm run doctor` | « le volet ne se connecte pas » : vérifie `.env`, certificat, serveur :3000, orchestrateur (santé, CORS, modèle), base et manifest, et donne la correction de chaque maillon cassé (à lancer pendant `npm run dev`) |
 | `npm run smoke` | test de bout en bout (`--url`, `--token`, `--wait`) |
 | `npm run smoke -- --full` | **vérification fonctionnelle complète** : indexation → recherche → chat → analyse/cache/triage → synthèse → brouillons → actions → conformité → automatisations → brief → audit (`--lang`, `--reindex`, `--json`, `--admin-token`, `--metrics-token`) |
+| `npm run smoke:laya` | intégration Laya de bout en bout contre un faux moteur (aucun modèle) : décisions, cache, repli, probes, métriques, absence de fuite dans les logs (`--laya-url` pour un vrai moteur) |
+| `npm run eval:laya` | évaluation des décisions Laya sur un jeu annoté (`--dataset`, `--provider mock`, `--min-confidence`, `--no-permutations`) |
 | `npm run manifest:render` | rend les manifests Office depuis `ADDIN_HOST`/`API_HOST`/`AAD_CLIENT_ID` |
 | `npm run manifest:sideload` | charge le manifest dans Outlook (`--prod`, `--remove`, `--print`) |
 | `npm run manifest:package -w @oao/addin[:dev]` | package d'app Teams (zip `manifest.json` + `color.png`/`outline.png`) pour l'entrée « Apps » du nouvel Outlook (§10.2) |

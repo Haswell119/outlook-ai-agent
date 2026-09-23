@@ -28,6 +28,7 @@ Acteurs de menace considérés :
 | Fuite depuis les logs / la base d'audit | Corps d'email en clair dans les logs ou la DB | `AUDIT_STORE_CONTENT=false` par défaut (hashes SHA-256 uniquement), voir §3 |
 | Modèle IA interne compromis / malveillant | Sortie IA manipulatrice (auto-approbation, fuite de contexte) | Sortie toujours validée par des schémas zod stricts, jamais de champ "exécuter directement" dans la sortie LLM — l'exécution passe uniquement par le pipeline `propose → approve (humain) → execute` |
 | Déni de service sur le modèle interne | Le GPU/LLM interne devient indisponible | Repli heuristique dégradé documenté (`docs/OPERATIONS.md` §11), pas de blocage total du produit |
+| Email piégé contre le moteur de décision (Laya, optionnel) | Texte de l'email cherchant à changer les questions, les critères, le modèle ou la taxonomie, ou à forger un bloc de décisions dans le prompt réduit | Questions, critères, noms de modèle et taxonomie sont des constantes serveur (l'email ne remplit que `subject`/`body`/extraits du state) ; choix renvoyés revalidés contre les options posées ; bloc `### SYSTEM DECISIONS` forgé neutralisé ; décisions soumises à un seuil de confiance ; un dossier suggéré n'est qu'une **proposition** soumise à validation ([`LAYA.md`](LAYA.md) §12) |
 
 ## 2. Flux de données
 
@@ -45,6 +46,11 @@ Orchestrator (Fastify)
    ├─► PostgreSQL + pgvector (réseau interne)
    │     - audit_events (hashes, pas le corps par défaut)
    │     - email_index (pour la recherche sémantique, si activée)
+   │
+   ├─► Laya (optionnel, DECISION_PROVIDER=laya) — dans le cluster, hors ligne
+   │     - state compact : sujet, corps nettoyé et tronqué, signaux, métadonnées
+   │       (aucune adresse, aucun identifiant, aucun contenu de pièce jointe)
+   │     - bearer LAYA_API_KEY (fichier monté) ; Laya n'a AUCUNE sortie réseau
    │
    └─► Microsoft Graph (optionnel, OBO) — uniquement si GRAPH_ENABLED=true
          - jeton échangé On-Behalf-Of (jamais stocké), scopes minimaux (§6)
@@ -71,6 +77,12 @@ d'email → prompt → réponse" reste sur le réseau interne.
   `AUDIT_STORE_CONTENT=true` — option explicite, désactivée par défaut, à
   n'activer qu'après validation compliance et dans un cadre légal défini
   (ex. obligation de conservation FINMA sur certains flux).
+- **Décisions structurées (Laya, optionnel)** : l'audit ne garde que le choix,
+  la confiance et le verdict par question, le hash SHA-256 et la taille du state
+  envoyé, les versions (taxonomie, décisions, checkpoint) et la raison d'un
+  éventuel repli — jamais le state, le corps ou le sujet. Même règle pour les
+  journaux (type d'erreur, statut, latence, identifiant de corrélation) ; vérifié
+  par `npm run smoke:laya` avec des canaris.
 - **Index sémantique (`email_index`, pgvector)** : activé uniquement si
   `EMBEDDINGS_ENABLED=true` ; contient les vecteurs d'embedding + les
   métadonnées nécessaires à la citation de sources (sujet, expéditeur, date,
@@ -254,6 +266,10 @@ injoignable (voir `docs/OPERATIONS.md` §11).
 | `oao-addin` | `component=addin` | ns ingress | DNS uniquement (fichiers statiques) |
 | `oao-postgres` | `component=postgres` | api, worker, migrate, backup | DNS |
 | `oao-migrate` / `oao-backup` | jobs | — | DNS, postgres (+443 si backup S3) |
+| `oao-laya` *(si `laya.enabled`)* | `component=laya` | pods `orchestrator-api` et `orchestrator-worker`, port 8000 | **aucun** (`egress: []`) ; DNS + 443 vers `laya.weights.download.egressCidrs` uniquement pendant un téléchargement explicite de poids |
+
+Avec Laya activé, `oao-api` et `oao-worker` reçoivent en plus un egress vers
+les pods `component=laya` sur le port 8000.
 
 Limite assumée : `NetworkPolicy` ne sait pas filtrer par nom de domaine. Les
 flux vers Entra ID et Graph sont donc exprimés comme « 443/tcp vers
@@ -563,6 +579,8 @@ Compléments à §1, propres à l'exécution en cluster :
 | Scrape non autorisé de `/metrics` | énumération d'activité (volumétrie par utilisateur) | `METRICS_TOKEN` obligatoire + NetworkPolicy limitant l'ingress au namespace de monitoring |
 | Dérive de configuration (changement manuel en prod) | `kubectl edit` non tracé | `driftDetection: enabled` de Flux réapplique l'état du dépôt ; git est la source de vérité |
 | Perte de disponibilité du GPU interne | le produit devient inutilisable | dégradation heuristique documentée, alerte `OaoLlmCircuitOpen`, aucune bascule vers un cloud public |
+| Pod Laya compromis (optionnel) | exfiltration des states reçus, réponses truquées | NetworkPolicy : entrée depuis les pods orchestrateur uniquement, **`egress: []`** (aucune sortie) hors mode téléchargement explicite ; non-root, rootfs et poids en lecture seule ; réponses validées (zod, taille bornée) et seulement **proposées** ; clé dédiée `outlook-ai-laya` |
+| Poids de modèle altérés | décisions biaisées | poids épinglés par commit (`laya.weights.revision`), PVC en lecture seule, ou poids figés dans le digest d'une image interne ; évaluation avant activation ([`LAYA.md`](LAYA.md) §14) |
 
 ## 15. Localisation des données (data residency)
 
@@ -571,6 +589,9 @@ Compléments à §1, propres à l'exécution en cluster :
   fournisseur d'IA public n'est appelé, dans aucun mode de fonctionnement
   (`llm.provider` ne connaît que `openai-compatible` — pointé vers l'endpoint
   interne — et `mock`).
+- Laya (optionnel) tourne **dans** le cluster et n'a aucune route sortante en
+  production ; ses poids sont téléchargés une fois, depuis un miroir interne de
+  préférence, puis servis hors ligne (`HF_HUB_OFFLINE=1`).
 - Les seuls flux sortants du cluster sont : l'endpoint LLM interne (réseau
   privé), PostgreSQL (dans le cluster ou base interne), et — uniquement si
   `graph.enabled=true` — Entra ID et Microsoft Graph, qui sont déjà les

@@ -91,6 +91,22 @@ Deux chemins pour lire les emails :
 Détail complet : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (§10 pour la
 topologie de déploiement NKP).
 
+### Moteur de décision local (Laya) — optionnel, désactivé par défaut
+
+L'orchestrateur peut déléguer cinq décisions fermées (urgence, domaine métier,
+dossier Outlook suggéré, réponse attendue, action requise) à
+[Laya](docs/LAYA.md), un modèle de décision local servi par `laya-serve`
+(Deployment séparé, hors ligne, sans GPU requis). Le LLM garde le résumé, les
+tâches, les risques et les réponses. Un dossier suggéré n'est jamais qu'une
+action **proposée**, soumise à validation.
+
+**Statut : intégré, non validé en production.** Les checkpoints publiés ne sont
+pas calibrés sur nos données (mesures indicatives dans
+[`docs/LAYA.md`](docs/LAYA.md) §16) : `DECISION_PROVIDER=disabled` par défaut,
+puis `shadow`, annotation d'un jeu interne et évaluation (`npm run eval:laya`)
+avant tout mode `active`. Sans Laya, rien ne change (réponses, cache, audit
+identiques).
+
 ## Structure du monorepo
 
 ```
@@ -106,6 +122,7 @@ outlook-ai-agent/
 │   ├── gitops/         # Flux : sources, HelmRelease par environnement, SOPS, image automation
 │   ├── docker/         # Dockerfiles multi-stage non-root, nginx, init PostgreSQL
 │   └── k8s/            # Manifests GÉNÉRÉS depuis le chart (npm run k8s:render), pour les clusters sans Helm
+├── evaluation/laya/    # Harnais d'évaluation des décisions Laya + jeu synthétique (jeux réels hors Git)
 ├── scripts/            # Outillage développeur en Node ESM (multi-OS)
 ├── .github/workflows/  # CI, release (images + chart OCI signés), CodeQL
 └── docs/               # Architecture, setup, NKP, runbook, sécurité, actions, API
@@ -146,6 +163,9 @@ Détails et stack complète (PostgreSQL + modèle interne) :
 | `npm run check:llm` | valide l'endpoint LLM interne (models, chat, embeddings) |
 | `npm run doctor` | diagnostique un volet qui ne se connecte pas (certificat, ports, `.env`, CORS, orchestrateur, base, manifest) |
 | `npm run smoke` | test de bout en bout contre un orchestrator en marche |
+| `npm run check:laya` | valide un moteur Laya (`/health` + une décision de test) |
+| `npm run smoke:laya` | test de bout en bout de l'intégration Laya (faux moteur, aucun modèle ; `--laya-url` pour un vrai) |
+| `npm run eval:laya` | évalue les décisions Laya sur un jeu annoté (`--provider mock` pour la plomberie) |
 | `npm run manifest:render` | rend les manifests Office pour un environnement |
 | `npm run manifest:sideload` | charge le volet dans Outlook (multi-OS) |
 | `npm run k8s:render` | régénère `infra/k8s/rendered/` depuis le chart Helm |
@@ -164,6 +184,8 @@ Toutes acceptent `--help`.
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Modèle de menace, NetworkPolicies, secrets, signature d'images, contrôles FINMA |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Architecture technique détaillée (§5 add-in, §6 dashboard, §8 configuration complète, §10 déploiement NKP) |
 | [`apps/orchestrator/docs/AI_LOAD.md`](apps/orchestrator/docs/AI_LOAD.md) | Minimisation de la charge IA : les sept leviers, dimensionnement GPU |
+| [`docs/LAYA.md`](docs/LAYA.md) | Moteur de décision local Laya : modes, taxonomie, seuils, fallback, Docker, NKP, poids hors ligne, sécurité, évaluation, limites |
+| [`evaluation/laya/README.md`](evaluation/laya/README.md) | Harnais d'évaluation des décisions : format du jeu annoté, métriques, lecture du rapport |
 | [`docs/ACTIONS.md`](docs/ACTIONS.md) | Catalogue des types d'action IA, cible d'exécution, risque |
 | [`docs/API.md`](docs/API.md) | Endpoints, rôles requis, schémas, exemples |
 | [`docs/mockups.md`](docs/mockups.md) | Référence visuelle des écrans |
@@ -182,6 +204,7 @@ Toutes acceptent `--help`.
 | 4 | Vérifications de conformité avant envoi, analyse de pièces jointes, anti-phishing, dashboard | ✅ |
 | — | Packaging production NKP (Helm, GitOps, supply chain, observabilité) | ✅ |
 | — | Durcissement production des trois applications (probes, métriques, caches, sync worker, RBAC dashboard, CSP) | ✅ |
+| — | Moteur de décision local Laya (optionnel : shadow / active, taxonomie, fallback, Helm, image, évaluation) | intégré, désactivé par défaut — **à évaluer avant activation** |
 
 ## Crédits
 
