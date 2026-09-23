@@ -269,9 +269,19 @@ personal tab carries `scopes: ["personal"]`, `context: ["personalTab"]` and `hos
 
 ---
 
-### Following the selected message (pinned pane)
+### Following the selected message (pinned pane): `ItemContextService`
 
-Switching email with the pane open must never leave the previous email on screen. Four layers make sure of it:
+Switching email with the pane open hot-reloads the pane on the new email. `src/services/itemContext.ts` is the single source of
+truth for "which message and which surface": a framework-free service (`subscribe` / `getSnapshot`, read by React through
+`useItemContext()`) that merges every Outlook signal, coalesces the ones that arrive together (one click often raises
+`ItemChanged` **and** `SelectedItemsChanged`) into **one** reload, and drops a surface resolution that returns after a newer change.
+Each snapshot carries `surface`, `itemId`, `conversationId`, `subject`, `version` and the `reason` of the reload.
+
+The shell renders `ReadMode` **keyed by `itemId`**: a new email remounts every item-bound screen (summary, thread synthesis, chat,
+insights, open dialogs) with fresh state, while the selected tab is kept. The same email reloaded (`version` bump) is re-read in
+place, which costs nothing when its analysis is cached. `itemContext.refresh()` forces a reload.
+
+The signals it merges, from the most to the least reliable:
 
 1. **One Office handler per event, registered at start-up and never removed.** `primeMailboxEvents()` runs right after
    `Office.onReady`, before React (as Microsoft documents). Components only attach JavaScript listeners. Removing and re-adding
@@ -280,7 +290,7 @@ Switching email with the pane open must never leave the previous email on screen
    registration is retried.
 2. **`ItemChanged`** re-keys everything item-bound on the new `mailbox.item.itemId`.
 3. **`visibilitychange` / `focus`** re-check the host item when the pane is shown again.
-4. **A once-a-second check while the pane is visible** (`office/itemWatch.ts`). It compares the host item with what is rendered,
+4. **A once-a-second check while the pane is visible** (run by the service, logic in `office/itemWatch.ts`). It compares the host item with what is rendered,
    then asks `getSelectedItemsAsync` what the message list has selected. It acts only when **that selection changed**. A whole
    collapsed conversation selected by Outlook on the web counts as one message; a real multi-selection is left to the selection
    view. When `mailbox.item` did not follow (known Outlook bugs), the selected message is loaded by id

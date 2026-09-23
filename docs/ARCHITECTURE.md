@@ -153,6 +153,12 @@ Rules:
 
 ## 5. Add-in internals
 
+> **Hot reload on email change.** `ItemContextService` (`apps/addin/src/services/itemContext.ts`) is the single source of truth for
+> the item the pane is about. It merges `ItemChanged`, `SelectedItemsChanged`, visibility/focus and a visible-pane check of the
+> message-list selection (which also covers Outlook's known "no event / stale `mailbox.item`" bugs), coalesces them into one
+> snapshot, and the shell keys the read surface by `itemId` so every item-bound screen restarts on the new email. Details:
+> `apps/addin/README.md`, section "Following the selected message".
+
 ```
 apps/addin/
 ├── manifest/manifest.xml        # Classic XML manifest (Outlook desktop + web), MessageRead + MessageCompose,

@@ -62,9 +62,11 @@ export interface ReadModeProps {
    * not carry this id belongs to another email and is never rendered.
    */
   itemId?: string;
+  /** Reports the selected tab, so the shell can restore it after a hot reload on the next email. */
+  onTabChange?: (tab: TabKey) => void;
 }
 
-export function ReadMode({ initialTab, initialView, itemVersion = 0, itemId = "" }: ReadModeProps) {
+export function ReadMode({ initialTab, initialView, itemVersion = 0, itemId = "", onTabChange }: ReadModeProps) {
   const s = useStyles();
   const { t, lang } = useI18n();
   const { api, features } = useApp();
@@ -122,10 +124,14 @@ export function ReadMode({ initialTab, initialView, itemVersion = 0, itemId = ""
     else analysis.refresh();
   }, [wholeThread, synthesis, analysis]);
 
-  const onTab = useCallback((key: TabKey) => {
-    setTab(key);
-    track("ui.tab", { tab: key });
-  }, []);
+  const onTab = useCallback(
+    (key: TabKey) => {
+      setTab(key);
+      onTabChange?.(key);
+      track("ui.tab", { tab: key });
+    },
+    [onTabChange],
+  );
 
   const briefEnabled = features?.dailyBriefEnabled !== false;
   const visibleTabs = useMemo(() => TAB_KEYS.filter((k) => k !== "brief" || briefEnabled), [briefEnabled]);

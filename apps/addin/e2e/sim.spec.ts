@@ -182,6 +182,43 @@ test.describe("switching between messages (the pinned pane)", () => {
     await expect(page.getByText("TR : Atlas", { exact: false })).toHaveCount(0);
   });
 
+  test("hot reload: switching email keeps the tab but starts every screen afresh for the new email", async ({ page }) => {
+    await openPane(page, { lang: "en" });
+    const h = host(page);
+    await expect(summary(page)).toBeVisible({ timeout: 40_000 });
+
+    // Chat about A.
+    await page.getByTestId("tab-chat").click();
+    await page.getByRole("textbox").first().fill("What is still open on the Atlas project?");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("assistant-card")).toBeVisible({ timeout: 60_000 });
+
+    // Switch to B: still on Chat, but a fresh, empty conversation about B.
+    await h.open("B");
+    await expect(subjectLine(page)).toContainText("relevé trimestriel", { timeout: 10_000 });
+    await expect(page.getByTestId("tab-chat")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("chat-tab")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("assistant-card")).toHaveCount(0);
+
+    // Insights on B, then back to A: A's insights, never B's.
+    await page.getByTestId("tab-insights").click();
+    await expect(page.getByTestId("insights-tab")).toBeVisible({ timeout: 40_000 });
+    await h.open("A");
+    await expect(subjectLine(page)).toContainText("Atlas project — open points", { timeout: 10_000 });
+    await expect(page.getByTestId("tab-insights")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("insights-tab")).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByText("relevé trimestriel", { exact: false })).toHaveCount(0);
+
+    // The whole-conversation switch is per email: B opens on its own summary, not on A's thread.
+    await page.getByTestId("tab-summary").click();
+    await page.getByTestId("whole-conversation").click();
+    await expect(page.getByTestId("thread-view")).toBeVisible({ timeout: 40_000 });
+    await h.open("B");
+    await expect(subjectLine(page)).toContainText("relevé trimestriel", { timeout: 10_000 });
+    await expect(page.getByTestId("thread-view")).toHaveCount(0);
+    await expect(summary(page)).toContainText("relevé trimestriel", { timeout: 40_000 });
+  });
+
   test("an item swapped without ItemChanged is recovered when the pane is focused", async ({ page }) => {
     await openPane(page, { lang: "en" });
     const h = host(page);

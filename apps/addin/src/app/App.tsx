@@ -4,10 +4,8 @@ import type { FeatureFlags } from "@oao/shared";
 import { initApi, getApi, setLanguageGetter, type OaoApi } from "@/api";
 import { I18nProvider, useI18n } from "@/i18n";
 import { isPreviewMode, queryParam } from "@/office/env";
-import { currentConversationId, currentItemId } from "@/office/readItem";
-import { newSelectionWatch, pollHostSelection } from "@/office/itemWatch";
-import { detectSurfaceSync, resolveSurface, type AppSurface } from "@/office/host";
-import { addMailboxListener } from "@/office/events";
+import { itemContext, useItemContext } from "@/services/itemContext";
+import { detectSurfaceSync, type AppSurface } from "@/office/host";
 import { startObservationFlusher } from "@/office/observe";
 import { loadSettings, buildInfo } from "@/app/settings";
 import { initTelemetry, track } from "@/telemetry";
@@ -46,9 +44,6 @@ function LanguageBridge() {
   return null;
 }
 
-/** How often a visible pane checks that it still shows the selected message. */
-export const ITEM_POLL_MS = 1000;
-
 /** Surfaces the shell can render (see `office/host.ts` for how they are picked). */
 export type AppMode = AppSurface;
 
@@ -70,115 +65,29 @@ export function App({ mode }: AppProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   /**
-   * The pane is **pinnable**, so the surface is not decided once and for all:
-   * the user keeps navigating the message list while it stays open. `surface`
-   * is re-resolved on every `ItemChanged` / `SelectedItemsChanged`, and
-   * `itemVersion` is bumped so the read / selection views re-read the item(s)
-   * (which costs nothing when the analysis is already cached).
+   * The pane is **pinnable**: the user keeps navigating the message list while
+   * it stays open. Which message and which surface it is about comes from
+   * `ItemContextService` (services/itemContext.ts), the single source of truth
+   * that merges every Outlook signal. Each new snapshot hot-reloads the
+   * item-bound screens: `ReadMode` is keyed by `itemId` (fresh state for the
+   * new email) and re-reads on `version` (same email, reloaded).
    */
-  const [surface, setSurface] = useState<AppMode>(() => mode ?? detectSurfaceSync());
-  const [itemVersion, setItemVersion] = useState(0);
-  /**
-   * Id of the message the host has selected *right now*. Everything item-bound
-   * is keyed by it, so a value that belongs to another message can never be
-   * rendered, however the host swapped the item.
-   */
-  const [itemId, setItemId] = useState<string>(() => (mode ? "" : currentItemId()));
-  const resolvedMode = mode ?? surface;
-  // Mirrored in refs so the safety nets can compare without re-subscribing.
-  const itemIdRef = useRef(itemId);
-  itemIdRef.current = itemId;
-  const surfaceRef = useRef(resolvedMode);
-  surfaceRef.current = resolvedMode;
-
+  const itemSnapshot = useItemContext(itemContext);
   useEffect(() => {
     if (mode) return; // forced by a test / screenshot
-    let alive = true;
-    const refresh = () => {
-      void resolveSurface().then((next) => {
-        if (alive) setSurface(next);
-      });
-    };
-    refresh();
-    const onChange = (event: "item" | "selection" | "visibility" | "focus" | "poll" | "selectionPoll") => () => {
-      if (!alive) return;
-      const next = currentItemId();
-      setItemId(next);
-      setItemVersion((v) => v + 1);
-      track("pane.itemChanged", { kind: event });
-      refresh();
-    };
-    // One Office handler per event for the whole pane, removed on unmount
-    // (see office/events.ts) — a pinned pane must not leak a handler per item.
-    // Registered unconditionally: the pane does not know whether the user
-    // pinned it, and on a host without Mailbox 1.5 the subscription is a no-op.
-    const onItemChanged = onChange("item");
-    const offItem = addMailboxListener("ItemChanged", () => {
-      onItemChanged();
-      // The event may come with a stale `mailbox.item` (office-js#5827):
-      // check the list selection right away instead of at the next poll.
-      window.setTimeout(() => void tick(), 300);
-    });
-    const offSelection = addMailboxListener("SelectedItemsChanged", onChange("selection"));
-
-    /**
-     * Safety net. `ItemChanged` is the supported way to learn that the
-     * selection moved, but it does not always arrive: the host may not have the
-     * 1.5 requirement set, the pane may have registered its handler after
-     * Outlook had already swapped the item, or the pane may have been hidden
-     * and re-shown on another message. Whenever the pane becomes visible or
-     * regains focus we therefore *ask* the host what it holds, and only do
-     * something when the answer differs from what we are rendering.
-     */
-    const recheck = (kind: "visibility" | "focus") => () => {
-      if (!alive) return;
-      if (kind === "visibility" && document.visibilityState !== "visible") return;
-      if (currentItemId() === itemIdRef.current) return;
-      onChange(kind)();
-    };
-    const onVisibility = recheck("visibility");
-    const onFocus = recheck("focus");
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", onFocus);
-
-    /**
-     * Second safety net, for the switch that raises nothing at all: while the
-     * pane is visible, compare what the host holds (cheap, synchronous) and
-     * what the message list has selected (`getSelectedItemsAsync`, see
-     * `office/itemWatch.ts`) with what is rendered. Compose, brief and the
-     * Apps-rail tab are not item-bound and are left alone.
-     */
-    const watch = newSelectionWatch();
-    let polling = false;
-    const tick = async () => {
-      if (!alive || polling || document.visibilityState !== "visible") return;
-      const current = surfaceRef.current;
-      if (current !== "read" && current !== "home") return;
-      polling = true;
-      try {
-        if (currentItemId() !== itemIdRef.current) {
-          onChange("poll")();
-          return;
-        }
-        if (await pollHostSelection(watch, { itemId: itemIdRef.current, conversationId: currentConversationId() })) onChange("selectionPoll")();
-      } catch {
-        /* a failed poll is retried at the next tick */
-      } finally {
-        polling = false;
-      }
-    };
-    void tick(); // first observation of the list selection = the baseline
-    const timer = window.setInterval(() => void tick(), ITEM_POLL_MS);
-
-    return () => {
-      alive = false;
-      offItem();
-      offSelection();
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", onFocus);
-    };
+    itemContext.start();
+    // Stop only detaches JavaScript listeners: the Office handlers stay
+    // registered (office/events.ts), so StrictMode's unmount/remount is safe.
+    return () => itemContext.stop();
   }, [mode]);
+  const resolvedMode: AppMode = mode ?? itemSnapshot.surface;
+  const itemId = mode ? "" : itemSnapshot.itemId;
+  const itemVersion = mode ? 0 : itemSnapshot.version;
+  /** The tab survives the hot reload of `ReadMode` from one email to the next. */
+  const readTab = useRef<string | null>(queryParam("tab"));
+  const onReadTab = useCallback((tab: string) => {
+    readTab.current = tab;
+  }, []);
 
   // Telemetry is initialised before anything else so early failures are seen.
   const opened = useRef(false);
@@ -259,7 +168,9 @@ export function App({ mode }: AppProps) {
                   ) : resolvedMode === "brief" ? (
                     <BriefMode />
                   ) : (
-                    <ReadMode initialTab={queryParam("tab")} initialView={queryParam("view")} itemVersion={itemVersion} itemId={itemId} />
+                    // Keyed by the email: switching message remounts every item-bound
+                    // screen (summary, thread, chat, insights) with fresh state.
+                    <ReadMode key={itemId || "no-item"} initialTab={readTab.current} onTabChange={onReadTab} initialView={queryParam("view")} itemVersion={itemVersion} itemId={itemId} />
                   )}
                 </ErrorBoundary>
               )}
