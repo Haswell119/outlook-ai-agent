@@ -14,7 +14,8 @@
  * Output: apps/addin/certs/addin.crt + addin.key (mounted by
  * docker-compose.yml into the add-in nginx container).
  */
-import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { X509Certificate } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -60,10 +61,23 @@ const keyFile = join(outDir, "addin.key");
 
 mkdirSync(outDir, { recursive: true });
 
-if (existsSync(certFile) && existsSync(keyFile) && !flags.force) {
-  ok(`certificate already present in ${outDir} (use --force to regenerate)`);
+// The dev server (`npm run dev`) only uses ~/.office-addin-dev-certs; the copy
+// in apps/addin/certs is for the Docker « addin » container. Stopping early
+// because the copy exists used to leave a machine without (or with an expired)
+// Office certificate, so the pane was refused by Outlook.
+const officeCert = join(homedir(), ".office-addin-dev-certs", "localhost.crt");
+const officeCertValid = (() => {
+  try {
+    return new Date(new X509Certificate(readFileSync(officeCert)).validTo).getTime() > Date.now() + 24 * 3600 * 1000;
+  } catch {
+    return false;
+  }
+})();
+if (existsSync(certFile) && existsSync(keyFile) && officeCertValid && !flags.force) {
+  ok(`certificate already present in ${outDir} and ~/.office-addin-dev-certs (use --force to regenerate)`);
   process.exit(0);
 }
+if (!officeCertValid && existsSync(officeCert)) warn("the Office dev certificate in ~/.office-addin-dev-certs is expired — reinstalling");
 
 const hosts = ["localhost", "127.0.0.1", "::1", "addin.localhost"];
 

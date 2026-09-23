@@ -25,6 +25,7 @@
     "dev:db": "node scripts/dev-db.mjs",
     "certs": "node scripts/certs.mjs",
     "check:llm": "node scripts/check-llm.mjs",
+    "doctor": "node scripts/doctor.mjs",
     "smoke": "node scripts/smoke.mjs",
     "manifest:render": "npm run manifest:render -w @oao/addin",
     "manifest:sideload": "node scripts/sideload-manifest.mjs",

@@ -144,6 +144,7 @@ Détails et stack complète (PostgreSQL + modèle interne) :
 | `npm run setup:dev` | bootstrap complet de l'environnement de dev |
 | `npm run dev:db -- [up\|down\|reset\|psql]` | PostgreSQL/pgvector local |
 | `npm run check:llm` | valide l'endpoint LLM interne (models, chat, embeddings) |
+| `npm run doctor` | diagnostique un volet qui ne se connecte pas (certificat, ports, `.env`, CORS, orchestrateur, base, manifest) |
 | `npm run smoke` | test de bout en bout contre un orchestrator en marche |
 | `npm run manifest:render` | rend les manifests Office pour un environnement |
 | `npm run manifest:sideload` | charge le volet dans Outlook (multi-OS) |

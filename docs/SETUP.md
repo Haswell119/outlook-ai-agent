@@ -587,6 +587,32 @@ npm run smoke -- --full --reindex      # vérifie l'ensemble, embeddings inclus
 > rien n'est modifié : `/ready` répond 503 avec le message exact à suivre. Voir
 > [`OPERATIONS.md` §15](OPERATIONS.md#15-dimension-des-embeddings-pgvector).
 
+### Le volet ne se connecte pas
+
+Dans un second terminal, pendant que `npm run dev` tourne :
+
+```bash
+npm run doctor
+```
+
+Les causes les plus fréquentes, toutes détectées :
+
+- **certificat** : pas de certificat Office (ou expiré). Le navigateur laisse
+  passer l'avertissement, le volet Outlook non. `npm run certs`, puis redémarrer
+  `npm run dev` ;
+- **stack Docker complète lancée** (`docker compose up`) au lieu de la seule base :
+  ses conteneurs occupent 3000/8080 et `npm run dev` tourne à côté.
+  `docker compose down`, puis `npm run dev:db` ;
+- **`.env` modifié sans redémarrer** : Vite lit `VITE_API_BASE_URL` au démarrage ;
+- **orchestrateur arrêté** sur une erreur (base, port 8080 occupé) : voir les
+  lignes `[orch]`.
+
+Si tout est vert et que le volet ne se connecte toujours pas, le reste se joue
+dans le navigateur : ouvrir `https://localhost:3000/taskpane.html` dans le même
+navigateur (aucun avertissement de certificat ne doit apparaître), autoriser
+l'accès au « réseau local » demandé par Edge/Chrome pour Outlook, puis
+recharger Outlook avec Ctrl+F5.
+
 ### Toutes les commandes de l'outillage
 
 | Commande | Effet |
@@ -595,6 +621,7 @@ npm run smoke -- --full --reindex      # vérifie l'ensemble, embeddings inclus
 | `npm run dev:db -- [up\|down\|status\|logs\|reset\|psql]` | PostgreSQL local |
 | `npm run certs` | certificat HTTPS du volet (`--force`, `--mkcert`, `--openssl`) |
 | `npm run check:llm` | valide l'endpoint LLM interne |
+| `npm run doctor` | « le volet ne se connecte pas » : vérifie `.env`, certificat, serveur :3000, orchestrateur (santé, CORS, modèle), base et manifest, et donne la correction de chaque maillon cassé (à lancer pendant `npm run dev`) |
 | `npm run smoke` | test de bout en bout (`--url`, `--token`, `--wait`) |
 | `npm run smoke -- --full` | **vérification fonctionnelle complète** : indexation → recherche → chat → analyse/cache/triage → synthèse → brouillons → actions → conformité → automatisations → brief → audit (`--lang`, `--reindex`, `--json`, `--admin-token`, `--metrics-token`) |
 | `npm run manifest:render` | rend les manifests Office depuis `ADDIN_HOST`/`API_HOST`/`AAD_CLIENT_ID` |
