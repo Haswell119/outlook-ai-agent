@@ -1,0 +1,136 @@
+{
+  "version": "v1",
+  "areas": [
+    {
+      "id": "operations",
+      "labels": { "fr": "Opérations", "en": "Operations" },
+      "descriptions": {
+        "fr": "Flux opérationnels, NAV, positions, imports et fournisseurs.",
+        "en": "Operational flows, NAV, positions, imports and providers."
+      },
+      "folders": [
+        {
+          "id": "nav",
+          "displayName": "Operations/NAV",
+          "outlookFolder": "Operations/NAV",
+          "descriptions": {
+            "fr": "Imports NAV, valorisations, positions et fichiers associés.",
+            "en": "NAV imports, valuations, positions and associated files."
+          }
+        },
+        {
+          "id": "sftp",
+          "displayName": "Operations/SFTP",
+          "outlookFolder": "Operations/SFTP",
+          "descriptions": {
+            "fr": "Transferts SFTP, clés, fichiers reçus et incidents de connexion.",
+            "en": "SFTP transfers, keys, received files and connection incidents."
+          }
+        }
+      ]
+    },
+    {
+      "id": "accounting",
+      "labels": { "fr": "Comptabilité", "en": "Accounting" },
+      "descriptions": {
+        "fr": "Écritures comptables, Abacus, Auriga, balances et rapprochements.",
+        "en": "Accounting entries, Abacus, Auriga, balances and reconciliations."
+      },
+      "folders": [
+        {
+          "id": "abacus",
+          "displayName": "Accounting/Abacus",
+          "outlookFolder": "Accounting/Abacus",
+          "descriptions": {
+            "fr": "Écritures et interfaces liées à Abacus.",
+            "en": "Entries and interfaces related to Abacus."
+          }
+        }
+      ]
+    },
+    {
+      "id": "trading",
+      "labels": { "fr": "Trading", "en": "Trading" },
+      "descriptions": {
+        "fr": "Ordres, exécutions, contreparties, courtiers et données de marché.",
+        "en": "Orders, executions, counterparties, brokers and market data."
+      },
+      "folders": [
+        {
+          "id": "orders",
+          "displayName": "Trading/Orders",
+          "outlookFolder": "Trading/Orders",
+          "descriptions": {
+            "fr": "Ordres de bourse, confirmations d'exécution et règlements.",
+            "en": "Stock orders, execution confirmations and settlements."
+          }
+        },
+        {
+          "id": "market_data",
+          "displayName": "Trading/Market data",
+          "outlookFolder": "Trading/Market data",
+          "descriptions": {
+            "fr": "Cours, flux de données de marché, Bloomberg et fournisseurs de prix.",
+            "en": "Prices, market data feeds, Bloomberg and pricing vendors."
+          }
+        }
+      ]
+    },
+    {
+      "id": "infrastructure",
+      "labels": { "fr": "Infrastructure", "en": "Infrastructure" },
+      "descriptions": {
+        "fr": "Serveurs, Kubernetes, réseau, sécurité et déploiements.",
+        "en": "Servers, Kubernetes, network, security and deployments."
+      },
+      "folders": [
+        {
+          "id": "general",
+          "displayName": "Infrastructure",
+          "outlookFolder": "Infrastructure",
+          "descriptions": {
+            "fr": "Infrastructure générale.",
+            "en": "General infrastructure."
+          }
+        }
+      ]
+    },
+    {
+      "id": "administration",
+      "labels": { "fr": "Administration", "en": "Administration" },
+      "descriptions": {
+        "fr": "Contrats, fournisseurs de services, ressources humaines et services généraux.",
+        "en": "Contracts, service providers, human resources and general services."
+      },
+      "folders": [
+        {
+          "id": "contracts",
+          "displayName": "Administration/Contracts",
+          "outlookFolder": "Administration/Contracts",
+          "descriptions": {
+            "fr": "Contrats, avenants, renouvellements et résiliations.",
+            "en": "Contracts, amendments, renewals and terminations."
+          }
+        },
+        {
+          "id": "hr",
+          "displayName": "Administration/HR",
+          "outlookFolder": "Administration/HR",
+          "descriptions": {
+            "fr": "Recrutement, absences, salaires et formation.",
+            "en": "Hiring, leave, payroll and training."
+          }
+        }
+      ]
+    },
+    {
+      "id": "other",
+      "labels": { "fr": "Autre", "en": "Other" },
+      "descriptions": {
+        "fr": "Aucune catégorie métier précédente ne correspond.",
+        "en": "None of the previous business categories apply."
+      },
+      "folders": []
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from "prom-client";
+import type { DecisionCallSample } from "./adapters/decision/resilient.js";
 import type { LlmCallSample } from "./adapters/llm/queue.js";
+import type { CircuitState } from "./util/circuit-breaker.js";
 
 /**
  * Prometheus metrics (`GET /metrics`, protected by `METRICS_TOKEN` when set).
@@ -47,6 +49,23 @@ export class Metrics {
   readonly precomputedAnalyses: Gauge<string>;
   readonly auditEvents: Counter<"type">;
   readonly briefs: Counter<"source">;
+
+  /*
+   * Structured-decision engine (Laya). Labels are bounded on purpose: error
+   * classes, fixed question ids, and option ids that only exist in the
+   * validated taxonomy — never a subject, an address, a conversation id or a
+   * free-form folder name.
+   */
+  readonly layaRequests: Counter<"outcome">;
+  readonly layaDuration: Histogram<"outcome">;
+  readonly layaFallbacks: Counter<"reason">;
+  readonly layaLowConfidence: Counter<"question">;
+  /** 0 closed, 1 half-open, 2 open. */
+  readonly layaCircuitState: Gauge<string>;
+  readonly layaShadowComparisons: Counter<"question" | "result">;
+  readonly layaDecisions: Counter<"question" | "choice">;
+  /** Laya calls that did not have to be made, by reason. */
+  readonly layaCallsSaved: Counter<"reason">;
 
   constructor(opts: { defaultMetrics?: boolean; prefix?: string; version?: string; role?: string } = {}) {
     const prefix = opts.prefix ?? "oao_";
@@ -100,6 +119,31 @@ export class Metrics {
     this.precomputedAnalyses = new Gauge({ name: `${prefix}precomputed_analyses`, help: "Live precomputed analyses across all mailboxes", registers: reg });
     this.auditEvents = new Counter({ name: `${prefix}audit_events_total`, help: "Audit events written, by type", labelNames: ["type"] as const, registers: reg });
     this.briefs = new Counter({ name: `${prefix}daily_briefs_total`, help: "Daily briefs generated, by source", labelNames: ["source"] as const, registers: reg });
+
+    this.layaRequests = new Counter({ name: `${prefix}laya_requests_total`, help: "Calls to the decision engine by outcome (ok, timeout, network, unauthorized, invalid_request, model_error, rate_limited, server, invalid_response, circuit_open, queue_timeout…)", labelNames: ["outcome"] as const, registers: reg });
+    this.layaDuration = new Histogram({
+      name: `${prefix}laya_request_duration_seconds`,
+      help: "Decision engine call duration in seconds (queue wait excluded)",
+      labelNames: ["outcome"] as const,
+      buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10],
+      registers: reg,
+    });
+    this.layaFallbacks = new Counter({ name: `${prefix}laya_fallbacks_total`, help: "Analyses where the engine's decision could not be used, by reason (active mode)", labelNames: ["reason"] as const, registers: reg });
+    this.layaLowConfidence = new Counter({ name: `${prefix}laya_low_confidence_total`, help: "Engine answers discarded by the confidence policy, by question", labelNames: ["question"] as const, registers: reg });
+    this.layaCircuitState = new Gauge({ name: `${prefix}laya_circuit_state`, help: "Decision engine circuit breaker: 0 closed, 1 half-open, 2 open", registers: reg });
+    this.layaShadowComparisons = new Counter({ name: `${prefix}laya_shadow_comparisons_total`, help: "Shadow mode: engine vs historic analysis agreement (proxies), by question and result", labelNames: ["question", "result"] as const, registers: reg });
+    this.layaDecisions = new Counter({ name: `${prefix}laya_decisions_total`, help: "Engine answers by question and chosen option (taxonomy ids only)", labelNames: ["question", "choice"] as const, registers: reg });
+    this.layaCallsSaved = new Counter({ name: `${prefix}laya_model_calls_saved_total`, help: "Decision engine calls avoided, by reason (triage, cache, coalesced, single_folder, area_not_accepted, other_area, no_folders)", labelNames: ["reason"] as const, registers: reg });
+  }
+
+  /** Fed by the decision provider's resilience wrapper (`onCall`). */
+  observeLayaCall(s: DecisionCallSample): void {
+    this.layaRequests.inc({ outcome: s.outcome });
+    if (s.latencyMs > 0 || s.outcome === "ok") this.layaDuration.observe({ outcome: s.outcome }, s.latencyMs / 1000);
+  }
+
+  setLayaCircuit(state: CircuitState): void {
+    this.layaCircuitState.set(state === "open" ? 2 : state === "half_open" ? 1 : 0);
   }
 
   /** Fed by the LLM queue's `onCall` hook. */

@@ -255,6 +255,155 @@
           "sync": {
             "$ref": "#/components/schemas/MailboxSyncStatus"
           },
+          "decisioning": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "disabled",
+                  "mock",
+                  "laya"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "shadow",
+                  "active"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "degraded",
+                  "unavailable",
+                  "disabled"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              },
+              "circuit": {
+                "type": "string",
+                "enum": [
+                  "closed",
+                  "open",
+                  "half_open"
+                ]
+              },
+              "modelStrategy": {
+                "type": "string",
+                "enum": [
+                  "language",
+                  "auto",
+                  "fixed"
+                ]
+              },
+              "fixedModel": {
+                "type": "string"
+              },
+              "loadedModels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "device": {
+                "type": "string"
+              },
+              "taxonomyVersion": {
+                "type": "string"
+              },
+              "decisionVersion": {
+                "type": "string"
+              },
+              "minConfidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "folderMinConfidence": {
+                "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
+              },
+              "fallbackToLlm": {
+                "type": "boolean"
+              },
+              "shadowSampleRate": {
+                "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
+              },
+              "concurrency": {
+                "type": "integer"
+              },
+              "stats": {
+                "type": "object",
+                "properties": {
+                  "decisions": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "providerCalls": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "failures": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "fallbacks": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "lowConfidence": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "lowConfidenceRate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "avgLatencyMs": {
+                    "type": "number"
+                  },
+                  "inFlight": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "pending": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "decisions",
+                  "providerCalls",
+                  "failures",
+                  "fallbacks",
+                  "lowConfidence",
+                  "inFlight",
+                  "pending"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "provider",
+              "mode",
+              "state",
+              "circuit",
+              "modelStrategy",
+              "decisionVersion",
+              "minConfidence",
+              "folderMinConfidence",
+              "fallbackToLlm",
+              "shadowSampleRate",
+              "concurrency",
+              "stats"
+            ],
+            "additionalProperties": false
+          },
           "uptimeSeconds": {
             "type": "number"
           }
@@ -572,9 +721,7 @@
                 "type": "string"
               },
               "confidence": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1
+                "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
               }
             },
             "required": [
@@ -584,13 +731,13 @@
             "additionalProperties": false
           },
           "confidence": {
-            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+            "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
           },
           "phishing": {
             "type": "object",
             "properties": {
               "score": {
-                "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+                "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
               },
               "verdict": {
                 "type": "string",
@@ -653,6 +800,156 @@
             },
             "required": [
               "kind"
+            ],
+            "additionalProperties": false
+          },
+          "decisioning": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "laya",
+                  "laya_shadow",
+                  "taxonomy",
+                  "llm_fallback",
+                  "heuristic",
+                  "disabled"
+                ]
+              },
+              "mode": {
+                "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/mode"
+              },
+              "urgency": {
+                "type": "object",
+                "properties": {
+                  "level": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "normal",
+                      "high",
+                      "critical"
+                    ]
+                  },
+                  "confidence": {
+                    "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
+                  }
+                },
+                "required": [
+                  "level",
+                  "confidence"
+                ],
+                "additionalProperties": false
+              },
+              "businessArea": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "confidence": {
+                    "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
+                  }
+                },
+                "required": [
+                  "id",
+                  "label",
+                  "confidence"
+                ],
+                "additionalProperties": false
+              },
+              "suggestedFolder": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "displayName": {
+                    "type": "string"
+                  },
+                  "outlookFolder": {
+                    "type": "string"
+                  },
+                  "confidence": {
+                    "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "laya",
+                      "taxonomy"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "displayName",
+                  "outlookFolder",
+                  "confidence"
+                ],
+                "additionalProperties": false
+              },
+              "replyExpected": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "boolean"
+                  },
+                  "confidence": {
+                    "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
+                  }
+                },
+                "required": [
+                  "value",
+                  "confidence"
+                ],
+                "additionalProperties": false
+              },
+              "actionRequired": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "boolean"
+                  },
+                  "confidence": {
+                    "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
+                  }
+                },
+                "required": [
+                  "value",
+                  "confidence"
+                ],
+                "additionalProperties": false
+              },
+              "lowConfidence": {
+                "type": "boolean"
+              },
+              "degraded": {
+                "type": "boolean"
+              },
+              "fallbackReason": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "taxonomyVersion": {
+                "type": "string"
+              },
+              "decisionVersion": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "mode",
+              "lowConfidence",
+              "degraded",
+              "decisionVersion"
             ],
             "additionalProperties": false
           }
@@ -866,7 +1163,7 @@
             }
           },
           "confidence": {
-            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+            "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
           },
           "auditId": {
             "type": "string"
@@ -950,7 +1247,7 @@
             "$ref": "#/components/schemas/AnalyzeEmailRequest/properties/language"
           },
           "confidence": {
-            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+            "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
           },
           "auditId": {
             "type": "string"
@@ -1088,7 +1385,7 @@
             "additionalProperties": false
           },
           "confidence": {
-            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+            "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
           },
           "source": {
             "type": "string",
@@ -1220,7 +1517,7 @@
                   "type": "string"
                 },
                 "relevance": {
-                  "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+                  "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
                 },
                 "excerpt": {
                   "type": "string"
@@ -1347,7 +1644,7 @@
             "additionalProperties": false
           },
           "confidence": {
-            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+            "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
           },
           "auditId": {
             "type": "string"
@@ -1802,7 +2099,7 @@
             ]
           },
           "confidence": {
-            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+            "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
           },
           "auditId": {
             "type": "string"
@@ -1837,7 +2134,7 @@
         "type": "object",
         "properties": {
           "score": {
-            "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+            "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
           },
           "verdict": {
             "type": "string",
@@ -2070,7 +2367,7 @@
               "additionalProperties": false
             },
             "confidence": {
-              "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+              "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
             },
             "riskLevel": {
               "$ref": "#/components/schemas/EmailAnalysis/properties/risks/items/properties/severity"
@@ -2270,7 +2567,7 @@
                   "type": "string"
                 },
                 "confidence": {
-                  "$ref": "#/components/schemas/EmailAnalysis/properties/classification/properties/confidence"
+                  "$ref": "#/components/schemas/SystemStatus/properties/decisioning/properties/minConfidence"
                 },
                 "model": {
                   "type": "string"

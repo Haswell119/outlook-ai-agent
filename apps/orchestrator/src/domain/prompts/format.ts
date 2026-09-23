@@ -24,7 +24,8 @@ export const langName = (l: Language) => (l === "fr" ? "French (français)" : "E
  * Neutralise the block markers inside attacker-controlled text.
  *
  * `formatEmail` delimits untrusted content with `### EMAIL` / `### END EMAIL`
- * lines. Those markers are the only thing separating data from instructions, so
+ * lines (and the narrative prompt adds a `### SYSTEM DECISIONS` block the email
+ * must not be able to imitate). Those markers are the only thing separating data from instructions, so
  * an email whose body contains `### END EMAIL` followed by its own directives
  * would otherwise appear to the model as if it came from us. Zero-width and
  * bidi controls are stripped for the same reason: they hide such a payload from
@@ -33,7 +34,7 @@ export const langName = (l: Language) => (l === "fr" ? "French (français)" : "E
 export function neutralizeDelimiters(text: string): string {
   return text
     .replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "")
-    .replace(/^(\s*)#{2,}(\s*(?:END\s+)?(?:EMAIL|MESSAGE|THREAD)\b)/gim, "$1[#]$2");
+    .replace(/^(\s*)#{2,}(\s*(?:END\s+)?(?:EMAIL|MESSAGE|THREAD|SYSTEM\s+DECISIONS)\b)/gim, "$1[#]$2");
 }
 
 /**

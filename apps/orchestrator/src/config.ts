@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MODEL_NAME_PATTERN } from "./domain/decisions/schemas.js";
 import { redactValue, resolveSecretFiles } from "./util/secrets.js";
 
 /**
@@ -31,6 +32,20 @@ const csv = (def: string[]) =>
 
 const int = (def: number) => z.coerce.number().int().default(def);
 const optStr = z.string().optional().transform((v) => (v && v.trim() !== "" ? v.trim() : undefined));
+/**
+ * Number whose empty value means "default". `z.coerce.number()` turns `""`
+ * into 0, which for a threshold such as `LAYA_MIN_CONFIDENCE=` would silently
+ * accept every answer. A non-number becomes NaN instead of a schema error, so
+ * the range checks in `superRefine` report it together with every other
+ * problem (fail fast, but with the complete list).
+ */
+const num = (def: number) =>
+  z.preprocess((v) => (typeof v === "string" ? (v.trim() === "" ? undefined : Number(v.trim())) : v), z.union([z.number(), z.nan()]).default(def));
+
+/** Laya knobs that must be strictly positive integers. */
+const LAYA_POSITIVE_INTS = ["LAYA_TIMEOUT_MS", "LAYA_MAX_RESPONSE_BYTES", "LAYA_CONCURRENCY", "LAYA_CIRCUIT_FAILURE_THRESHOLD", "LAYA_CIRCUIT_COOLDOWN_MS", "LAYA_INPUT_MAX_CHARS"] as const;
+/** Laya knobs that are ratios in [0, 1]. */
+const LAYA_RATIOS = ["LAYA_MIN_CONFIDENCE", "LAYA_FOLDER_MIN_CONFIDENCE", "LAYA_SHADOW_SAMPLE_RATE"] as const;
 
 const ConfigObjectSchema = z
   .object({
@@ -88,6 +103,43 @@ const ConfigObjectSchema = z
     /** Consecutive failures that open the circuit. */
     LLM_CIRCUIT_FAILURES: int(5),
     LLM_CIRCUIT_COOLDOWN_MS: int(30000),
+
+    /* ----------------- structured decisions (Laya, docs/LAYA.md) ----------------- */
+    /**
+     * `disabled` (default): historic behaviour, no decision engine at all.
+     * `mock`: deterministic in-process provider (demo, tests).
+     * `laya`: `laya-serve` over HTTP (`POST /v1/systemone`).
+     */
+    DECISION_PROVIDER: z.enum(["disabled", "mock", "laya"]).default("disabled"),
+    /** `shadow`: decisions are audited and measured, never shown. `active`: they drive the analysis. */
+    LAYA_MODE: z.enum(["shadow", "active"]).default("shadow"),
+    LAYA_BASE_URL: z.string().default("http://laya:8000"),
+    /** Bearer token expected by laya-serve (`LAYA_API_KEY` on its side). Never logged, never exposed. */
+    LAYA_API_KEY: optStr,
+    /** Per-call timeout; also the longest wait for a concurrency slot. */
+    LAYA_TIMEOUT_MS: num(5000),
+    LAYA_MAX_RESPONSE_BYTES: num(1_048_576),
+    /** Minimum engine confidence for urgency, business area, reply / action expected. */
+    LAYA_MIN_CONFIDENCE: num(0.75),
+    /** Minimum confidence of a folder decision before a `move_to_folder` suggestion is made. */
+    LAYA_FOLDER_MIN_CONFIDENCE: num(0.8),
+    /** When a decision is unusable (outage, low confidence): true = the historic full LLM prompt classifies; false = no classification. */
+    LAYA_FALLBACK_TO_LLM: bool(true),
+    /** In-flight decision calls per orchestrator process (one laya-serve pod serialises inference). */
+    LAYA_CONCURRENCY: num(1),
+    LAYA_CIRCUIT_FAILURE_THRESHOLD: num(5),
+    LAYA_CIRCUIT_COOLDOWN_MS: num(30000),
+    /** Folder taxonomy (JSON). Empty = the example bundled with the orchestrator (refused for laya+active in production). */
+    LAYA_TAXONOMY_FILE: optStr,
+    /** Bumped whenever questions / criteria / mapping change: part of every analysis cache key and audit record. */
+    LAYA_DECISION_VERSION: z.string().default("v1"),
+    /** Cap on the email body sent to the engine (head + tail kept). */
+    LAYA_INPUT_MAX_CHARS: num(4000),
+    /** `language`: english for English mail, multilingual otherwise. `auto`: let laya-serve route. `fixed`: always LAYA_FIXED_MODEL. */
+    LAYA_MODEL_STRATEGY: z.enum(["language", "auto", "fixed"]).default("language"),
+    LAYA_FIXED_MODEL: optStr,
+    /** Shadow mode only: fraction of analysed emails also sent to the engine (deterministic by content hash). */
+    LAYA_SHADOW_SAMPLE_RATE: num(1),
 
     /* ------------------------------ database ------------------------------ */
     DATABASE_URL: z.string().default("postgres://oao:oao@localhost:5432/oao"),
@@ -175,6 +227,36 @@ export const ConfigSchema = ConfigObjectSchema
     if (cfg.EMBEDDING_BATCH_SIZE < 1 || cfg.EMBEDDING_BATCH_SIZE > 512) fail("EMBEDDING_BATCH_SIZE", "EMBEDDING_BATCH_SIZE must be between 1 and 512");
     if (cfg.LLM_INPUT_MAX_CHARS < 500) fail("LLM_INPUT_MAX_CHARS", "LLM_INPUT_MAX_CHARS must be >= 500");
     if (cfg.THREAD_MAX_MESSAGES < 1) fail("THREAD_MAX_MESSAGES", "THREAD_MAX_MESSAGES must be >= 1");
+
+    /* ------------------------- structured decisions ------------------------ */
+    // Always validated (cheap, and a typo should not wait for the day the engine is switched on)…
+    for (const key of LAYA_RATIOS) {
+      const v = cfg[key];
+      if (!(Number.isFinite(v) && v >= 0 && v <= 1)) fail(key, `${key} must be a number between 0 and 1 (got ${v})`);
+    }
+    for (const key of LAYA_POSITIVE_INTS) {
+      const v = cfg[key];
+      if (!(Number.isInteger(v) && v > 0)) fail(key, `${key} must be a positive integer (got ${v})`);
+    }
+    if (cfg.LAYA_INPUT_MAX_CHARS > 20_000) fail("LAYA_INPUT_MAX_CHARS", "LAYA_INPUT_MAX_CHARS must be <= 20000 (the engine reads a few hundred tokens of state; see docs/LAYA.md)");
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(cfg.LAYA_DECISION_VERSION)) fail("LAYA_DECISION_VERSION", "LAYA_DECISION_VERSION must be 1-32 characters among letters, digits, '.', '_' and '-'");
+    if (cfg.LAYA_FIXED_MODEL && !MODEL_NAME_PATTERN.test(cfg.LAYA_FIXED_MODEL)) fail("LAYA_FIXED_MODEL", "LAYA_FIXED_MODEL must be a checkpoint name such as english, multilingual or typed-decisions");
+    // …but only an enabled engine may block the start: DECISION_PROVIDER=disabled always boots.
+    if (cfg.DECISION_PROVIDER !== "disabled" && cfg.LAYA_MODEL_STRATEGY === "fixed" && !cfg.LAYA_FIXED_MODEL) fail("LAYA_FIXED_MODEL", "LAYA_MODEL_STRATEGY=fixed requires LAYA_FIXED_MODEL (e.g. multilingual)");
+    if (cfg.DECISION_PROVIDER === "laya") {
+      let url: URL | undefined;
+      try {
+        url = new URL(cfg.LAYA_BASE_URL);
+      } catch {
+        fail("LAYA_BASE_URL", `LAYA_BASE_URL is not a valid URL (got "${cfg.LAYA_BASE_URL}")`);
+      }
+      if (url && url.protocol !== "http:" && url.protocol !== "https:") fail("LAYA_BASE_URL", "LAYA_BASE_URL must be an http(s) URL");
+      if (url && (url.username || url.password)) fail("LAYA_BASE_URL", "LAYA_BASE_URL must not embed credentials — use LAYA_API_KEY / LAYA_API_KEY_FILE");
+      if (cfg.LAYA_MODE === "active" && prod) {
+        if (!cfg.LAYA_API_KEY) fail("LAYA_API_KEY", "DECISION_PROVIDER=laya with LAYA_MODE=active requires LAYA_API_KEY (or LAYA_API_KEY_FILE) when NODE_ENV=production");
+        if (!cfg.LAYA_TAXONOMY_FILE) fail("LAYA_TAXONOMY_FILE", "DECISION_PROVIDER=laya with LAYA_MODE=active requires an explicit LAYA_TAXONOMY_FILE when NODE_ENV=production (the bundled taxonomy is an example)");
+      }
+    }
   });
 
 /** Names of every configuration variable (drives the `<NAME>_FILE` secret resolution). */

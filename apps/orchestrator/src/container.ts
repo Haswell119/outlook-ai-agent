@@ -4,6 +4,7 @@ import { createPgRepositories } from "./adapters/db/index.js";
 import { migrationsUpToDate, runMigrations } from "./adapters/db/migrate.js";
 import { createPool, type PgPool } from "./adapters/db/pool.js";
 import { ensureVectorDimensions, unknownVectorStore, type VectorStoreState } from "./adapters/db/vector-dimensions.js";
+import { createDecisionProvider, type ResilientDecisionProvider } from "./adapters/decision/index.js";
 import { CachedEmbeddingProvider } from "./adapters/llm/cached-embeddings.js";
 import { DisabledGraphClient, MsalGraphClient } from "./adapters/graph/client.js";
 import { MockEmbeddingProvider, MockLlmProvider } from "./adapters/llm/mock.js";
@@ -11,7 +12,9 @@ import { OpenAiCompatibleProvider } from "./adapters/llm/openai-compatible.js";
 import { QueuedLlmProvider } from "./adapters/llm/queue.js";
 import { createMemoryRepositories } from "./adapters/memory/index.js";
 import { WebhookNotifier } from "./adapters/notify/webhook.js";
+import { loadTaxonomy, taxonomyWarnings, type LoadedTaxonomy } from "./domain/decisions/taxonomy.js";
 import { Metrics } from "./metrics.js";
+import type { DecisionProvider } from "./ports/decision.js";
 import type { EmbeddingProvider, LlmProvider } from "./ports/llm.js";
 import type { GraphClient } from "./ports/graph.js";
 import type { Notifier } from "./ports/notifier.js";
@@ -28,6 +31,8 @@ export interface Container {
   llmQueue?: QueuedLlmProvider;
   /** Embedding cache wrapper, when embeddings are enabled. */
   embeddingCache?: CachedEmbeddingProvider;
+  /** Decision provider circuit / concurrency wrapper (undefined when disabled or bypassed). */
+  decisionResilience?: ResilientDecisionProvider;
   /** Postgres pool, when not in memory mode (readiness probe, leader election). */
   pool?: PgPool;
   /**
@@ -53,6 +58,13 @@ export interface ContainerOverrides {
   metrics?: Metrics;
   /** Skip the queue/circuit wrapper (unit tests that assert on the raw provider). */
   skipLlmQueue?: boolean;
+  /** Replaces the inner decision provider (still wrapped in resilience unless `skipDecisionResilience`). */
+  decisionProvider?: DecisionProvider;
+  skipDecisionResilience?: boolean;
+  /** Replaces the taxonomy file. */
+  taxonomy?: LoadedTaxonomy;
+  /** `fetch` used by the Laya HTTP adapter (tests with a fake server). */
+  decisionFetch?: typeof fetch;
 }
 
 /** Composition root: builds adapters from the config (or the given overrides) and wires the services. */
@@ -164,7 +176,22 @@ export async function createContainer(cfg: Config, overrides: ContainerOverrides
       : new DisabledGraphClient());
   const notifier = overrides.notifier ?? new WebhookNotifier(cfg.NOTIFY_WEBHOOK_URL, fetch, logger);
 
-  const deps: ServiceDeps = { cfg, repos, llm, embeddings, graph, notifier, logger, metrics };
+  /* ------------------------ structured decisions ------------------------ */
+  // Separate from the LLM on purpose: own provider, own circuit breaker, own
+  // concurrency. Disabled by default; the taxonomy is only read when enabled,
+  // and an invalid one stops the boot (TaxonomyError is a ConfigError).
+  const taxonomy = cfg.DECISION_PROVIDER === "disabled" ? undefined : (overrides.taxonomy ?? loadTaxonomy(cfg.LAYA_TAXONOMY_FILE));
+  const decision = createDecisionProvider(cfg, { logger, metrics, fetchImpl: overrides.decisionFetch }, overrides.decisionProvider, overrides.skipDecisionResilience);
+  if (cfg.DECISION_PROVIDER !== "disabled") {
+    logger.info(
+      { provider: cfg.DECISION_PROVIDER, mode: cfg.LAYA_MODE, modelStrategy: cfg.LAYA_MODEL_STRATEGY, taxonomy: taxonomy ? { version: taxonomy.taxonomy.version, source: taxonomy.source, hash: taxonomy.hash.slice(0, 12) } : undefined, fallbackToLlm: cfg.LAYA_FALLBACK_TO_LLM },
+      "structured decisions enabled",
+    );
+    if (taxonomy?.example) logger.warn({ file: taxonomy.source }, "LAYA_TAXONOMY_FILE is not set: using the bundled EXAMPLE taxonomy — set your own before relying on folder suggestions");
+    for (const warning of taxonomy ? taxonomyWarnings(taxonomy.taxonomy) : []) logger.warn({ file: taxonomy!.source }, `decision taxonomy: ${warning}`);
+  }
+
+  const deps: ServiceDeps = { cfg, repos, llm, embeddings, graph, notifier, logger, metrics, decisions: decision.provider, taxonomy, decisionStats: decision.resilient };
   const services = createServices(deps, metrics);
 
   const capturedPool = pool;
@@ -176,6 +203,7 @@ export async function createContainer(cfg: Config, overrides: ContainerOverrides
     metrics,
     llmQueue,
     embeddingCache,
+    decisionResilience: decision.resilient,
     pool: capturedPool,
     vectorStore: capturedVectorStore,
     startedAt: Date.now(),

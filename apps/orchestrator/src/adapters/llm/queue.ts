@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import { LlmError } from "../../errors.js";
 import type { LlmCompletion, LlmProvider, LlmRequest, LlmUseCase } from "../../ports/llm.js";
+import { CircuitBreaker } from "../../util/circuit-breaker.js";
 
 /**
  * LLM queue, two-tier model router and circuit breaker — the load governor in
@@ -110,9 +111,8 @@ export class QueuedLlmProvider implements LlmProvider {
   private running = 0;
   private seq = 0;
 
-  private consecutiveFailures = 0;
-  private circuitOpenedAt = 0;
-  private halfOpenInFlight = false;
+  /** Breaker state is shared logic (`util/circuit-breaker.ts`), but this instance is the LLM's alone. */
+  private readonly breaker: CircuitBreaker;
 
   private latencySum = 0;
   private latencyCount = 0;
@@ -127,6 +127,12 @@ export class QueuedLlmProvider implements LlmProvider {
     this.name = inner.name;
     this.model = opts.model || inner.model;
     this.now = opts.now ?? (() => Date.now());
+    this.breaker = new CircuitBreaker({
+      failureThreshold: opts.circuitFailures,
+      cooldownMs: opts.circuitCooldownMs,
+      now: this.now,
+      onOpen: ({ failures, cooldownMs }) => this.opts.logger?.warn({ failures, cooldownMs }, "llm circuit opened — degrading to heuristics"),
+    });
   }
 
   /* ------------------------------- routing ------------------------------ */
@@ -141,35 +147,20 @@ export class QueuedLlmProvider implements LlmProvider {
   /* --------------------------- circuit breaker -------------------------- */
 
   get circuitOpen(): boolean {
-    if (this.consecutiveFailures < this.opts.circuitFailures) return false;
-    return this.now() - this.circuitOpenedAt < this.opts.circuitCooldownMs;
+    return this.breaker.isOpen;
   }
 
-  /** True when the cooldown elapsed and one trial call may go through. */
+  /** True when the circuit is closed, or when the cooldown elapsed and this is the single trial call. */
   private canProbe(): boolean {
-    if (this.consecutiveFailures < this.opts.circuitFailures) return true;
-    if (this.now() - this.circuitOpenedAt < this.opts.circuitCooldownMs) return false;
-    if (this.halfOpenInFlight) return false;
-    this.halfOpenInFlight = true;
-    return true;
+    return this.breaker.tryAcquire();
   }
 
   private onSuccess(): void {
-    this.consecutiveFailures = 0;
-    this.circuitOpenedAt = 0;
-    this.halfOpenInFlight = false;
+    this.breaker.recordSuccess();
   }
 
   private onFailure(): void {
-    this.consecutiveFailures++;
-    this.halfOpenInFlight = false;
-    if (this.consecutiveFailures === this.opts.circuitFailures) {
-      this.circuitOpenedAt = this.now();
-      this.opts.logger?.warn({ failures: this.consecutiveFailures, cooldownMs: this.opts.circuitCooldownMs }, "llm circuit opened — degrading to heuristics");
-    } else if (this.consecutiveFailures > this.opts.circuitFailures) {
-      // Failed probe: restart the cooldown.
-      this.circuitOpenedAt = this.now();
-    }
+    this.breaker.recordFailure();
   }
 
   /* ------------------------------ scheduling ---------------------------- */
@@ -272,7 +263,7 @@ export class QueuedLlmProvider implements LlmProvider {
     if (!this.canProbe()) {
       this.shortCircuited++;
       this.record({ model, useCase, priority, outcome: "circuit_open", latencyMs: 0, waitMs: 0 });
-      throw new LlmError("network", `LLM circuit open after ${this.consecutiveFailures} consecutive failures — degraded mode`);
+      throw new LlmError("network", `LLM circuit open after ${this.breaker.failures} consecutive failures — degraded mode`);
     }
 
     const queuedAt = this.now();
@@ -281,7 +272,7 @@ export class QueuedLlmProvider implements LlmProvider {
       release = await this.acquire(req);
     } catch (e) {
       // A probe that never got a slot must not keep the half-open state locked.
-      this.halfOpenInFlight = false;
+      this.breaker.abandonProbe();
       this.record({ model, useCase, priority, outcome: "queue_timeout", latencyMs: 0, waitMs: this.now() - queuedAt });
       throw e;
     }
@@ -332,7 +323,7 @@ export class QueuedLlmProvider implements LlmProvider {
       circuitOpen: this.circuitOpen,
       shortCircuited: this.shortCircuited,
       queueTimeouts: this.queueTimeouts,
-      consecutiveFailures: this.consecutiveFailures,
+      consecutiveFailures: this.breaker.failures,
       totalCalls: this.totalCalls,
       byModel: Object.fromEntries(this.byModel),
     };
@@ -340,6 +331,6 @@ export class QueuedLlmProvider implements LlmProvider {
 
   /** Test helper: forget the breaker state. */
   resetCircuit(): void {
-    this.onSuccess();
+    this.breaker.reset();
   }
 }

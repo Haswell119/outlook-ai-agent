@@ -60,7 +60,8 @@ export class ActionsService {
         requiresComplianceApproval: g.requiresComplianceApproval,
         executionTarget: g.executionTarget,
         parameters: { ...s.parameters, emailId: analysis.emailId, conversationId: analysis.conversationId },
-        selectedByDefault: g.riskLevel !== "high",
+        // A suggestion flagged `selectedByDefault: false` (e.g. a decision-engine folder) must be ticked by the user.
+        selectedByDefault: g.riskLevel !== "high" && s.parameters.selectedByDefault !== false,
       };
     });
 
@@ -231,9 +232,15 @@ export class ActionsService {
       case "archive":
         await graph.moveMessage(token, emailId, "archive");
         return "Message archived";
-      case "move_to_folder":
-        await graph.moveMessage(token, emailId, String(p.folder ?? p.destinationFolder ?? "archive"));
-        return `Message moved to ${p.folder ?? p.destinationFolder ?? "archive"}`;
+      case "move_to_folder": {
+        const folder = String(p.folder ?? p.destinationFolder ?? "archive");
+        // Graph moves to a folder *id* or a well-known name; a display path
+        // ("Operations/NAV") is neither (ids are per mailbox), so the move is
+        // left to the user in Outlook instead of failing server-side.
+        if (!isGraphFolderRef(folder)) throw new GraphDisabledError(`"${folder}" is a folder path, not a Graph folder id — moved by the user in Outlook`);
+        await graph.moveMessage(token, emailId, folder);
+        return `Message moved to ${folder}`;
+      }
       case "categorize":
       case "classify_email":
         await graph.updateCategories(token, emailId, [String(p.category ?? "AI")]);
@@ -259,6 +266,12 @@ export class ActionsService {
     return { actionId, type: stored.action.type, status: req.status === "cancelled" ? "rejected" : req.status, message: req.message, auditId: ev.id };
   }
 }
+
+/** Graph well-known mail folder names (usable as `destinationId`). */
+const WELL_KNOWN_FOLDERS = new Set(["archive", "inbox", "deleteditems", "drafts", "junkemail", "sentitems", "outbox", "conversationhistory", "clutter", "scheduled", "searchfolders", "recoverableitemsdeletions"]);
+
+/** True for a Graph folder id (long opaque base64url-ish string) or a well-known name. */
+export const isGraphFolderRef = (folder: string): boolean => WELL_KNOWN_FOLDERS.has(folder.trim().toLowerCase()) || /^[A-Za-z0-9+=_-]{40,}$/.test(folder.trim());
 
 const sourceOf = (p: StoredProposal) => ({ label: p.actions[0]?.action.source.label ?? "", emailId: p.emailId, conversationId: p.conversationId });
 const sourceLabelOf = (e: EmailContext) => e.subject || "(no subject)";

@@ -11,9 +11,9 @@ import { AppError } from "../../errors.js";
  *  - `GET /api/v1/live`  — liveness: 200 as soon as the process is up. It never
  *    touches a dependency, so a slow database can never trigger a pod restart.
  *  - `GET /api/v1/ready` — readiness: database reachable **and** migrations
- *    applied. An LLM or Graph outage does **not** make the pod unready: the
- *    service still answers with heuristics, and removing it from the Service
- *    would turn a degradation into an outage.
+ *    applied. An LLM, Graph or decision-engine (Laya) outage does **not** make
+ *    the pod unready: the service still answers (heuristics, LLM fallback),
+ *    and removing it from the Service would turn a degradation into an outage.
  *  - `GET /api/v1/health` — unchanged detailed view (used by the runbook).
  */
 export async function systemRoutes(app: FastifyInstance, c: Container) {
@@ -26,7 +26,7 @@ export async function systemRoutes(app: FastifyInstance, c: Container) {
   });
 
   app.get(Routes.health, async () => {
-    const [db, llm] = await Promise.all([c.deps.repos.ping(2000), c.deps.llm.ping(2000)]);
+    const [db, llm, laya] = await Promise.all([c.deps.repos.ping(2000), c.deps.llm.ping(2000), decisionCheck(c)]);
     const queue = c.llmQueue?.stats;
     const checks = {
       database: { status: db.ok ? "ok" : "down", detail: db.detail },
@@ -37,10 +37,12 @@ export async function systemRoutes(app: FastifyInstance, c: Container) {
         detail: c.cfg.ROLE === "api" ? "API-only role (ROLE=api)" : c.cfg.WORKERS_ENABLED ? `scheduler enabled (precompute=${c.cfg.PRECOMPUTE_ENABLED})` : "WORKERS_ENABLED=false",
       },
       vectors: vectorCheck(c),
+      // Present only when DECISION_PROVIDER is enabled; never "down" (the engine is optional by design).
+      ...(laya ? { laya } : {}),
     } as const;
     const vectors = checks.vectors;
-    const status = !db.ok ? "down" : !llm.ok || queue?.circuitOpen || vectors.status === "down" ? "degraded" : "ok";
-    return HealthSchema.parse({ status, checks, version: APP_VERSION, timestamp: new Date().toISOString() });
+    const status = !db.ok ? "down" : !llm.ok || queue?.circuitOpen || vectors.status === "down" || laya?.affectsUsers ? "degraded" : "ok";
+    return HealthSchema.parse({ status, checks: stripInternal(checks), version: APP_VERSION, timestamp: new Date().toISOString() });
   });
 
   app.get(Routes.features, async () => FeatureFlagsSchema.parse(features(c)));
@@ -67,6 +69,7 @@ export async function systemRoutes(app: FastifyInstance, c: Container) {
       c.metrics.llmQueueRunning.set(queue.running);
       c.metrics.llmCircuitOpen.set(queue.circuitOpen ? 1 : 0);
     }
+    if (c.decisionResilience) c.metrics.setLayaCircuit(c.decisionResilience.circuitState);
     const { contentType, body } = await c.metrics.render();
     return reply.header("content-type", contentType).send(body);
   });
@@ -87,6 +90,25 @@ export function vectorCheck(c: Container): { status: "ok" | "degraded" | "down";
   if (v.mismatch) return { status: "down", detail: v.mismatch };
   if (!v.pgvector) return { status: "degraded", detail: v.detail };
   return { status: "ok", detail: `${v.detail}${v.redimensioned ? " (re-dimensioned at boot: stored embeddings were discarded, re-index to recompute them)" : ""}` };
+}
+
+/**
+ * Decision-engine check for `/health` (undefined when disabled). `degraded`
+ * whenever the engine is unreachable or its circuit is open — it is optional:
+ * `/ready` never looks at it. `affectsUsers` (active mode only) also degrades
+ * the overall status: in shadow mode nobody sees the difference.
+ */
+export async function decisionCheck(c: Container): Promise<{ status: "ok" | "degraded"; detail?: string; affectsUsers: boolean } | undefined> {
+  const svc = c.services.emailDecision;
+  if (!svc.enabled) return undefined;
+  const h = await svc.health();
+  const ok = h.state === "ok";
+  return { status: ok ? "ok" : "degraded", detail: `${h.state}: ${h.detail ?? ""}`.trim(), affectsUsers: !ok && svc.mode === "active" };
+}
+
+/** Drop fields that are not part of the `Health` contract. */
+function stripInternal<T extends Record<string, unknown>>(checks: T): Record<string, { status: "ok" | "degraded" | "down"; detail?: string }> {
+  return Object.fromEntries(Object.entries(checks).map(([k, v]) => [k, { status: (v as { status: "ok" | "degraded" | "down" }).status, detail: (v as { detail?: string }).detail }]));
 }
 
 /** True when embeddings are configured **and** effectively storable/queryable. */
@@ -111,18 +133,19 @@ export function features(c: Container) {
 
 /** Admin: full runtime status (queues, caches, workers, sync). */
 export async function systemStatus(c: Container, userId?: string) {
-  const [db, llm] = await Promise.all([c.deps.repos.ping(2000), c.deps.llm.ping(2000)]);
+  const [db, llm, decisioning] = await Promise.all([c.deps.repos.ping(2000), c.deps.llm.ping(2000), c.services.emailDecision.status()]);
   const queue = c.llmQueue?.stats;
   const cache = c.services.cache.stats;
   const embedding = c.embeddingCache?.stats ?? { hits: 0, misses: 0 };
   const sync = userId ? await c.services.mailboxSync.status(userId).catch(() => undefined) : undefined;
   return SystemStatusSchema.parse({
     health: {
-      status: !db.ok ? "down" : !llm.ok || queue?.circuitOpen ? "degraded" : "ok",
+      status: !db.ok ? "down" : !llm.ok || queue?.circuitOpen || (decisioning.provider !== "disabled" && decisioning.mode === "active" && decisioning.state !== "ok") ? "degraded" : "ok",
       checks: {
         database: { status: db.ok ? "ok" : "down", detail: db.detail },
         llm: { status: llm.ok && !queue?.circuitOpen ? "ok" : "degraded", detail: queue?.circuitOpen ? "circuit open" : llm.detail },
         vectors: vectorCheck(c),
+        ...(decisioning.provider !== "disabled" ? { laya: { status: decisioning.state === "ok" ? "ok" : "degraded", detail: `${decisioning.state}: ${decisioning.detail ?? ""}`.trim() } } : {}),
       },
       version: APP_VERSION,
       timestamp: new Date().toISOString(),
@@ -137,6 +160,7 @@ export async function systemStatus(c: Container, userId?: string) {
     },
     cache: { analysisHits: cache.hits, analysisMisses: cache.misses, embeddingHits: embedding.hits, embeddingMisses: embedding.misses },
     sync,
+    decisioning,
     uptimeSeconds: Math.round((Date.now() - c.startedAt) / 1000),
   });
 }

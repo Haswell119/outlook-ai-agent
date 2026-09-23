@@ -76,7 +76,19 @@ if (LOADED_ENV_FILES.length === 0 && cfg.NODE_ENV !== "production") {
 
 /* -------------------------------- container ------------------------------ */
 
-const container = await createContainer(cfg, { logger });
+let container: Awaited<ReturnType<typeof createContainer>>;
+try {
+  container = await createContainer(cfg, { logger });
+} catch (e) {
+  // A configuration file read at wiring time (e.g. the Laya taxonomy) is still a configuration error.
+  if (e instanceof ConfigError) {
+    console.error(`\nOutlook AI Orchestrator: invalid configuration (${e.problems.length} problem${e.problems.length > 1 ? "s" : ""})\n`);
+    for (const p of e.problems) console.error(`  ✗ ${p}`);
+    console.error("\nSee docs/LAYA.md §taxonomie for the taxonomy format.\n");
+    process.exit(78); // EX_CONFIG
+  }
+  throw e;
+}
 if (isMemoryDatabase(cfg) && cfg.DEMO_SEED) {
   const r = await seedDemo(container);
   logger.info(r, "demo data seeded into memory repositories");

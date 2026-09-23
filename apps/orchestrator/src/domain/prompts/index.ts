@@ -2,6 +2,7 @@ export * from "./schemas.js";
 export * from "./clean.js";
 export * from "./format.js";
 export * from "./analysis.js";
+export * from "./narrative.js";
 export * from "./thread.js";
 export * from "./draft.js";
 export * from "./chat.js";

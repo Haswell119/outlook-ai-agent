@@ -14,6 +14,8 @@ export interface LlmMessage {
  */
 export type LlmUseCase =
   | "email_analysis"
+  /** Reduced analysis prompt used when the decision engine already classified the email (no classification asked). */
+  | "email_narrative"
   | "thread_synthesis"
   | "draft_reply"
   | "chat_answer"

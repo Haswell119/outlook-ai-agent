@@ -139,6 +139,8 @@ function answer(useCase: LlmUseCase, prompt: string, lang: Language): unknown {
   switch (useCase) {
     case "email_analysis":
       return emailAnalysis(prompt, lang);
+    case "email_narrative":
+      return emailNarrative(prompt, lang);
     case "thread_synthesis":
       return threadSynthesis(prompt, lang);
     case "draft_reply":
@@ -186,6 +188,13 @@ function emailAnalysis(prompt: string, lang: Language) {
   const h = analyzeHeuristically(email, lang, 0.9);
   const conf = Math.min(0.95, 0.78 + Math.min(h.signals.keyPhrases.length, 4) * 0.04);
   return { ...h, signals: undefined, confidence: Number(conf.toFixed(2)) };
+}
+
+/** Reduced analysis: the same heuristics, without classification nor filing actions (the decision engine owns those). */
+function emailNarrative(prompt: string, lang: Language) {
+  const { classification: _classification, suggestedActions, ...rest } = emailAnalysis(prompt, lang) as ReturnType<typeof emailAnalysis> & { classification?: unknown; suggestedActions?: Array<{ type: string }> };
+  void _classification;
+  return { ...rest, suggestedActions: (suggestedActions ?? []).filter((a) => !["categorize", "classify_email", "move_to_folder", "archive"].includes(a.type)) };
 }
 
 function threadSynthesis(prompt: string, lang: Language) {

@@ -8,6 +8,7 @@ import { ComplianceService } from "./ComplianceService.js";
 import type { ServiceDeps } from "./context.js";
 import { DailyBriefService } from "./DailyBriefService.js";
 import { DraftReplyService } from "./DraftReplyService.js";
+import { decisionSettings, EmailDecisionService } from "./EmailDecisionService.js";
 import { EscalationService } from "./EscalationService.js";
 import { FeedbackService } from "./FeedbackService.js";
 import { IndexEmailsService } from "./IndexEmailsService.js";
@@ -22,6 +23,8 @@ export interface Services {
   audit: AuditService;
   policy: PolicyService;
   cache: AiCacheService;
+  /** Structured decisions (Laya); `enabled === false` when DECISION_PROVIDER=disabled. */
+  emailDecision: EmailDecisionService;
   analyzeEmail: AnalyzeEmailService;
   synthesizeThread: SynthesizeThreadService;
   draftReply: DraftReplyService;
@@ -44,7 +47,8 @@ export function createServices(deps: ServiceDeps, metrics?: Metrics): Services {
   const policy = new PolicyService(deps.repos.policy, audit, deps.cfg.INTERNAL_DOMAINS);
   const cache = new AiCacheService(deps.repos.analysisCache, { enabled: deps.cfg.ANALYSIS_CACHE_ENABLED, ttlHours: deps.cfg.ANALYSIS_CACHE_TTL_HOURS, logger: deps.logger, metrics });
   const indexEmails = new IndexEmailsService(deps, audit);
-  const analyzeEmail = new AnalyzeEmailService(deps, audit, policy, cache, metrics, indexEmails);
+  const emailDecision = new EmailDecisionService({ provider: deps.decisions, settings: decisionSettings(deps.cfg), taxonomy: deps.taxonomy, resilience: deps.decisionStats, logger: deps.logger, metrics });
+  const analyzeEmail = new AnalyzeEmailService(deps, audit, policy, cache, metrics, indexEmails, emailDecision);
   const synthesizeThread = new SynthesizeThreadService(deps, audit, cache);
   const draftReply = new DraftReplyService(deps, audit, cache);
   const search = new SearchService(deps, audit, indexEmails);
@@ -57,5 +61,5 @@ export function createServices(deps: ServiceDeps, metrics?: Metrics): Services {
   const users = new UsersService(audit, deps.cfg);
   const dailyBrief = new DailyBriefService(deps, audit, cache, metrics);
   const mailboxSync = new MailboxSyncService(deps, audit, indexEmails, analyzeEmail, policy, metrics);
-  return { audit, policy, cache, analyzeEmail, synthesizeThread, draftReply, indexEmails, search, chat, escalations, actions, compliance, automations, feedback, users, dailyBrief, mailboxSync };
+  return { audit, policy, cache, emailDecision, analyzeEmail, synthesizeThread, draftReply, indexEmails, search, chat, escalations, actions, compliance, automations, feedback, users, dailyBrief, mailboxSync };
 }

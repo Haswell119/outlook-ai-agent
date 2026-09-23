@@ -152,6 +152,69 @@ export const DetectedRiskSchema = z.object({
 });
 export type DetectedRisk = z.infer<typeof DetectedRiskSchema>;
 
+/* ------------------------------------------------------------------------- */
+/*  1b. Structured decisions (local decision engine, e.g. Laya) — optional   */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Where the structured decisions of an analysis come from:
+ *  - `laya`         : the local decision engine answered with enough confidence (active mode)
+ *  - `laya_shadow`  : consulted in shadow mode — audited and measured, never shown to the user
+ *  - `taxonomy`     : derived deterministically from the taxonomy. For a business area with a single
+ *                     folder the origin is marked on `suggestedFolder.source` (the area itself still
+ *                     comes from the engine, so the top-level source stays `laya`)
+ *  - `llm_fallback` : the engine was unavailable or unsure; the historic LLM prompt classified
+ *  - `heuristic`    : the engine was unavailable and the LLM fallback is disabled: rules only
+ *  - `disabled`     : no decision engine configured
+ */
+export const DecisionSourceSchema = z.enum(["laya", "laya_shadow", "taxonomy", "llm_fallback", "heuristic", "disabled"]);
+export type DecisionSource = z.infer<typeof DecisionSourceSchema>;
+
+/** `shadow`: decisions are computed for comparison only. `active`: they drive the analysis. */
+export const DecisionModeSchema = z.enum(["shadow", "active"]);
+export type DecisionMode = z.infer<typeof DecisionModeSchema>;
+
+export const UrgencyLevelSchema = z.enum(["low", "normal", "high", "critical"]);
+export type UrgencyLevel = z.infer<typeof UrgencyLevelSchema>;
+
+/**
+ * Structured decisions attached to an analysis. Optional everywhere: absent
+ * when the decision engine is disabled or in shadow mode, and every consumer
+ * must keep working without it. Only decisions that passed the confidence
+ * policy are filled in; `lowConfidence` tells that at least one did not.
+ * A suggested folder is only ever a *suggestion*: moving the email goes
+ * through the usual propose → human approval → execute flow.
+ */
+export const EmailDecisioningSchema = z.object({
+  source: DecisionSourceSchema,
+  mode: DecisionModeSchema,
+  urgency: z.object({ level: UrgencyLevelSchema, confidence: ConfidenceSchema }).optional(),
+  businessArea: z.object({ id: z.string(), label: z.string(), confidence: ConfidenceSchema }).optional(),
+  suggestedFolder: z
+    .object({
+      id: z.string(),
+      displayName: z.string(),
+      outlookFolder: z.string(),
+      confidence: ConfidenceSchema,
+      /** `taxonomy` when the area has a single folder (no second decision needed). */
+      source: z.enum(["laya", "taxonomy"]).optional(),
+    })
+    .optional(),
+  replyExpected: z.object({ value: z.boolean(), confidence: ConfidenceSchema }).optional(),
+  actionRequired: z.object({ value: z.boolean(), confidence: ConfidenceSchema }).optional(),
+  /** At least one answer was discarded by the confidence policy (confidence below the threshold or missing, or an unusable answer). */
+  lowConfidence: z.boolean(),
+  /** The decision engine failed (timeout, outage, invalid answer…) for this email. */
+  degraded: z.boolean(),
+  /** Machine-readable reason of a fallback (`low_confidence`, `timeout`, `circuit_open`…). Never email content. */
+  fallbackReason: z.string().optional(),
+  /** Checkpoint that answered (e.g. `multilingual`). */
+  model: z.string().optional(),
+  taxonomyVersion: z.string().optional(),
+  decisionVersion: z.string(),
+});
+export type EmailDecisioning = z.infer<typeof EmailDecisioningSchema>;
+
 export const EmailAnalysisSchema = z.object({
   emailId: z.string(),
   language: LanguageSchema,
@@ -189,6 +252,12 @@ export const EmailAnalysisSchema = z.object({
   triage: z
     .object({ kind: z.enum(["conversation", "notification", "newsletter", "out_of_office", "automatic", "calendar", "trivial"]), reason: z.string().optional() })
     .optional(),
+  /**
+   * Structured decisions (urgency, business area, suggested folder, reply /
+   * action expected) from the local decision engine. Optional: absent when it
+   * is disabled or in shadow mode.
+   */
+  decisioning: EmailDecisioningSchema.optional(),
 });
 export type EmailAnalysis = z.infer<typeof EmailAnalysisSchema>;
 
@@ -954,6 +1023,46 @@ export const FeatureFlagsSchema = z.object({
 });
 export type FeatureFlags = z.infer<typeof FeatureFlagsSchema>;
 
+/**
+ * Admin: status of the structured-decision engine (Laya). Configuration and
+ * counters only — never an API key, an URL with credentials or email content.
+ */
+export const DecisioningStatusSchema = z.object({
+  provider: z.enum(["disabled", "mock", "laya"]),
+  mode: DecisionModeSchema,
+  /** `unavailable`: the last probe failed or the circuit is open. The orchestrator stays ready either way. */
+  state: z.enum(["ok", "degraded", "unavailable", "disabled"]),
+  detail: z.string().optional(),
+  circuit: z.enum(["closed", "open", "half_open"]),
+  modelStrategy: z.enum(["language", "auto", "fixed"]),
+  fixedModel: z.string().optional(),
+  /** Checkpoints reported as loaded by the engine's health probe. */
+  loadedModels: z.array(z.string()).optional(),
+  device: z.string().optional(),
+  taxonomyVersion: z.string().optional(),
+  decisionVersion: z.string(),
+  minConfidence: ConfidenceSchema,
+  folderMinConfidence: ConfidenceSchema,
+  fallbackToLlm: z.boolean(),
+  shadowSampleRate: ConfidenceSchema,
+  concurrency: z.number().int(),
+  stats: z.object({
+    /** Emails for which a decision was attempted since the process started. */
+    decisions: z.number().int().nonnegative(),
+    /** HTTP calls to the engine (a hierarchical decision makes one or two). */
+    providerCalls: z.number().int().nonnegative(),
+    failures: z.number().int().nonnegative(),
+    fallbacks: z.number().int().nonnegative(),
+    lowConfidence: z.number().int().nonnegative(),
+    /** lowConfidence / decisions, when at least one decision was made. */
+    lowConfidenceRate: z.number().min(0).max(1).optional(),
+    avgLatencyMs: z.number().optional(),
+    inFlight: z.number().int().nonnegative(),
+    pending: z.number().int().nonnegative(),
+  }),
+});
+export type DecisioningStatus = z.infer<typeof DecisioningStatusSchema>;
+
 /** Admin: runtime status of the orchestrator (queues, caches, workers). */
 export const SystemStatusSchema = z.object({
   health: z.lazy(() => HealthSchema),
@@ -961,6 +1070,8 @@ export const SystemStatusSchema = z.object({
   llmQueue: z.object({ pending: z.number().int(), running: z.number().int(), concurrency: z.number().int(), avgLatencyMs: z.number().optional(), circuitOpen: z.boolean() }),
   cache: z.object({ analysisHits: z.number().int(), analysisMisses: z.number().int(), embeddingHits: z.number().int(), embeddingMisses: z.number().int() }),
   sync: MailboxSyncStatusSchema.optional(),
+  /** Structured-decision engine (Laya). Absent on orchestrators that predate it. */
+  decisioning: DecisioningStatusSchema.optional(),
   uptimeSeconds: z.number(),
 });
 export type SystemStatus = z.infer<typeof SystemStatusSchema>;

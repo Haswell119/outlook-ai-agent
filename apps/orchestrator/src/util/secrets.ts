@@ -54,6 +54,7 @@ export function resolveSecretFiles(
 /** Keys whose value must never be printed or logged. */
 export const SECRET_KEYS = new Set([
   "LLM_API_KEY",
+  "LAYA_API_KEY",
   "AAD_CLIENT_SECRET",
   "ADMIN_API_TOKEN",
   "METRICS_TOKEN",

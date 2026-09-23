@@ -30,6 +30,13 @@ const actionList = z
   .catch([])
   .transform((items) => items.map((i) => LlmSuggestedActionSchema.safeParse(i)).filter((r) => r.success).map((r) => r.data));
 
+/**
+ * Action types that file / classify an email. In the narrative path the
+ * decision engine owns filing (deterministic `move_to_folder` suggestion), so
+ * these are dropped from the model's answer even if it produces them.
+ */
+export const FILING_ACTION_TYPES: ReadonlySet<string> = new Set(["categorize", "classify_email", "move_to_folder", "archive"]);
+
 export const EmailAnalysisLlmSchema = z.object({
   language: LanguageSchema.catch("en"),
   summary: z.string().min(1),
@@ -42,6 +49,26 @@ export const EmailAnalysisLlmSchema = z.object({
   confidence: conf,
 });
 export type EmailAnalysisLlm = z.infer<typeof EmailAnalysisLlmSchema>;
+
+/**
+ * Reduced (narrative) analysis: only what needs free-text understanding.
+ * Deliberately **no** classification, folder, urgency or reply-expected field:
+ * those come from the decision engine, and the model is never asked for a
+ * value that would then be ignored.
+ */
+export const EmailNarrativeLlmSchema = z.object({
+  language: LanguageSchema.catch("en"),
+  summary: z.string().min(1),
+  decisions: strArr,
+  pendingTasks: strArr,
+  /** Narrative risks: the ones that need reading the text (missing documents, contradictions, confidentiality…). */
+  risks: z.array(LlmRiskSchema).catch([]),
+  suggestedActions: actionList.transform((actions) => actions.filter((a) => !FILING_ACTION_TYPES.has(a.type))),
+  quickReplies: strArr.transform((a) => a.slice(0, 4)),
+  /** Confidence of the generated content. */
+  confidence: conf,
+});
+export type EmailNarrativeLlm = z.infer<typeof EmailNarrativeLlmSchema>;
 
 export const ThreadSynthesisLlmSchema = z.object({
   language: LanguageSchema.catch("en"),

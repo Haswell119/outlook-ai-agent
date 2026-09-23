@@ -1,7 +1,10 @@
 import type { Language } from "@oao/shared";
 import type { Config } from "../config.js";
 import type { AuthenticatedUser } from "../auth/identity.js";
+import type { DecisionProviderStats } from "../adapters/decision/resilient.js";
+import type { LoadedTaxonomy } from "../domain/decisions/taxonomy.js";
 import type { Metrics } from "../metrics.js";
+import type { DecisionProvider } from "../ports/decision.js";
 import type { EmbeddingProvider, LlmProvider } from "../ports/llm.js";
 import type { GraphClient } from "../ports/graph.js";
 import type { Notifier } from "../ports/notifier.js";
@@ -22,6 +25,15 @@ export interface ServiceDeps {
   repos: Repositories;
   llm: LlmProvider;
   embeddings?: EmbeddingProvider;
+  /**
+   * Structured-decision engine (Laya), separate from the LLM. Always wired:
+   * `DisabledDecisionProvider` when `DECISION_PROVIDER=disabled`.
+   */
+  decisions: DecisionProvider;
+  /** Folder taxonomy, loaded and validated at boot; absent when decisions are disabled. */
+  taxonomy?: LoadedTaxonomy;
+  /** Circuit / queue view of the decision provider (status page, metrics). */
+  decisionStats?: { readonly stats: DecisionProviderStats };
   graph: GraphClient;
   notifier: Notifier;
   logger: Logger;
