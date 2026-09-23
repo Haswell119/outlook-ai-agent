@@ -16,3 +16,14 @@ apps/addin/certs/
 *.key
 *.crt
 !infra/**/*.example
+
+# Laya evaluation: real annotated emails and generated reports never enter Git
+evaluation/laya/private/
+evaluation/laya/results/
+
+# Local Laya virtualenv and model cache (docs/LAYA.md §9)
+.laya/
+
+# Python bytecode (infra/docker/laya helper, evaluation tooling)
+__pycache__/
+*.py[cod]

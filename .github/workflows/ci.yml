@@ -105,6 +105,17 @@ jobs:
           ADMIN_AUTH_MODE: token
         run: npm run build -w ${{ matrix.package.workspace }}
 
+      # Structured-decision engine: the real orchestrator against a fake Laya
+      # (wire-compatible, no model, no network), then the evaluation harness on
+      # the synthetic dataset with the deterministic mock provider.
+      - name: Laya integration smoke test (fake engine, no model)
+        if: matrix.package.name == 'orchestrator'
+        run: npm run smoke:laya
+
+      - name: Laya evaluation harness (mock provider, synthetic dataset)
+        if: matrix.package.name == 'orchestrator'
+        run: npm run eval:laya -- --provider mock --no-permutations --out ${{ runner.temp }}/laya-eval
+
       - name: Render and validate the Office manifests
         if: matrix.package.name == 'addin'
         env:
@@ -230,7 +241,9 @@ jobs:
           node scripts/dev-db.mjs --help
           node scripts/certs.mjs --help
           node scripts/check-llm.mjs --help
+          node scripts/check-laya.mjs --help
           node scripts/smoke.mjs --help
+          node scripts/smoke-laya.mjs --help
           node scripts/sideload-manifest.mjs --help
           node scripts/render-k8s.mjs --help
 
@@ -304,6 +317,14 @@ jobs:
             --set ingress.enabled=false \
             --set traefik.ingressRoute.enabled=true \
             > /tmp/rendered/external.yaml
+          # Laya decision engine in shadow mode (docs/LAYA.md).
+          helm template oao $CHART -n oao -f $CHART/values-nkp.yaml \
+            --set laya.enabled=true \
+            > /tmp/rendered/laya.yaml
+          # Active mode without a key or an own taxonomy must be refused at render time.
+          if helm template oao $CHART -n oao --set laya.enabled=true --set laya.mode=active > /dev/null 2>&1; then
+            echo "::error::laya.mode=active without laya.taxonomy must fail"; exit 1
+          fi
           wc -l /tmp/rendered/*.yaml
 
       - name: kubeconform
@@ -356,6 +377,8 @@ jobs:
           - { name: orchestrator, dockerfile: infra/docker/orchestrator.Dockerfile }
           - { name: admin, dockerfile: infra/docker/admin.Dockerfile }
           - { name: addin, dockerfile: infra/docker/addin.Dockerfile }
+          # Installs torch (CPU) and laya[serve]; downloads no model weights.
+          - { name: laya, dockerfile: infra/docker/laya/Dockerfile, context: infra/docker/laya }
     steps:
       - uses: actions/checkout@v7
 
@@ -364,7 +387,7 @@ jobs:
       - name: Build ${{ matrix.image.name }}
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.image.context || '.' }}
           file: ${{ matrix.image.dockerfile }}
           push: false
           load: true

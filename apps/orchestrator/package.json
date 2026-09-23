@@ -15,7 +15,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "db:migrate": "tsx src/adapters/db/migrate.ts",
     "db:seed": "tsx src/adapters/db/seed.ts",
-    "openapi": "node dist/scripts/openapi.js"
+    "openapi": "node dist/scripts/openapi.js",
+    "eval:laya": "tsx src/scripts/evaluate-laya.ts"
   },
   "dependencies": {
     "@azure/msal-node": "^2.16.2",

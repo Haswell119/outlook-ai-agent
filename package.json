@@ -27,6 +27,9 @@
     "check:llm": "node scripts/check-llm.mjs",
     "doctor": "node scripts/doctor.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:laya": "node scripts/smoke-laya.mjs",
+    "check:laya": "node scripts/check-laya.mjs",
+    "eval:laya": "npm run eval:laya -w @oao/orchestrator --",
     "manifest:render": "npm run manifest:render -w @oao/addin",
     "manifest:sideload": "node scripts/sideload-manifest.mjs",
     "k8s:render": "node scripts/render-k8s.mjs"
