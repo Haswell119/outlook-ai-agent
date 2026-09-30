@@ -214,7 +214,19 @@ if (!pane.status) {
 
 step(`4. Orchestrator (${apiOrigin ?? "?"})`);
 if (apiOrigin) {
-  const health = await request(`${apiOrigin}/api/v1/health`, { timeoutMs: 8000 });
+  let probeOrigin = apiOrigin;
+  let health = await request(`${probeOrigin}/api/v1/health`, { timeoutMs: 8000 });
+  // Node may try ::1 for localhost while Docker publishes the port on 127.0.0.1
+  // only; the pane's browser falls back to 127.0.0.1 by itself, so probe the same way.
+  if (!health.status && new URL(apiOrigin).hostname === "localhost") {
+    const v4 = apiOrigin.replace("//localhost", "//127.0.0.1");
+    const retry = await request(`${v4}/api/v1/health`, { timeoutMs: 8000 });
+    if (retry.status) {
+      info(`Node could not use localhost (${health.error}); reached through 127.0.0.1, as the browser does`);
+      probeOrigin = v4;
+      health = retry;
+    }
+  }
   if (!health.status) {
     const u = new URL(apiOrigin);
     bad(
@@ -226,13 +238,13 @@ if (apiOrigin) {
   } else {
     if (health.status === 200) ok(`/health → ${health.json?.status ?? "ok"}`);
     else meh(`/health → HTTP ${health.status} ${health.json?.status ?? ""}`, "details: " + Object.entries(health.json?.checks ?? {}).filter(([, c]) => c.status !== "ok").map(([k, c]) => `${k}: ${c.detail ?? c.status}`).join("; "));
-    const ready = await request(`${apiOrigin}/api/v1/ready`, { timeoutMs: 8000 });
+    const ready = await request(`${probeOrigin}/api/v1/ready`, { timeoutMs: 8000 });
     if (ready.status === 200) ok("/ready → 200");
     else bad(`/ready → HTTP ${ready.status}: ${String(ready.body).slice(0, 200)}`, "the orchestrator is up but not ready (database / vector store): see the [orch] log lines");
 
     // The exact preflight the pane's browser sends before a POST.
     try {
-      const pre = await fetch(`${apiOrigin}/api/v1/analyze/email`, {
+      const pre = await fetch(`${probeOrigin}/api/v1/analyze/email`, {
         method: "OPTIONS",
         headers: { Origin: ADDIN_ORIGIN, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type,x-correlation-id,x-user-email,x-user-name,accept-language" },
         signal: AbortSignal.timeout(8000),
@@ -244,7 +256,7 @@ if (apiOrigin) {
       bad(`CORS preflight failed: ${e.message}`);
     }
 
-    const feats = await request(`${apiOrigin}/api/v1/config/features`, { headers: { "x-user-email": "doctor@localhost", "x-user-name": "Doctor" }, timeoutMs: 8000 });
+    const feats = await request(`${probeOrigin}/api/v1/config/features`, { headers: { "x-user-email": "doctor@localhost", "x-user-name": "Doctor" }, timeoutMs: 8000 });
     if (feats.ok && feats.json) {
       const f = feats.json;
       ok(`features: llm=${f.llmProvider}/${f.llmModel}, embeddings=${f.embeddingsEnabled}, graph=${f.graphEnabled}, v${f.version}`);
