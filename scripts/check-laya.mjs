@@ -90,7 +90,10 @@ async function orchestratorQuestions() {
   try {
     const qb = await import(pathToFileURL(join(dist, "question-builder.js")).href);
     const tx = await import(pathToFileURL(join(dist, "taxonomy.js")).href);
-    const file = (env.LAYA_TAXONOMY_FILE ?? "").trim() || undefined;
+    // Relative paths are resolved from the repository root, like the orchestrator does.
+    const raw = (env.LAYA_TAXONOMY_FILE ?? "").trim();
+    const file = raw ? resolve(repoRoot, raw) : undefined;
+    if (file && !existsSync(file)) warn(`LAYA_TAXONOMY_FILE=${raw} not found (${file}): the orchestrator will refuse to start — checking with the bundled example`);
     const taxonomy = tx.loadTaxonomy(file && existsSync(file) ? file : undefined);
     return { questions: qb.buildPrimaryQuestions(taxonomy.taxonomy, lang), source: `orchestrator questions, taxonomy ${taxonomy.taxonomy.version} (${taxonomy.example ? "bundled example" : taxonomy.source})` };
   } catch (e) {

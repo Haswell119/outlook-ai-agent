@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ConfigError } from "../../src/config.js";
-import { canonicalJson, EXAMPLE_TAXONOMY_PATH, loadTaxonomy, parseTaxonomy, TaxonomyError, taxonomyHash, taxonomyWarnings, type Taxonomy } from "../../src/domain/decisions/taxonomy.js";
+import { canonicalJson, EXAMPLE_TAXONOMY_PATH, loadTaxonomy, parseTaxonomy, resolveTaxonomyPath, TaxonomyError, taxonomyHash, taxonomyWarnings, type Taxonomy } from "../../src/domain/decisions/taxonomy.js";
 
 const example = (): Taxonomy => JSON.parse(readFileSync(EXAMPLE_TAXONOMY_PATH, "utf8")) as Taxonomy;
 
@@ -65,6 +65,19 @@ describe("taxonomy — stable hash", () => {
     changed.areas[0]!.folders[0]!.descriptions.fr = "Autre description";
     expect(taxonomyHash(parseTaxonomy(changed).taxonomy)).not.toBe(taxonomyHash(a));
     expect(loadTaxonomy().hash).toBe(loadTaxonomy().hash);
+  });
+
+  it("a relative LAYA_TAXONOMY_FILE is resolved from the repository root, whatever the working directory", () => {
+    // Vitest runs in apps/orchestrator: relative to the working directory this path would not exist.
+    const relative = "apps/orchestrator/config/laya-taxonomy.example.json";
+    expect(resolveTaxonomyPath(relative)).toBe(EXAMPLE_TAXONOMY_PATH);
+    const loaded = loadTaxonomy(relative);
+    expect(loaded.source).toBe(EXAMPLE_TAXONOMY_PATH);
+    expect(loaded.example).toBe(false); // an explicit file, even when it is a copy of the example
+    expect(loaded.hash).toBe(loadTaxonomy().hash); // the hash depends on the content, never on the path
+    // Absolute paths (the Helm ConfigMap mount) are kept as they are.
+    const absolute = path.resolve("/etc/oao/laya-taxonomy.json");
+    expect(resolveTaxonomyPath(absolute)).toBe(absolute);
   });
 });
 

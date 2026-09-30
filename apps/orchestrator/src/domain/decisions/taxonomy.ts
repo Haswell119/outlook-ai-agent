@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { Language } from "@oao/shared";
@@ -45,6 +46,17 @@ export const OTHER_AREA_ID = "other";
 
 /** Example taxonomy shipped with the orchestrator (dev / demo / shadow trials). */
 export const EXAMPLE_TAXONOMY_PATH = fileURLToPath(new URL("../../../config/laya-taxonomy.example.json", import.meta.url));
+
+/** Repository root: `/app` in the image, which keeps the monorepo layout. */
+const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
+
+/**
+ * A relative LAYA_TAXONOMY_FILE is resolved from the repository root, so one
+ * value (e.g. `config/laya/taxonomy.json`) works in the container, for
+ * `npm run dev`, `check:laya` and `eval:laya`, whatever their working
+ * directory. Absolute paths (Helm ConfigMap mount) are kept as they are.
+ */
+export const resolveTaxonomyPath = (file: string): string => resolve(REPO_ROOT, file);
 
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/;
@@ -160,7 +172,7 @@ export function parseTaxonomy(raw: unknown, source = "inline", example = false):
 
 /** Read + validate a taxonomy file. `path` undefined = the bundled example. */
 export function loadTaxonomy(path?: string, read: (p: string) => string = (p) => readFileSync(p, "utf8")): LoadedTaxonomy {
-  const file = path ?? EXAMPLE_TAXONOMY_PATH;
+  const file = path === undefined ? EXAMPLE_TAXONOMY_PATH : resolveTaxonomyPath(path);
   let text: string;
   try {
     text = read(file);

@@ -97,6 +97,10 @@ services:
     # Same posture as the Kubernetes deployment: read-only rootfs + tmpfs.
     read_only: true
     tmpfs: [/tmp]
+    volumes:
+      # Your Laya taxonomy (LAYA_TAXONOMY_FILE=config/laya/taxonomy.json), read-only;
+      # edit the file, then `docker compose restart orchestrator`.
+      - ./config/laya:/app/config/laya:ro
     healthcheck:
       test:
         - CMD
@@ -132,6 +136,8 @@ services:
         condition: service_healthy
     read_only: true
     tmpfs: [/tmp]
+    volumes:
+      - ./config/laya:/app/config/laya:ro
     networks: [oao]
 
   admin:

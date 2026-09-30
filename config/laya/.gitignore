@@ -1,0 +1,3 @@
+# Your taxonomy describes your own mailbox folders: kept out of Git by default.
+# Delete this line to version it.
+*.json

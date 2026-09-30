@@ -162,6 +162,16 @@ Fichier JSON **versionné**, validé au démarrage (zod), hors du code :
 `apps/orchestrator/config/laya-taxonomy.example.json` (exemple),
 `LAYA_TAXONOMY_FILE` en exploitation (Helm : ConfigMap montée).
 
+C'est la **seule** source des dossiers proposés : le complément ne lit pas les
+dossiers de la boîte (Office.js n'en expose aucune liste, EWS est bloqué dans
+Exchange Online à partir d'octobre 2026, Graph est optionnel). En local, déposer
+le fichier dans `config/laya/taxonomy.json` avec
+`LAYA_TAXONOMY_FILE=config/laya/taxonomy.json`. Ce dossier est monté en lecture
+seule dans les conteneurs `orchestrator` et `worker`, et ignoré par Git (mode
+d'emploi : [`config/laya/README.md`](../config/laya/README.md)). Un chemin
+relatif part toujours de la racine du repo (`/app` dans l'image), quel que soit
+le répertoire de travail.
+
 ```json
 {
   "version": "v1",
