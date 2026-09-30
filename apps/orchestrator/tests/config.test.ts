@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ConfigError, effectiveConfig, loadConfig, loadConfigDetailed, runsWorkers, servesApi, trustProxyOption } from "../src/config.js";
 import { redactUrl, redactValue, resolveSecretFiles } from "../src/util/secrets.js";
@@ -180,6 +181,26 @@ describe("role and proxy helpers", () => {
     expect([servesApi(worker), runsWorkers(worker)]).toEqual([false, true]);
     expect([servesApi(all), runsWorkers(all)]).toEqual([true, true]);
     expect(runsWorkers(loadConfig({ ...base, ROLE: "all", WORKERS_ENABLED: "false" }))).toBe(false);
+    // The migration job (compose `migrate`, Helm hook) sets ROLE=migrate: accepted, and neither serves nor works.
+    const migrate = loadConfig({ ...base, ROLE: "migrate" });
+    expect([servesApi(migrate), runsWorkers(migrate)]).toEqual([false, false]);
+    expect(() => loadConfig({ ...base, ROLE: "scheduler" })).toThrow(ConfigError);
+  });
+
+  it("every literal ROLE of the deployment descriptors is accepted", () => {
+    // compose `ROLE: x` and Kubernetes `- name: ROLE` / `value: x`; Helm expressions are not literals.
+    const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
+    const rendered = readdirSync(path.join(repoRoot, "infra/k8s/rendered"), { recursive: true, encoding: "utf8" })
+      .filter((f) => /\.ya?ml$/.test(f))
+      .map((f) => path.join("infra/k8s/rendered", f));
+    const roles = new Set<string>();
+    for (const file of ["docker-compose.yml", "docker-compose.prod.yml", ...rendered]) {
+      const text = readFileSync(path.join(repoRoot, file), "utf8");
+      for (const m of text.matchAll(/^\s*ROLE:\s*"?([\w-]+)"?\s*$/gm)) roles.add(m[1]!);
+      for (const m of text.matchAll(/-\s*name:\s*ROLE\s*\n\s*value:\s*"?([\w-]+)"?/g)) roles.add(m[1]!);
+    }
+    expect([...roles].sort()).toEqual(["all", "api", "migrate", "worker"]);
+    for (const role of roles) expect(() => loadConfig({ ...base, ROLE: role })).not.toThrow();
   });
 
   it("trustProxyOption understands booleans, hop counts and lists", () => {

@@ -50,8 +50,13 @@ const LAYA_RATIOS = ["LAYA_MIN_CONFIDENCE", "LAYA_FOLDER_MIN_CONFIDENCE", "LAYA_
 const ConfigObjectSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-    /** Process role: API only, worker only, or both in a single process. */
-    ROLE: z.enum(["api", "worker", "all"]).default("api"),
+    /**
+     * Process role: API only, worker only, or both in a single process.
+     * `migrate` is the one-shot schema-migration job (compose `migrate` service,
+     * Helm pre-install/pre-upgrade hook): it neither serves HTTP nor runs
+     * workers, and `server.ts` refuses to start with it.
+     */
+    ROLE: z.enum(["api", "worker", "all", "migrate"]).default("api"),
     PORT: int(8080),
     HOST: z.string().default("0.0.0.0"),
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),

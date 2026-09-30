@@ -341,7 +341,7 @@ with no external dependency. Any `FOO_FILE=/path` is read at boot and fills `FOO
 | Variable | Default | Meaning |
 |---|---|---|
 | `NODE_ENV` | `development` | `development` \| `test` \| `production` |
-| `ROLE` | `api` | `api` (HTTP only) \| `worker` (jobs only, **no HTTP listener**) \| `all` |
+| `ROLE` | `api` | `api` (HTTP only) \| `worker` (jobs only, **no HTTP listener**) \| `all` \| `migrate` (schema-migration job only; the server refuses it) |
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | HTTP listener |
 | `LOG_LEVEL` / `LOG_FORMAT` | `info` / `json` | pino |
 | `ORGANIZATION_NAME` | `Northbridge Capital` | surfaced in `FeatureFlags.organizationName` |

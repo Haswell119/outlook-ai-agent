@@ -27,6 +27,12 @@ try {
   process.exit(78); // EX_CONFIG
 }
 
+// ROLE=migrate belongs to the migration job: a server started with it would neither listen nor work.
+if (cfg.ROLE === "migrate") {
+  console.error("\nOutlook AI Orchestrator: ROLE=migrate is reserved for the schema migration job (apps/orchestrator/dist/adapters/db/migrate.js).\nStart the server with ROLE=api, worker or all.\n");
+  process.exit(78); // EX_CONFIG
+}
+
 /* --------------------------------- logging ------------------------------- */
 
 /**
