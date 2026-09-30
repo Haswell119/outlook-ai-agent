@@ -30,6 +30,8 @@ vi.mock("@/lib/api", () => ({
   getAuditEventsForExport,
   OrchestratorError,
   newCorrelationId: () => "adm-test-correlation",
+  // Demo-mode window (12–18 May 2025): the expected file names below rely on it.
+  periodAnchor: async () => undefined,
 }));
 
 vi.mock("@/lib/session", () => ({ requireRoles, ForbiddenError, UnauthorizedError }));

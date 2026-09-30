@@ -32,6 +32,8 @@ export interface TopBarProps {
   organisation: string;
   language: Language;
   mock: boolean;
+  /** Why the demo dataset is shown (orchestrator URL and error, or ADMIN_MOCK=true). */
+  mockReason?: string;
   pendingApprovals: number;
   messages: Record<string, string>;
   user: { email: string; name: string; roles: AdminRole[] };
@@ -49,6 +51,7 @@ export function TopBar({
   organisation,
   language,
   mock,
+  mockReason,
   pendingApprovals,
   messages,
   user,
@@ -103,7 +106,14 @@ export function TopBar({
                   {t("top.mock")}
                 </Badge>
               </TooltipTrigger>
-              <TooltipContent side="bottom">{t("top.mockHint")}</TooltipContent>
+              <TooltipContent side="bottom" className="max-w-sm">
+                {t("top.mockHint")}
+                {mockReason && (
+                  <span className="mt-1 block break-all font-mono text-[11px] opacity-80" data-testid="mock-reason">
+                    {mockReason}
+                  </span>
+                )}
+              </TooltipContent>
             </Tooltip>
           )}
           {sessionExpired && (

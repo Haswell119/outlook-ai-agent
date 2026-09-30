@@ -8,6 +8,7 @@ import {
   currentLanguage,
   getPendingEscalationCount,
   isMockMode,
+  mockReason,
   organizationName,
 } from "@/lib/api";
 import { dictionaries, type Messages } from "@/lib/i18n";
@@ -26,10 +27,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const cfg = adminConfig();
   const language = await currentLanguage();
   const messages = dictionaries[language] as unknown as Messages;
-  const [mock, organisation, pendingApprovals] = await Promise.all([
+  const [mock, organisation, pendingApprovals, mockDetail] = await Promise.all([
     isMockMode(),
     organizationName(),
     getPendingEscalationCount(),
+    mockReason(),
   ]);
 
   return (
@@ -48,6 +50,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           organisation={organisation}
           language={language}
           mock={mock}
+          mockReason={mockDetail}
           pendingApprovals={pendingApprovals}
           messages={messages}
           user={{ email: session.email, name: session.name, roles: session.roles }}

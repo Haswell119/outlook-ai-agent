@@ -8,6 +8,7 @@ import {
   getAuditStats,
   getAutomations,
   getSystemStatus,
+  periodAnchor,
 } from "@/lib/api";
 import { aiLoadBreakdown, estimatedGpuMinutesSaved } from "@/lib/ai-load";
 import { requireRoles } from "@/lib/session";
@@ -70,7 +71,7 @@ export default async function AnalyticsPage({
   const messages = dictionaries[language] as unknown as Record<string, string>;
   const t = (k: string, vars?: Record<string, string | number>) => tr(messages, k, vars);
 
-  const query = resolveQuery(params);
+  const query = resolveQuery(params, await periodAnchor());
   const tabRaw = Array.isArray(params.tab) ? params.tab[0] : params.tab;
   const active: AnalyticsTab =
     tabRaw === "performance" || tabRaw === "impact" ? tabRaw : "usage";

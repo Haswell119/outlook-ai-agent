@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { AlertTriangle } from "lucide-react";
 import type { AuditEvent } from "@oao/shared";
-import { adminConfig, alertCategory, currentLanguage, getComplianceAlerts } from "@/lib/api";
+import { adminConfig, alertCategory, currentLanguage, getComplianceAlerts, periodAnchor } from "@/lib/api";
 import { dictionaries } from "@/lib/i18n";
 import { resolveQuery, toDay, type SearchParamsInput } from "@/lib/query";
 import { formatDateRange, formatNumber } from "@/lib/format";
@@ -27,7 +27,7 @@ export default async function AlertsPage({
   const messages = dictionaries[language] as unknown as Record<string, string>;
   const t = (k: string) => messages[k] ?? k;
 
-  const query = resolveQuery(params);
+  const query = resolveQuery(params, await periodAnchor());
   const alerts = await getComplianceAlerts(query);
 
   const groups = new Map<string, AuditEvent[]>();

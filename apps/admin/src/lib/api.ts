@@ -129,6 +129,8 @@ interface ModeCache {
   mode: DataMode;
   checkedAt: number;
   warned: boolean;
+  /** Why the demo dataset is shown: orchestrator URL and error. */
+  reason?: string;
 }
 
 const globalMode = globalThis as unknown as { __oaoAdminMode?: ModeCache };
@@ -143,28 +145,69 @@ function degradeToMock(reason: string): DataMode {
       `[@oao/admin] orchestrator unreachable at ${cfg.orchestratorUrl} (${reason}) — falling back to ADMIN_MOCK data.`,
     );
   }
-  globalMode.__oaoAdminMode = { mode: "mock", checkedAt: Date.now(), warned: true };
+  globalMode.__oaoAdminMode = { mode: "mock", checkedAt: Date.now(), warned: true, reason: `${cfg.orchestratorUrl}: ${reason}` };
   return "mock";
 }
 
-/** Resolved once per 15 s so a dead orchestrator does not slow every render. */
+/**
+ * `fetch failed` alone hides the reason: append the socket error of every
+ * connection attempt, e.g. `ECONNREFUSED ::1:8080` when Node tried IPv6 for
+ * `localhost` while Docker publishes the port on 127.0.0.1 only.
+ */
+export function describeError(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown error";
+  const cause = (error as Error & { cause?: { errors?: unknown } }).cause;
+  const attempts = (Array.isArray(cause?.errors) ? cause.errors : cause ? [cause] : []) as Array<{
+    code?: string;
+    address?: string;
+    port?: number;
+  }>;
+  const detail = attempts
+    .map((c) => [c.code, c.address ? `${c.address}${c.port ? `:${c.port}` : ""}` : undefined].filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join(", ");
+  return detail ? `${error.message} (${detail})` : error.message;
+}
+
+/**
+ * Resolved once per 15 s so a dead orchestrator does not slow every render.
+ *
+ * The probe asks `/live` (is the orchestrator there?), not `/health`: health
+ * also pings the model endpoint and the decision engine, which can take
+ * several seconds while they are busy. The dashboard then showed the demo
+ * dataset although the orchestrator was answering.
+ */
 export async function dataMode(): Promise<DataMode> {
   const cfg = adminConfig();
   if (cfg.forceMock) return "mock";
   const cache = globalMode.__oaoAdminMode;
   if (cache && Date.now() - cache.checkedAt < PROBE_TTL_MS) return cache.mode;
   try {
-    const res = await rawFetch(Routes.health, { signal: AbortSignal.timeout(2500) });
-    if (!res.ok) return degradeToMock(`health ${res.status}`);
+    const res = await rawFetch(Routes.live, { signal: AbortSignal.timeout(2500) });
+    if (!res.ok) return degradeToMock(`${Routes.live} → ${res.status}`);
     globalMode.__oaoAdminMode = { mode: "live", checkedAt: Date.now(), warned: false };
     return "live";
   } catch (error) {
-    return degradeToMock(error instanceof Error ? error.message : "unknown error");
+    return degradeToMock(describeError(error));
   }
 }
 
 export async function isMockMode(): Promise<boolean> {
   return (await dataMode()) === "mock";
+}
+
+/**
+ * Last day of the default time windows: today with live data; `undefined` in
+ * demo mode, where `resolveQuery` keeps the week the demo dataset is dated.
+ */
+export async function periodAnchor(): Promise<Date | undefined> {
+  return (await isMockMode()) ? undefined : new Date();
+}
+
+/** Why the demo dataset is shown, for the top bar (`undefined` with live data). */
+export async function mockReason(): Promise<string | undefined> {
+  if (adminConfig().forceMock) return "ADMIN_MOCK=true";
+  return (await dataMode()) === "mock" ? globalMode.__oaoAdminMode?.reason : undefined;
 }
 
 export function newCorrelationId(): string {
@@ -275,7 +318,7 @@ async function call<T>(
         /* non-JSON error body */
       }
       if (res.status >= 500) {
-        degradeToMock(`${res.status}`);
+        degradeToMock(`${init.method ?? "GET"} ${path} → ${res.status}`);
         if (!adminConfig().isProduction) return fallback();
       }
       throw new OrchestratorError(
@@ -297,7 +340,7 @@ async function call<T>(
         correlationId,
       );
     }
-    degradeToMock(error instanceof Error ? error.message : "unknown error");
+    degradeToMock(describeError(error));
     if (!adminConfig().isProduction) return fallback();
     throw new OrchestratorError(
       error instanceof Error ? error.message : `Failed to call ${path}`,

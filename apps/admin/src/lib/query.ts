@@ -6,8 +6,9 @@ import {
 } from "@oao/shared";
 
 /**
- * Reference period of the mock-up (docs/mockups.md §G). Used as the default
- * window so the dashboard always renders a populated week.
+ * Reference period of the mock-up (docs/mockups.md §G): the week the demo
+ * dataset is dated. It is the default window **in demo mode** only; with live
+ * data the window ends today (see `resolveQuery`).
  */
 export const DEFAULT_PERIOD: { from: string; to: string } = {
   from: "2025-05-12T00:00:00.000Z",
@@ -56,16 +57,22 @@ export function toDay(iso: string): string {
 
 /**
  * Turns Next.js `searchParams` into a validated `AuditQuery`.
- * The reference period of the mock-up (12–18 May 2025) is the default so the
- * dashboard always shows data, live or mocked.
+ *
+ * `anchor` is the last day of the "last 7 / 30 days" windows: now with live
+ * data (`periodAnchor()` in `lib/api`). Without it, the windows end on the
+ * reference week of the demo dataset (12–18 May 2025), whose events are dated
+ * then. Live data used to be read in that May 2025 week too, so the overview
+ * and the audit trail looked empty.
  */
-export function resolveQuery(params: SearchParamsInput): ResolvedQuery {
+export function resolveQuery(params: SearchParamsInput, anchor?: Date): ResolvedQuery {
   const preset = (one(params.range) ?? "last7") as ResolvedQuery["preset"];
-  let from = DEFAULT_PERIOD.from;
-  let to = DEFAULT_PERIOD.to;
+  const end = anchor ? dayEnd(toDay(anchor.toISOString())) : DEFAULT_PERIOD.to;
+  const endMs = Date.parse(end);
+  let from = anchor ? dayStart(toDay(new Date(endMs - 6 * 86400000).toISOString())) : DEFAULT_PERIOD.from;
+  let to = end;
 
   if (preset === "last30") {
-    from = dayStart(toDay(new Date(Date.parse(DEFAULT_PERIOD.to) - 29 * 86400000).toISOString()));
+    from = dayStart(toDay(new Date(endMs - 29 * 86400000).toISOString()));
   } else if (preset === "custom") {
     const f = one(params.from);
     const t = one(params.to);

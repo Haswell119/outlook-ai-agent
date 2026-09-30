@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAuditEventsForExport, streamAuditExport } from "@/lib/api";
+import { getAuditEventsForExport, periodAnchor, streamAuditExport } from "@/lib/api";
 import { auditEventsToCsv } from "@/lib/csv";
 import { handleRouteError } from "@/lib/http";
 import { resolveQuery } from "@/lib/query";
@@ -25,7 +25,7 @@ export function exportFilename(from: string, to: string): string {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const params = Object.fromEntries(url.searchParams.entries());
-  const query = resolveQuery(params);
+  const query = resolveQuery(params, await periodAnchor());
   const filename = exportFilename(query.from, query.to);
 
   try {

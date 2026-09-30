@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { ShieldCheck, SlidersHorizontal } from "lucide-react";
-import { adminConfig, currentLanguage, getAuditEventsForExport, getAuditPage, getAuditStats } from "@/lib/api";
+import { adminConfig, currentLanguage, getAuditEventsForExport, getAuditPage, getAuditStats, periodAnchor } from "@/lib/api";
 import { buildFilterOptions } from "@/lib/filter-options";
 import { dictionaries } from "@/lib/i18n";
 import { resolveQuery, toDay, type SearchParamsInput } from "@/lib/query";
@@ -33,7 +33,7 @@ export default async function OverviewPage({
   const messages = dictionaries[language] as unknown as Record<string, string>;
   const t = (k: string) => messages[k] ?? k;
 
-  const query = resolveQuery(params);
+  const query = resolveQuery(params, await periodAnchor());
   const [stats, page, filterOptions] = await Promise.all([
     getAuditStats({ from: query.from, to: query.to }),
     getAuditPage(query),

@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { Shield } from "lucide-react";
-import { adminConfig, currentLanguage, getAuditPage } from "@/lib/api";
+import { adminConfig, currentLanguage, getAuditPage, periodAnchor } from "@/lib/api";
 import { buildFilterOptions } from "@/lib/filter-options";
 import { dictionaries } from "@/lib/i18n";
 import { resolveQuery, toDay, type SearchParamsInput } from "@/lib/query";
@@ -28,7 +28,7 @@ export default async function AuditPage({
   const messages = dictionaries[language] as unknown as Record<string, string>;
   const t = (k: string) => messages[k] ?? k;
 
-  const query = resolveQuery(params);
+  const query = resolveQuery(params, await periodAnchor());
   const [page, filterOptions] = await Promise.all([getAuditPage(query), buildFilterOptions(language)]);
 
   return (
