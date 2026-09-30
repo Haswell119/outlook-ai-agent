@@ -22,7 +22,7 @@
  *                 sent to the engine carries no address and no raw body.
  *
  *   npm run smoke:laya
- *   npm run smoke:laya -- --laya-url http://localhost:8000 --laya-key "$LAYA_API_KEY"
+ *   npm run smoke:laya -- --laya-url http://127.0.0.1:8000 --laya-key "$LAYA_API_KEY"
  *
  * With --laya-url the fake server is not started and the checks that depend on
  * the fake's answers are relaxed (a real engine answers what it answers): use
@@ -51,7 +51,7 @@ and verifies decisions, caching, fallback, probes, metrics and log hygiene.
 No model is downloaded, no external service is contacted.
 
 Options:
-  --laya-url <url>   use a running Laya instead of the fake (e.g. http://localhost:8000)
+  --laya-url <url>   use a running Laya instead of the fake (e.g. http://127.0.0.1:8000)
   --laya-key <key>   its API key (default $LAYA_API_KEY)
   --timeout <ms>     per-request timeout (default 20000)
   --keep-logs        print the orchestrator logs at the end

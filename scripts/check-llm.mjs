@@ -9,7 +9,7 @@
  *
  * Exit code 0 = usable configuration, 1 = blocking problem.
  */
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   fail,
@@ -49,7 +49,7 @@ Default env file: ./.env
 `,
 );
 
-const envFile = positionals[0] ? join(process.cwd(), positionals[0]) : join(repoRoot, ".env");
+const envFile = positionals[0] ? resolve(process.cwd(), positionals[0]) : join(repoRoot, ".env");
 const env = loadEnv(envFile);
 const timeoutMs = Number(flags.timeout ?? 30000);
 

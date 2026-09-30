@@ -18,7 +18,7 @@
  * Exit code 0 = usable engine, 1 = blocking problem.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { fail, helpIfRequested, info, loadEnv, ok, parseArgs, repoRoot, request, step, warn } from "./lib/common.mjs";
@@ -35,7 +35,7 @@ Usage: npm run check:laya -- [path-to-env-file] [options]
 
 Options:
   --url <url>        engine base URL (default $LAYA_BASE_URL; "laya:8000" is
-                     rewritten to localhost:8000 when run from the host)
+                     rewritten to 127.0.0.1:8000 when run from the host)
   --model <name>     checkpoint to ask (english | multilingual; default multilingual)
   --lang <fr|en>     language of the synthetic email and questions (default fr)
   --timeout <ms>     per-request timeout (default 30000 — a cold CPU load is slow)
@@ -45,16 +45,16 @@ Default env file: ./.env
 `,
 );
 
-const envFile = positionals[0] ? join(process.cwd(), positionals[0]) : join(repoRoot, ".env");
+const envFile = positionals[0] ? resolve(process.cwd(), positionals[0]) : join(repoRoot, ".env");
 const env = loadEnv(envFile, { quiet: true });
 const timeoutMs = Number(flags.timeout ?? 30000);
 const lang = String(flags.lang ?? "fr") === "en" ? "en" : "fr";
 const model = String(flags.model ?? "multilingual");
 
-let baseUrl = String(flags.url ?? env.LAYA_BASE_URL ?? "http://localhost:8000").trim().replace(/\/+$/, "");
+let baseUrl = String(flags.url ?? env.LAYA_BASE_URL ?? "http://127.0.0.1:8000").trim().replace(/\/+$/, "");
 if (!flags.url && /^https?:\/\/laya(:\d+)?$/.test(baseUrl)) {
   // The compose-network name does not resolve from the host.
-  baseUrl = baseUrl.replace("//laya", "//localhost");
+  baseUrl = baseUrl.replace("//laya", "//127.0.0.1");
   info(`LAYA_BASE_URL uses the compose service name; checking ${baseUrl} from the host`);
 }
 

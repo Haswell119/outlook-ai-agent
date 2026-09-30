@@ -251,8 +251,12 @@ docker compose --profile laya up --build
 #    laya        : laya-serve hors ligne (HF_HUB_OFFLINE=1), healthcheck /health
 #    orchestrator: attend laya (healthy), LAYA_BASE_URL=http://laya:8000
 npm run check:laya                                  # /health + une décision de test
-npm run smoke:laya -- --laya-url http://localhost:8000 --laya-key "$LAYA_API_KEY"
+npm run smoke:laya -- --laya-url http://127.0.0.1:8000 --laya-key "$LAYA_API_KEY"
 ```
+
+Depuis l'hôte, écrire `127.0.0.1` et non `localhost` : le port n'est publié que
+sur `127.0.0.1`, et Node (notamment sous Windows) peut tenter `::1` (IPv6) en
+premier. Symptôme : `fetch failed`, souvent sur la première requête seulement.
 
 GPU (NVIDIA, **non testé ici**) : `docker compose --profile laya -f docker-compose.yml -f docker-compose.gpu.yml up --build`
 (image CUDA `cu126` par défaut, `LAYA_TORCH_INDEX_URL` pour `cu130`/`cu132`).
@@ -268,7 +272,7 @@ HF_HOME=$PWD/.laya/models LAYA_MODEL_REVISION=5e7b2b1b8ca2ecdd3f2322d94069c9b6ce
 HF_HOME=$PWD/.laya/models HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 LAYA_MODELS=english,multilingual laya-serve
 ```
 
-puis `LAYA_BASE_URL=http://localhost:8000` dans `.env` et `npm run dev`.
+puis `LAYA_BASE_URL=http://127.0.0.1:8000` dans `.env` et `npm run dev`.
 
 L'image (`infra/docker/laya/Dockerfile`) : Python 3.11 slim épinglé par digest,
 `laya[serve]==0.3.9` + toutes les dépendances épinglées (`constraints.txt`),

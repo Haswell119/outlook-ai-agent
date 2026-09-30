@@ -431,7 +431,8 @@ npm run smoke:laya                            # intégration de bout en bout, fa
 ```
 
 Avec `npm run dev` (orchestrateur sur l'hôte) : `docker compose --profile laya up laya`
-puis `LAYA_BASE_URL=http://localhost:8000` dans `.env`. Démonstration sans modèle :
+puis `LAYA_BASE_URL=http://127.0.0.1:8000` dans `.env` (pas `localhost` : le port n'est
+publié que sur 127.0.0.1). Démonstration sans modèle :
 `DECISION_PROVIDER=mock`. Tout le reste (modes, taxonomie, seuils, évaluation
 avant activation) : [`LAYA.md`](LAYA.md).
 

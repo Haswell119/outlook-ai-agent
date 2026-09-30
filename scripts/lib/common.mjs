@@ -235,8 +235,34 @@ export async function request(url, { method = "GET", headers = {}, body, timeout
     }
     return { ok: response.ok, status: response.status, body: text, json };
   } catch (error) {
-    return { ok: false, status: 0, body: "", error: /** @type {Error} */ (error).message };
+    return { ok: false, status: 0, body: "", error: describeFetchError(url, error) };
   }
+}
+
+/**
+ * `fetch failed` alone hides the reason: append the socket error of every
+ * connection attempt (Node tries each address of a name, e.g. ::1 then
+ * 127.0.0.1 for `localhost`). Docker publishes loopback-only ports on
+ * 127.0.0.1, so with `localhost` the hint points at the explicit address.
+ */
+export function describeFetchError(url, error) {
+  const e = /** @type {Error & { cause?: any }} */ (error);
+  const attempts = Array.isArray(e.cause?.errors) ? e.cause.errors : e.cause ? [e.cause] : [];
+  const detail = attempts
+    .map((c) => [c.code, c.address ? `${c.address}${c.port ? `:${c.port}` : ""}` : undefined].filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join(", ");
+  let message = detail ? `${e.message} (${detail})` : e.message;
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    /* not a URL: no hint */
+  }
+  if (host === "localhost" && attempts.some((c) => c.address === "::1")) {
+    message += " — Node tried ::1 (IPv6) for localhost, but Docker publishes these ports on 127.0.0.1 only: use 127.0.0.1 instead of localhost";
+  }
+  return message;
 }
 
 /** Poll `probe` until it resolves truthy or the timeout elapses. */
