@@ -24,6 +24,7 @@ import {
   has,
   helpIfRequested,
   info,
+  officeDevCaTrusted,
   ok,
   parseArgs,
   npmRun,
@@ -73,11 +74,15 @@ const officeCertValid = (() => {
     return false;
   }
 })();
-if (existsSync(certFile) && existsSync(keyFile) && officeCertValid && !flags.force) {
+// Valid files are not enough on Windows: the CA must also be trusted (a
+// declined prompt leaves the files without the trust, and Outlook refuses the pane).
+const caTrusted = officeDevCaTrusted() !== false;
+if (existsSync(certFile) && existsSync(keyFile) && officeCertValid && caTrusted && !flags.force) {
   ok(`certificate already present in ${outDir} and ~/.office-addin-dev-certs (use --force to regenerate)`);
   process.exit(0);
 }
 if (!officeCertValid && existsSync(officeCert)) warn("the Office dev certificate in ~/.office-addin-dev-certs is expired — reinstalling");
+else if (!caTrusted) warn("the Office dev CA is not trusted by Windows (Current User\\Root) — reinstalling: accept the Windows prompt");
 
 const hosts = ["localhost", "127.0.0.1", "::1", "addin.localhost"];
 

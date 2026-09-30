@@ -265,6 +265,19 @@ export function describeFetchError(url, error) {
   return message;
 }
 
+/**
+ * Windows only: is the Office dev CA ("Developer CA for Microsoft Office
+ * Add-ins") in Current User\Root? Outlook refuses the pane otherwise.
+ * `undefined` off Windows, or when PowerShell cannot tell.
+ */
+export function officeDevCaTrusted() {
+  if (!isWindows) return undefined;
+  // spawnSync without a shell: the pipe must reach PowerShell, not cmd.exe.
+  const ps = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "@(Get-ChildItem Cert:\\CurrentUser\\Root | Where-Object { $_.Subject -like '*Developer CA for Microsoft Office Add-ins*' }).Count"], { encoding: "utf8", timeout: 15000 });
+  if (ps.status !== 0) return undefined;
+  return Number(String(ps.stdout ?? "").trim() || "0") > 0;
+}
+
 /** Poll `probe` until it resolves truthy or the timeout elapses. */
 export async function waitFor(probe, { timeoutMs = 60000, intervalMs = 1000, label = "condition" } = {}) {
   const deadline = Date.now() + timeoutMs;

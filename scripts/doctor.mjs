@@ -24,11 +24,10 @@ import { request as httpsRequest } from "node:https";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { X509Certificate as X509 } from "node:crypto";
 import { connect as tlsConnect } from "node:tls";
 
-import { fail, helpIfRequested, info, isWindows, loadEnv, ok, parseArgs, repoRoot, request, step, style, warn } from "./lib/common.mjs";
+import { fail, helpIfRequested, info, loadEnv, officeDevCaTrusted, ok, parseArgs, repoRoot, request, step, style, warn } from "./lib/common.mjs";
 
 const { flags } = parseArgs(process.argv.slice(2), { booleans: ["help", "h"] });
 helpIfRequested(
@@ -153,13 +152,9 @@ if (!existsSync(devCertFile)) {
   } catch (e) {
     bad(`cannot read ${devCertFile}: ${e.message}`, "npm run certs");
   }
-  if (isWindows) {
-    // spawnSync without a shell: the pipe must reach PowerShell, not cmd.exe.
-    const ps = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "@(Get-ChildItem Cert:\\CurrentUser\\Root | Where-Object { $_.Subject -like '*Developer CA for Microsoft Office Add-ins*' }).Count"], { encoding: "utf8", timeout: 15000 });
-    const count = Number(String(ps.stdout ?? "").trim() || "0");
-    if (ps.status === 0 && count === 0) bad("the Office dev CA is not in your Windows trusted roots (Current User)", "npm run certs   and accept the Windows prompt « Voulez-vous installer ce certificat ? »");
-    else if (ps.status === 0) ok("Office dev CA trusted by Windows (Current User\\Root)");
-  }
+  const trusted = officeDevCaTrusted();
+  if (trusted === false) bad("the Office dev CA is not in your Windows trusted roots (Current User)", "npm run certs   and accept the Windows prompt « Voulez-vous installer ce certificat ? », then restart the add-in dev server");
+  else if (trusted) ok("Office dev CA trusted by Windows (Current User\\Root)");
 }
 
 /* ------------------------------ 3. add-in ------------------------------ */
@@ -175,8 +170,8 @@ if (!pane.status) {
   if (vite.status !== 200) {
     bad(
       "port 3000 is served by something else than this repo's `npm run dev` (probably the Docker « addin » container)",
-      "stop the full Docker stack: docker compose down   (keep only the database: npm run dev:db)",
-      "then restart npm run dev",
+      "remove it: docker compose rm -sf addin admin   (the dev servers replace both; the other containers can keep running)",
+      "then restart the add-in dev server: npm run dev   (npm run dev -w @oao/addin when the orchestrator runs in Docker)",
     );
   } else ok("taskpane.html served by the Vite dev server of this repo");
 
