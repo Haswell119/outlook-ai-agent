@@ -1,5 +1,48 @@
 /** Small pure text helpers shared by domain and services. */
 
+/**
+ * Drops every `<tag …>…</tag>` block in one forward pass; an unclosed block
+ * runs to the end, as in a browser. A lazy `<style[\s\S]*?<\/style>` regex
+ * rescans the rest of the input for every unclosed opening tag: quadratic on
+ * a hostile body.
+ */
+function dropBlocks(html: string, tag: "style" | "script"): string {
+  const open = new RegExp(`<${tag}`, "gi");
+  const close = new RegExp(`</${tag}>`, "gi");
+  let out = "";
+  let from = 0;
+  for (;;) {
+    open.lastIndex = from;
+    const start = open.exec(html);
+    if (!start) return out + html.slice(from);
+    out += html.slice(from, start.index);
+    close.lastIndex = start.index + start[0].length;
+    const end = close.exec(html);
+    if (!end) return out;
+    from = end.index + end[0].length;
+  }
+}
+
+/**
+ * Plain text of an HTML mail body (Graph bodies, imported .eml / .msg files).
+ * Linear in the input: the body is untrusted and an imported one can weigh 25 MB.
+ */
+export function htmlToText(html: string): string {
+  return dropBlocks(dropBlocks(html, "style"), "script")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|tr|li|h\d)>/gi, "\n")
+    // `[^<>]`, not `[^>]`: a run of "<" without ">" must not be rescanned from every "<".
+    .replace(/<[^<>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function normalizeWhitespace(s: string): string {
   return s.replace(/\r\n?/g, "\n").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 }

@@ -58,6 +58,11 @@ describe("SearchService", () => {
     const fused = fuse([hit("a", 1), hit("b", 0.5)], [hit("b", 0.9), hit("c", 0.8)]);
     expect(fused.map((f) => f.hit.chunk.emailId)).toEqual(["b", "a", "c"]);
   });
+  it("copies of one message stored under two ids (same Internet Message-ID) are one result", () => {
+    const hit = (emailId: string, internetMessageId?: string) => ({ chunk: { userId: "u", emailId, internetMessageId, subject: "", bodyText: "", chunkNo: 0 }, score: 1 });
+    const fused = fuse([hit("imp-1", "<m@x.example>"), hit("AAMk-1", "<m@x.example>"), hit("b")], [hit("AAMk-1", "<m@x.example>")]);
+    expect(fused.map((f) => f.hit.chunk.emailId)).toEqual(["imp-1", "b"]);
+  });
 });
 
 describe("ChatService", () => {

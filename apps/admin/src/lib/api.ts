@@ -29,6 +29,7 @@ import {
   EscalationSchema,
   FeatureFlagsSchema,
   HealthSchema,
+  MailboxImportResponseSchema,
   MailboxSyncStatusSchema,
   PolicySchema,
   Routes,
@@ -42,6 +43,8 @@ import {
   type FeatureFlags,
   type Health,
   type Language,
+  type MailboxImportRequest,
+  type MailboxImportResponse,
   type MailboxSyncStatus,
   type Policy,
   type SystemStatus,
@@ -633,6 +636,53 @@ export async function triggerMailboxSync(): Promise<MailboxSyncStatus> {
     method: "POST",
     body: JSON.stringify({ refresh: true }),
   });
+}
+
+/**
+ * `POST Routes.mailboxImport` — one batch of `.eml` / `.msg` files (see
+ * `/integrations`). A write, so never answered from the demo dataset: errors
+ * are surfaced, not degraded. The timeout covers a batch whose messages are
+ * analysed by the model.
+ */
+export async function importMailFiles(request: MailboxImportRequest): Promise<MailboxImportResponse> {
+  if ((await dataMode()) === "mock") {
+    throw new OrchestratorError(
+      `The import needs a reachable orchestrator; the dashboard is showing demo data (${(await mockReason()) ?? "ADMIN_MOCK"})`,
+      503,
+      "demo_mode",
+    );
+  }
+  const correlationId = newCorrelationId();
+  let res: Response;
+  try {
+    res = await rawFetch(Routes.mailboxImport, {
+      method: "POST",
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(300_000),
+      correlationId,
+    });
+  } catch (error) {
+    // Usually a batch that outlived the orchestrator's connection timeout: what
+    // was already processed is kept, and importing again skips it.
+    throw new OrchestratorError(
+      `The orchestrator did not answer (${describeError(error)}); import the same files again to resume`,
+      502,
+      "orchestrator_unavailable",
+      correlationId,
+    );
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: { code?: string; message?: string; correlationId?: string };
+    } | null;
+    throw new OrchestratorError(
+      body?.error?.message ?? `POST ${Routes.mailboxImport} → ${res.status}`,
+      res.status,
+      body?.error?.code,
+      body?.error?.correlationId ?? res.headers.get("x-correlation-id") ?? correlationId,
+    );
+  }
+  return MailboxImportResponseSchema.parse(await res.json());
 }
 
 /* --------------------------------------------------------------------------- */

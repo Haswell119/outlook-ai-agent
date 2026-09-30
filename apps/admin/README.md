@@ -35,7 +35,7 @@ from the deterministic dataset in `src/lib/mock-data.ts` and you are signed in a
 | `npm run start -w @oao/admin`             | Serve the build on port 3001                                    |
 | `npm run typecheck -w @oao/admin`         | `tsc --noEmit`                                                  |
 | `npm run lint -w @oao/admin`              | Same as `typecheck` (no ESLint config in the repo)              |
-| `npm run test -w @oao/admin`              | Vitest — 77 unit tests                                          |
+| `npm run test -w @oao/admin`              | Vitest — 100 unit tests                                         |
 | `npm run e2e -w @oao/admin`               | Playwright — 12 end-to-end tests (needs `build` first)          |
 | `npm run analyze -w @oao/admin`           | `ANALYZE=true next build` → bundle treemaps in `.next/analyze/`  |
 | `npm run screenshots -w @oao/admin`       | Refreshes `docs/screenshots/*.png` from a running build          |
@@ -125,6 +125,7 @@ Pages redirect, `/api/*` route handlers answer `401` / `403` with the contract's
 
 | Route            | Contents                                                                                                   |
 | ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| `/integrations`  | Connected systems, and **Import emails (.eml / .msg)**: files or a whole folder of exported messages, sent in batches to `POST Routes.mailboxImport` and processed like a Graph sync (indexed; optionally analysed and stored as precomputed). Per-file results, progress, *Stop*; re-importing creates no duplicates. Needs live data (disabled in demo mode). |
 | `/system`        | `SystemStatus`: health checks, models (generation / fast / embedding), LLM queue (pending, running, concurrency, average latency, circuit breaker), analysis & embedding cache hit rates, mailbox sync with **Sync now**, uptime, Kubernetes probe paths and the `/metrics` note. **Auto-refreshes every 15 s.** |
 | `/settings`      | Organisation (name from `FeatureFlags.organizationName`, internal domains read-only from the policy, timezone, language), feature flags, health with *Re-check*, and a **Diagnostics** JSON export (health + flags + versions, no secrets). |
 | `/audit`         | Search, the four contract filters plus **AI source** and **model** (read from `details.source` / `model`), page size and the server-side CSV export. |

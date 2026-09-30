@@ -12,6 +12,7 @@ import { decisionSettings, EmailDecisionService } from "./EmailDecisionService.j
 import { EscalationService } from "./EscalationService.js";
 import { FeedbackService } from "./FeedbackService.js";
 import { IndexEmailsService } from "./IndexEmailsService.js";
+import { MailboxImportService } from "./MailboxImportService.js";
 import { PolicyService } from "./PolicyService.js";
 import { SearchService } from "./SearchService.js";
 import { SynthesizeThreadService } from "./SynthesizeThreadService.js";
@@ -39,6 +40,8 @@ export interface Services {
   users: UsersService;
   dailyBrief: DailyBriefService;
   mailboxSync: MailboxSyncService;
+  /** `.eml` / `.msg` upload from the admin dashboard, processed like a Graph sync. */
+  mailboxImport: MailboxImportService;
 }
 
 /** Wire every use case once (composition root helper). */
@@ -61,5 +64,6 @@ export function createServices(deps: ServiceDeps, metrics?: Metrics): Services {
   const users = new UsersService(audit, deps.cfg);
   const dailyBrief = new DailyBriefService(deps, audit, cache, metrics);
   const mailboxSync = new MailboxSyncService(deps, audit, indexEmails, analyzeEmail, policy, metrics);
-  return { audit, policy, cache, emailDecision, analyzeEmail, synthesizeThread, draftReply, indexEmails, search, chat, escalations, actions, compliance, automations, feedback, users, dailyBrief, mailboxSync };
+  const mailboxImport = new MailboxImportService(deps, audit, indexEmails, analyzeEmail, policy, users, metrics);
+  return { audit, policy, cache, emailDecision, analyzeEmail, synthesizeThread, draftReply, indexEmails, search, chat, escalations, actions, compliance, automations, feedback, users, dailyBrief, mailboxSync, mailboxImport };
 }

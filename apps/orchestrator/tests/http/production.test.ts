@@ -303,10 +303,10 @@ describe("GET /audit/export", () => {
 describe("OpenAPI document", () => {
   it("is generated from the shared contracts and documents the new routes", () => {
     const doc = buildOpenApiDocument() as { paths: Record<string, unknown>; components: { schemas: Record<string, unknown> } };
-    for (const path of ["/live", "/ready", "/analyze/email", "/analyze/email/{emailId}", "/brief/daily", "/mailbox/sync", "/admin/system", "/audit/export"]) {
+    for (const path of ["/live", "/ready", "/analyze/email", "/analyze/email/{emailId}", "/brief/daily", "/mailbox/sync", "/admin/system", "/admin/mailbox/import", "/audit/export"]) {
       expect(Object.keys(doc.paths), path).toContain(path);
     }
-    for (const schema of ["EmailAnalysis", "DailyBrief", "MailboxSyncStatus", "SystemStatus", "ApiError"]) {
+    for (const schema of ["EmailAnalysis", "DailyBrief", "MailboxSyncStatus", "SystemStatus", "ApiError", "MailboxImportRequest", "MailboxImportResponse"]) {
       expect(doc.components.schemas[schema], schema).toBeTruthy();
     }
     // `source` and `triage` are what the add-in keys its UI off.

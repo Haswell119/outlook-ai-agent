@@ -1,5 +1,6 @@
 import type { SearchRequest, SearchResponse, SearchSource } from "@oao/shared";
 import { SearchResponseSchema } from "@oao/shared";
+import { messageKey } from "../domain/messageKey.js";
 import type { IndexHit, IndexSearchFilter } from "../ports/repositories.js";
 import { bestExcerpt } from "../util/text.js";
 import type { AuditService } from "./AuditService.js";
@@ -77,12 +78,15 @@ export class SearchService {
   }
 }
 
-/** Reciprocal-rank fusion (k = 60), keeping the best chunk per email. */
+/**
+ * Reciprocal-rank fusion (k = 60), keeping the best chunk per email. Copies of
+ * one message stored under two ids (same Internet Message-ID) count once.
+ */
 export function fuse(lexical: IndexHit[], vector: IndexHit[], k = 60): Array<{ hit: IndexHit; score: number }> {
   const scores = new Map<string, { hit: IndexHit; score: number }>();
   const add = (list: IndexHit[], weight: number) => {
     list.forEach((hit, rank) => {
-      const key = hit.chunk.emailId;
+      const key = messageKey(hit.chunk);
       const contribution = weight / (k + rank + 1);
       const prev = scores.get(key);
       if (prev) {

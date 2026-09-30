@@ -2901,6 +2901,161 @@
           "rating"
         ],
         "additionalProperties": false
+      },
+      "MailboxImportRequest": {
+        "type": "object",
+        "properties": {
+          "importId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,64}$"
+          },
+          "mailbox": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320
+          },
+          "analyze": {
+            "type": "boolean",
+            "default": false
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 260
+                },
+                "folder": {
+                  "type": "string",
+                  "maxLength": 260
+                },
+                "contentBase64": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "name",
+                "contentBase64"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 20
+          }
+        },
+        "required": [
+          "importId",
+          "mailbox",
+          "files"
+        ],
+        "additionalProperties": false
+      },
+      "MailboxImportResponse": {
+        "type": "object",
+        "properties": {
+          "importId": {
+            "type": "string"
+          },
+          "mailbox": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "hybrid",
+              "lexical"
+            ]
+          },
+          "warning": {
+            "type": "string"
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "integer"
+              },
+              "imported": {
+                "type": "integer"
+              },
+              "duplicate": {
+                "type": "integer"
+              },
+              "rejected": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              },
+              "analysed": {
+                "type": "integer"
+              },
+              "skippedByTriage": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "files",
+              "imported",
+              "duplicate",
+              "rejected",
+              "failed",
+              "analysed",
+              "skippedByTriage"
+            ],
+            "additionalProperties": false
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "imported",
+                    "duplicate",
+                    "rejected",
+                    "failed"
+                  ]
+                },
+                "emailId": {
+                  "type": "string"
+                },
+                "analysed": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "importId",
+          "mailbox",
+          "userId",
+          "mode",
+          "counts",
+          "results"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {
@@ -5194,6 +5349,98 @@
           },
           "403": {
             "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (`rate_limited`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error (`internal_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/mailbox/import": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "importMailFiles",
+        "summary": "Import .eml / .msg files (without Graph)",
+        "description": "Indexes the messages of one mailbox like a Graph sync, and with `analyze: true` stores their analyses as precomputed. Idempotent: a message already indexed is reported as `duplicate`. Read-only towards the mailbox: nothing is moved, sent or deleted. At most 20 files and 30 MB of files per request.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailboxImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-file results; a bad file never fails the batch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailboxImportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation_error`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (`unauthorized`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient role (`forbidden`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large (`validation_error`)",
             "content": {
               "application/json": {
                 "schema": {

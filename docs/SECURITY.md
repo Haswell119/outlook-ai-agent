@@ -57,7 +57,8 @@ Orchestrator (Fastify)
 
 Admin dashboard (Next.js) ──HTTPS + bearer──► Orchestrator (lecture seule sur
                                                l'audit, décisions compliance,
-                                               policy)
+                                               policy, import de fichiers
+                                               mail — §3.3)
 ```
 
 Aucune donnée n'est envoyée à un fournisseur cloud IA public : le modèle est
@@ -123,6 +124,34 @@ C'est la garantie qu'un retry réseau de l'add-in, ou un double clic, ne crée p
 deux rappels ni deux tâches. Les enregistrements sont purgés par le job de
 rétention. L'en-tête est **rédigé** dans les logs (`req.headers['idempotency-key']`
 fait partie de la liste `redact` de pino).
+
+### 3.3 Import de fichiers mail (sans Graph)
+
+`POST /api/v1/admin/mailbox/import` (tableau de bord → *Intégrations*) ajoute un
+chemin d'entrée pour du contenu d'email, équivalent à une synchronisation Graph :
+
+- **Rôle `admin` uniquement**, vérifié par le tableau de bord (`requireRoles`)
+  puis par l'orchestrateur (`requireRole("admin")`). La route du tableau de
+  bord n'accepte que `application/json` : un formulaire HTML d'un autre site ne
+  peut pas l'appeler sans preflight CORS.
+- **L'admin choisit la boîte cible** : les messages atterrissent dans l'index de
+  cet utilisateur (sa recherche et son chat les voient). L'opération est tracée
+  (`emails_indexed`, `details.stage: "mailbox_import"`, acteur = l'admin,
+  compteurs seulement).
+- **Contenu non fiable** : analysé en mémoire, jamais exécuté ni écrit sur
+  disque ; le HTML est converti en texte ; des pièces jointes, seuls le nom, la
+  taille et le type sont conservés. Rien de ce que contient un fichier ne change
+  la façon dont il est traité (questions, taxonomie, configuration).
+- **Jamais dans les logs** : un fichier illisible est journalisé par la classe
+  de l'erreur uniquement ; les raisons renvoyées au tableau de bord sont des
+  textes fixes.
+- **Mêmes règles que le reste de l'index** : `email_index`, cloisonnement par
+  utilisateur, rétention `INDEX_RETENTION_DAYS`. Le modèle n'est appelé que si
+  l'option *Analyser* est cochée, par le même chemin que le worker.
+- **Aucune action sur la boîte** : rien n'est déplacé, envoyé ni supprimé.
+- **Limites propres à la route** : corps jusqu'à 41 Mo (seule exception à
+  `BODY_LIMIT_BYTES`), 20 fichiers et 30 Mo décodés par requête, 25 Mo par
+  message, quota de débit dans un compteur séparé.
 
 ## 4. Ce qui n'est jamais fait par l'IA
 
@@ -433,6 +462,7 @@ est vérifiable dans le code cité.
 | Injection de prompt depuis un email entrant : le contenu pouvait forger les délimiteurs de bloc et se faire passer pour une instruction système | le prompt système déclare explicitement que tout ce qui est dans `### EMAIL` / `### MESSAGE` / `### THREAD` est de la **donnée** non fiable, et `neutralizeDelimiters()` empêche le contenu de reproduire ces marqueurs. La sortie reste validée par schéma et aucune action ne s'exécute sans la boucle propose → approbation humaine → exécution | `apps/orchestrator/src/domain/prompts/format.ts` |
 | Liens externes ouverts en `target="_blank"` sans `rel` : le document ouvert garde une référence `window.opener` sur le volet | tous les liens sortants portent `rel="noopener"` | `apps/addin/src/**`, `apps/admin/src/**` |
 | `CORS_ORIGINS=*` avec CORS crédentié annule la protection d'origine | refusé au démarrage quand `NODE_ENV=production` (§10) | `apps/orchestrator/src/config.ts` |
+| La conversion HTML → texte des corps d'email (Graph, puis import de fichiers) utilisait `<style[\s\S]*?<\/style>` et `<[^>]+>` : **quadratiques** sur un contenu hostile (240 Ko de `<` sans `>` ≈ 1 min d'event loop bloquée, un email piégé de quelques centaines de Ko figeait l'orchestrator) | `htmlToText()` supprime les blocs `<style>` / `<script>` en une seule passe et retire les balises avec `<[^<>]+>` : **linéaire** (200 000 blocs non fermés en moins d'une seconde, testé). Côté import, la liste d'adresses et l'objet sont bornés avant analyse | `apps/orchestrator/src/util/text.ts`, `src/adapters/mailfile/parse.ts` |
 
 ## 12. Gestion des secrets
 

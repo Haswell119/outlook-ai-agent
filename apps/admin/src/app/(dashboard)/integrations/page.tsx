@@ -1,7 +1,8 @@
 import { Database, Mail, Plug, Server, Webhook } from "lucide-react";
-import { currentLanguage, getFeatures } from "@/lib/api";
+import { currentLanguage, dataMode, getFeatures, getUsers } from "@/lib/api";
 import { dictionaries } from "@/lib/i18n";
 import { requireRoles } from "@/lib/session";
+import { MailImport } from "@/components/integrations/mail-import";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,11 +10,22 @@ import { Card, CardContent } from "@/components/ui/card";
 export const dynamic = "force-dynamic";
 
 export default async function IntegrationsPage() {
-  await requireRoles("admin");
+  const session = await requireRoles("admin");
   const language = await currentLanguage();
   const messages = dictionaries[language] as unknown as Record<string, string>;
   const t = (k: string) => messages[k] ?? k;
   const features = await getFeatures();
+  const live = (await dataMode()) === "live";
+  // Mailboxes the add-in has been used with (audit trail), most recent first;
+  // the shared admin token is not a mailbox.
+  const knownMailboxes = Array.from(
+    new Set(
+      (await getUsers().catch(() => []))
+        .filter((u) => u.id !== "admin-dashboard" && u.email.includes("@"))
+        .sort((a, b) => (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? ""))
+        .map((u) => u.email.toLowerCase()),
+    ),
+  );
 
   const integrations = [
     {
@@ -84,6 +96,18 @@ export default async function IntegrationsPage() {
             </CardContent>
           </Card>
         ))}
+      </div>
+      <div className="mt-4">
+        <MailImport
+          messages={messages}
+          language={language}
+          defaultMailbox={
+            // The signed-in operator's own mailbox when the add-in knows it, else the most recent one.
+            knownMailboxes.includes(session.email.toLowerCase()) ? session.email.toLowerCase() : (knownMailboxes[0] ?? session.email)
+          }
+          knownMailboxes={knownMailboxes}
+          live={live}
+        />
       </div>
     </>
   );

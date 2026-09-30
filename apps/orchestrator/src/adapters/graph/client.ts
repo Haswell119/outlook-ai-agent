@@ -2,6 +2,7 @@ import { ConfidentialClientApplication } from "@azure/msal-node";
 import type { EmailContext } from "@oao/shared";
 import { GraphDisabledError } from "../../errors.js";
 import type { GraphClient, GraphDeltaPage, MailboxAccess } from "../../ports/graph.js";
+import { htmlToText } from "../../util/text.js";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = ["https://graph.microsoft.com/.default"];
@@ -88,22 +89,8 @@ interface GraphMessage {
   "@removed"?: { reason?: string };
 }
 
-export function htmlToText(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|tr|li|h\d)>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
+// Shared with the mail-file import (adapters/mailfile), which maps to the same EmailContext.
+export { htmlToText };
 
 export function graphMessageToEmail(m: GraphMessage): EmailContext {
   const addr = (r?: { emailAddress?: { name?: string; address?: string } }) => ({ name: r?.emailAddress?.name, address: r?.emailAddress?.address ?? "" });

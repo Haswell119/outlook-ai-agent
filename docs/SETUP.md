@@ -220,6 +220,22 @@ Dashboard admin (web, Auth.js) ──OIDC──────────►    �
 > emails ouverts dans le volet ou sélectionnés sont indexés* ») dit exactement ce
 > que la question peut atteindre ; chaque réponse indique combien d'emails
 > indexés ont correspondu. Avec Graph, le worker indexe la boîte entière.
+>
+> **Tester « comme avec Graph » sans Graph : importer ses emails.** Tableau de
+> bord (rôle `admin`) → **Intégrations → Importer des emails (.eml / .msg)** :
+> des fichiers ou un dossier entier d'emails exportés, envoyés par lots à
+> [`POST /admin/mailbox/import`](API.md#import-de-fichiers-mail-post-apiv1adminmailboximport).
+> Ils suivent le chemin du worker : indexation (recherche et chat « Tous les
+> emails »), tri, et avec l'option *Analyser chaque message* une analyse stockée
+> comme précalculée (brief du jour de leur date de réception). Rien n'est
+> déplacé, envoyé ni supprimé, et réimporter les mêmes fichiers ne crée pas de
+> doublons. Export : **Outlook classique**, sélectionner les messages et les
+> glisser dans un dossier de l'explorateur (`.msg`) ; **Outlook sur le web /
+> nouvel Outlook**, *Autres actions (…) → Enregistrer sous / Télécharger*
+> (`.eml`). Limites : 25 Mo par message ; le job de rétention purge les emails
+> reçus il y a plus de `INDEX_RETENTION_DAYS` jours (365 par défaut) ; ce que
+> seul Graph fait (conversation complète côté serveur, actions sur la boîte)
+> reste indisponible.
 
 Deux modes, indépendants :
 

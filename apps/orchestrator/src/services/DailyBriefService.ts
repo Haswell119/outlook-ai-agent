@@ -1,5 +1,6 @@
 import type { DailyBrief, DetectedRisk, EmailAnalysis, Language, OpenTask, Priority } from "@oao/shared";
 import { DailyBriefSchema } from "@oao/shared";
+import { onePerMessage } from "../domain/messageKey.js";
 import { buildDailyBriefPrompt, DailyBriefLlmSchema } from "../domain/prompts/index.js";
 import type { Metrics } from "../metrics.js";
 import type { IndexedChunk } from "../ports/repositories.js";
@@ -169,13 +170,15 @@ export class DailyBriefService {
 
   /** Everything the brief says, derived from the index + precomputed analyses. */
   private async collectFacts(userId: string, window: BriefWindow, language: Language): Promise<BriefFacts> {
-    const chunks = await this.deps.repos.emailIndex.listReceivedBetween(userId, window.from, window.to, 300);
+    const received = await this.deps.repos.emailIndex.listReceivedBetween(userId, window.from, window.to, 300);
     const analyses = new Map<string, EmailAnalysis>();
-    for (const c of chunks) {
+    for (const c of received) {
       const entry = await this.cache.byEmail<EmailAnalysis>(userId, c.emailId);
       const value = entry?.value as EmailAnalysis | undefined;
       if (value && typeof value === "object" && "summary" in value) analyses.set(c.emailId, value);
     }
+    // A message indexed twice (imported file + opened in Outlook) is one email; keep the analysed copy.
+    const chunks = onePerMessage(received, (c) => analyses.has(c.emailId));
 
     const priorityEmails: DailyBrief["priorityEmails"] = [];
     const taskTitles = new Set<string>();
@@ -227,7 +230,7 @@ export class DailyBriefService {
     return {
       language,
       newEmails: chunks.length,
-      analysed: analyses.size,
+      analysed: chunks.filter((c) => analyses.has(c.emailId)).length,
       awaitingReply,
       phishingSuspected,
       priorityEmails: priorityEmails.slice(0, 8),

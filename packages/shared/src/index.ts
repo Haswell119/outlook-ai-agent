@@ -470,6 +470,70 @@ export const IndexEmailsResponseSchema = z.object({
 export type IndexEmailsResponse = z.infer<typeof IndexEmailsResponseSchema>;
 
 /* ------------------------------------------------------------------------- */
+/*  Mailbox import (no Microsoft Graph)                                       */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Exported mail (`.eml`, `.msg`) processed like a mailbox sync: indexed for
+ * search / chat / brief, and optionally analysed and stored as precomputed.
+ * Admin only. One request = one batch; the batches of an upload share `importId`.
+ */
+export const MAILBOX_IMPORT_MAX_FILES = 20;
+/** Decoded bytes per batch (base64 inflates the request by a third). */
+export const MAILBOX_IMPORT_MAX_BATCH_BYTES = 30 * 1024 * 1024;
+
+export const MailboxImportFileSchema = z.object({
+  /** File name as uploaded; the content, not the extension, decides the format. */
+  name: z.string().min(1).max(260),
+  /** Folder the file came from in a folder upload, e.g. `Inbox/Clients`. */
+  folder: z.string().max(260).optional(),
+  contentBase64: z.string().min(1),
+});
+export type MailboxImportFile = z.infer<typeof MailboxImportFileSchema>;
+
+export const MailboxImportRequestSchema = z.object({
+  importId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
+  /** Mailbox (user email) the messages belong to. */
+  mailbox: z.string().trim().toLowerCase().email().max(320),
+  /** Also analyse each message and keep it as a precomputed analysis (model calls). */
+  analyze: z.boolean().default(false),
+  files: z.array(MailboxImportFileSchema).min(1).max(MAILBOX_IMPORT_MAX_FILES),
+});
+export type MailboxImportRequest = z.infer<typeof MailboxImportRequestSchema>;
+
+export const MailboxImportFileResultSchema = z.object({
+  name: z.string(),
+  /** `duplicate`: already in the index (re-import), not indexed again. */
+  status: z.enum(["imported", "duplicate", "rejected", "failed"]),
+  emailId: z.string().optional(),
+  /** Analysis stored as precomputed (analyze=true, not skipped by triage). */
+  analysed: z.boolean().optional(),
+  /** Why a file was rejected or failed. Never quotes the message content. */
+  reason: z.string().optional(),
+});
+export type MailboxImportFileResult = z.infer<typeof MailboxImportFileResultSchema>;
+
+export const MailboxImportResponseSchema = z.object({
+  importId: z.string(),
+  mailbox: z.string(),
+  /** Key the messages are stored under (the mailbox owner's user id). */
+  userId: z.string(),
+  mode: z.enum(["hybrid", "lexical"]),
+  warning: z.string().optional(),
+  counts: z.object({
+    files: z.number().int(),
+    imported: z.number().int(),
+    duplicate: z.number().int(),
+    rejected: z.number().int(),
+    failed: z.number().int(),
+    analysed: z.number().int(),
+    skippedByTriage: z.number().int(),
+  }),
+  results: z.array(MailboxImportFileResultSchema),
+});
+export type MailboxImportResponse = z.infer<typeof MailboxImportResponseSchema>;
+
+/* ------------------------------------------------------------------------- */
 /*  5. Human-in-the-loop — proposed / approved actions                       */
 /* ------------------------------------------------------------------------- */
 
@@ -1157,6 +1221,7 @@ export const Routes = {
   adminPolicy: `${API_PREFIX}/admin/policy`,
   adminUsers: `${API_PREFIX}/admin/users`,
   adminSystem: `${API_PREFIX}/admin/system`,
+  mailboxImport: `${API_PREFIX}/admin/mailbox/import`,
 } as const;
 
 /* ------------------------------------------------------------------------- */

@@ -92,10 +92,45 @@
 | PUT | `/api/v1/admin/policy` | `admin` | `PolicySchema` (partiel accepté) | `PolicySchema` |
 | GET | `/api/v1/admin/users` | `admin` | — | `z.array(AdminUserSchema)` |
 | GET | `/api/v1/admin/system` | `admin` | query : `{ userId? }` | `SystemStatusSchema` — file LLM (pending/running/concurrency/circuit), compteurs de cache analyse et embeddings, état de sync, uptime, feature flags ; champ optionnel `decisioning` (fournisseur, mode, état, circuit, stratégie de modèle, versions, seuils, compteurs — jamais l'URL ni la clé) |
+| POST | `/api/v1/admin/mailbox/import` | `admin` | `MailboxImportRequestSchema` — ≤ 20 fichiers `.eml`/`.msg` en base64, ≤ 30 Mo décodés par requête | `MailboxImportResponseSchema` — résultat par fichier (`imported`/`duplicate`/`rejected`/`failed`) et compteurs ; voir [Import de fichiers mail](#import-de-fichiers-mail-post-apiv1adminmailboximport) |
 
 Toute erreur suit `ApiErrorSchema` avec un code parmi : `validation_error`
 (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict`
 (409), `llm_unavailable` (502), `graph_unavailable` (503), `database_error` (500).
+
+## Import de fichiers mail (`POST /api/v1/admin/mailbox/import`)
+
+Pour tester sur une vraie boîte **sans Microsoft Graph** : le tableau de bord
+(**Intégrations → Importer des emails**) envoie des messages exportés par lots.
+Chaque lot suit le chemin du worker de synchronisation (`workers/mailboxSync.ts`) :
+indexation (recherche, chat), tri, et avec `analyze: true` analyse en priorité
+`background` stockée comme `precomputed` (brief du jour, réponse instantanée).
+
+- **Format** : `.eml` (RFC 5322/MIME) ou `.msg` (Outlook), détecté sur le
+  contenu (l'extension n'est qu'un indice). 25 Mo maximum par message.
+- **Propriétaire** : les messages sont rangés sous l'identifiant que le
+  complément présente pour `mailbox` : l'adresse en `AUTH_MODE=dev`, l'object id
+  Entra vu dans l'audit en `AUTH_MODE=aad` (à défaut l'adresse, avec un
+  `warning`).
+- **Idempotent** : `id` dérivé du Message-ID (sinon du contenu), `conversationId`
+  de la racine du fil (`References`/`In-Reply-To`, sinon l'objet sans `RE:`/`TR:`).
+  Un message déjà indexé revient en `duplicate` ; avec `analyze: true` il est
+  tout de même analysé (le cache évite de payer deux fois).
+- **Lecture seule vis-à-vis de la boîte** : rien n'est déplacé, envoyé ni
+  supprimé. Un fichier illisible est `rejected` avec sa raison, sans faire
+  échouer le lot.
+- **Limites propres à la route** : corps jusqu'à 41 Mo (au lieu de
+  `BODY_LIMIT_BYTES`), quota `RATE_LIMIT_PER_MINUTE` dans un compteur séparé
+  pour ne pas bloquer le reste du tableau de bord pendant un import.
+- **Journal** : un événement `emails_indexed` par lot, acteur = l'admin,
+  `details.stage: "mailbox_import"` avec les compteurs, jamais le contenu.
+
+```bash
+B64=$(base64 -w0 message.eml)
+curl -s -X POST "$API/admin/mailbox/import" -H "authorization: Bearer $ADMIN_API_TOKEN" \
+  -H "content-type: application/json" \
+  -d "{\"importId\":\"imp_$(date +%s)\",\"mailbox\":\"defi-ia@outlook.com\",\"files\":[{\"name\":\"message.eml\",\"contentBase64\":\"$B64\"}]}" | jq '.counts'
+```
 
 ## Cloisonnement par utilisateur
 

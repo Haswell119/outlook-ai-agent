@@ -25,6 +25,8 @@ import {
   HealthSchema,
   IndexEmailsRequestSchema,
   IndexEmailsResponseSchema,
+  MailboxImportRequestSchema,
+  MailboxImportResponseSchema,
   MailboxSyncStatusSchema,
   PhishingCheckRequestSchema,
   PhishingCheckResponseSchema,
@@ -99,6 +101,8 @@ const SCHEMAS: Record<string, ZodTypeAny> = {
   AuditStats: AuditStatsSchema,
   Policy: PolicySchema,
   FeedbackRequest: FeedbackRequestSchema,
+  MailboxImportRequest: MailboxImportRequestSchema,
+  MailboxImportResponse: MailboxImportResponseSchema,
 };
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
@@ -293,6 +297,17 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           summary: "Runtime status (queue, circuit, caches, sync)",
           parameters: [{ name: "userId", in: "query", required: false, schema: { type: "string" }, description: "Mailbox whose sync status is included." }],
           responses: { 200: ok("SystemStatus"), ...COMMON_ERRORS },
+        },
+      },
+      [p(Routes.mailboxImport)]: {
+        post: {
+          tags: ["admin"],
+          operationId: "importMailFiles",
+          summary: "Import .eml / .msg files (without Graph)",
+          description:
+            "Indexes the messages of one mailbox like a Graph sync, and with `analyze: true` stores their analyses as precomputed. Idempotent: a message already indexed is reported as `duplicate`. Read-only towards the mailbox: nothing is moved, sent or deleted. At most 20 files and 30 MB of files per request.",
+          requestBody: body("MailboxImportRequest"),
+          responses: { 200: ok("MailboxImportResponse", "Per-file results; a bad file never fails the batch"), 413: err("Request body too large (`validation_error`)"), ...COMMON_ERRORS },
         },
       },
     },

@@ -46,6 +46,8 @@ export class Metrics {
   readonly syncRuns: Counter<"outcome" | "mode">;
   readonly syncLag: Gauge<"user">;
   readonly syncMessages: Counter<"stage">;
+  /** Mail files imported without Graph (admin upload), by outcome. */
+  readonly mailboxImportFiles: Counter<"outcome">;
   readonly precomputedAnalyses: Gauge<string>;
   readonly auditEvents: Counter<"type">;
   readonly briefs: Counter<"source">;
@@ -116,6 +118,7 @@ export class Metrics {
     this.syncRuns = new Counter({ name: `${prefix}mailbox_sync_runs_total`, help: "Mailbox sync runs by outcome and auth mode", labelNames: ["outcome", "mode"] as const, registers: reg });
     this.syncLag = new Gauge({ name: `${prefix}mailbox_sync_lag_seconds`, help: "Seconds since the last successful sync, per mailbox", labelNames: ["user"] as const, registers: reg });
     this.syncMessages = new Counter({ name: `${prefix}mailbox_sync_messages_total`, help: "Messages handled by the sync worker by stage", labelNames: ["stage"] as const, registers: reg });
+    this.mailboxImportFiles = new Counter({ name: `${prefix}mailbox_import_files_total`, help: "Mail files imported without Graph, by outcome (imported, duplicate, rejected, failed)", labelNames: ["outcome"] as const, registers: reg });
     this.precomputedAnalyses = new Gauge({ name: `${prefix}precomputed_analyses`, help: "Live precomputed analyses across all mailboxes", registers: reg });
     this.auditEvents = new Counter({ name: `${prefix}audit_events_total`, help: "Audit events written, by type", labelNames: ["type"] as const, registers: reg });
     this.briefs = new Counter({ name: `${prefix}daily_briefs_total`, help: "Daily briefs generated, by source", labelNames: ["source"] as const, registers: reg });

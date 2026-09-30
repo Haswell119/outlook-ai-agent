@@ -33,7 +33,12 @@ export function errorHandler(error: FastifyError | Error, req: FastifyRequest, r
   }
   const fe = error as FastifyError;
   if (fe.statusCode === 429) return reply.status(429).send({ error: { code: "rate_limited", message: "Too many requests", correlationId } });
-  if (fe.statusCode === 413) return reply.status(413).send({ error: { code: "validation_error", message: "Request body too large (max 2 MB)", correlationId } });
+  if (fe.statusCode === 413) {
+    // Per route: the mail import accepts more than the global BODY_LIMIT_BYTES.
+    const limit = req.routeOptions?.bodyLimit;
+    const max = limit ? ` (max ${Math.round(limit / 1024 / 1024)} MB)` : "";
+    return reply.status(413).send({ error: { code: "validation_error", message: `Request body too large${max}`, correlationId } });
+  }
   if (fe.statusCode && fe.statusCode >= 400 && fe.statusCode < 500) {
     return reply.status(fe.statusCode).send({ error: { code: fe.statusCode === 404 ? "not_found" : "validation_error", message: fe.message, correlationId } });
   }

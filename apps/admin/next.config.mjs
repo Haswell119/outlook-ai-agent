@@ -85,6 +85,12 @@ const nextConfig = {
   poweredByHeader: false,
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: false },
+  experimental: {
+    // The middleware (CSP nonce) buffers request bodies, 10 MB by default: the
+    // mail import (`/api/import`) sends batches of base64 files, up to one 25 MB
+    // message per request (about 34 MB once encoded).
+    middlewareClientMaxBodySize: "45mb",
+  },
   async headers() {
     return [{ source: "/:path*", headers: STATIC_SECURITY_HEADERS }];
   },
