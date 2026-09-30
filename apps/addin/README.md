@@ -211,6 +211,11 @@ Both also declare the list-level activations:
 "Open AI panel" and "Ask about this email" carry all three; "Daily brief" is pinnable and no-item but not multi-select (a brief is
 about the day, not about the selection).
 
+Permission: `ReadWriteMailbox` in the XML manifests (`MailboxItem.ReadWrite.User` + `Mailbox.ReadWrite.User` in the unified one).
+`getSelectedItemsAsync` requires it: with `ReadWriteItem`, Outlook refuses the call, which silently disables the Selection view
+and the follow-the-selection safety net below. After a permission change, remove the add-in and add it again. Rationale and
+limits: `docs/SECURITY.md` §8.
+
 ### The unified manifest must be uploaded as a Teams app package
 
 `manifest.json` alone is not installable: Outlook and Teams want a **zip** with `manifest.json` at the root plus the two icons it
@@ -298,7 +303,8 @@ The signals it merges, from the most to the least reliable:
    up. It is disabled in a message popped out into its own window, whose pane belongs to its message.
 
 Note: Microsoft documents pinnable task panes as unavailable on **Outlook.com** consumer mailboxes. There, keep the pane open
-with the pin icon when Outlook offers it; the checks above still follow the selection as long as the pane stays open.
+with the pin icon when Outlook offers it; the checks above still follow the selection as long as the pane stays open (they need
+the `ReadWriteMailbox` permission, and Mailbox 1.15 to load a message Outlook did not hand over itself).
 
 ### Test without Outlook: the host simulator
 
@@ -453,7 +459,8 @@ Mailbox **1.10** is the manifest minimum (Smart Alerts `OnMessageSend`). Every o
 * **1.10** — `LaunchEvent` / `OnMessageSend`, `Office.actions.associate`, `notificationMessages` insight messages with a
   `showTaskPane` action ("Compliance risk detected — Show panel")
 * **1.13** — `item.sensitivityLabel.setAsync` (only with a `labelId`; otherwise the user is asked to apply the label), plus the whole
-  multi-select path: **`SupportsMultiSelect`**, `mailbox.getSelectedItemsAsync` and the **`SelectedItemsChanged`** event
+  multi-select path: **`SupportsMultiSelect`**, `mailbox.getSelectedItemsAsync` (needs the `ReadWriteMailbox` permission) and the
+  **`SelectedItemsChanged`** event
 * **1.15** — `mailbox.loadItemByIdAsync`, used to load the body/sender/attachments of each selected message. Without it the Selection
   view degrades to the subjects `getSelectedItemsAsync` returns (it does **not** return senders or bodies) and says so in the UI
 * **1.14** — `event.completed({ sendModeOverride, commandId })` on the Smart Alerts dialog (feature-detected; older hosts get the

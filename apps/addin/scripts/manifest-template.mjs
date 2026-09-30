@@ -118,7 +118,10 @@ ${appDomains}
       </DesktopSettings>
     </Form>
   </FormSettings>
-  <Permissions>ReadWriteItem</Permissions>
+  <!-- ReadWriteMailbox, not ReadWriteItem: getSelectedItemsAsync (Mailbox 1.13) requires
+       it, and the Selection view and the pane's follow-the-selection safety net rely on it.
+       Same level as Mailbox.ReadWrite.User in the unified manifest. See docs/SECURITY.md. -->
+  <Permissions>ReadWriteMailbox</Permissions>
   <Rule xsi:type="RuleCollection" Mode="Or">
     <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read" />
     <Rule xsi:type="ItemIs" ItemType="Message" FormType="Edit" />

@@ -230,6 +230,24 @@ consentement admin (§6 de `docs/SETUP.md`) est donné scope par scope au fur et
 à mesure du déploiement des phases, pas en une seule fois pour toutes les
 phases futures.
 
+### Permission du complément Outlook (manifeste)
+
+Distincte des scopes Graph : c'est ce que le complément peut faire **dans
+Outlook**, via Office.js.
+
+| Manifeste | Permission | Pourquoi |
+|---|---|---|
+| XML (`manifest.xml`, `manifest.dev.xml`) | `ReadWriteMailbox` | `getSelectedItemsAsync` (Mailbox 1.13) l'exige. Avec `ReadWriteItem`, Outlook refuse l'appel, ce qui désactive la vue Sélection (multi-sélection) et le filet de sécurité qui fait suivre au volet l'email sélectionné quand Outlook n'envoie pas `ItemChanged` (Outlook.com, où le volet épinglable n'existe pas). |
+| Unifié (`manifest.json`) | `MailboxItem.ReadWrite.User` + `Mailbox.ReadWrite.User` | Même niveau. |
+
+Ce niveau donnerait techniquement accès à toute la boîte par Office.js. Le
+code n'en utilise que `getSelectedItemsAsync` et `loadItemByIdAsync`, pour
+**lire** les messages sélectionnés : jamais d'envoi, de suppression ni d'appel
+EWS (`makeEwsRequestAsync`, bloqué dans Exchange Online à partir du
+1er octobre 2026). Certains tenants exigent l'approbation d'un administrateur
+pour ce niveau. Tout changement de permission impose de retirer puis
+réinstaller le complément.
+
 ## 9. Modèle réseau — NetworkPolicies
 
 Le chart Helm applique un **default-deny** sur le namespace (ingress *et*
